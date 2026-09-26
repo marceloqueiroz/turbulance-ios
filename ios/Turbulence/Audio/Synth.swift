@@ -2,7 +2,7 @@ import AVFoundation
 
 /// Tiny synth for the per-occurrence stings (GDD §8): each sound is rendered once into a PCM buffer.
 final class Synth {
-    enum Sound: CaseIterable { case sick, spill, pick, step, ok, fail, nope, ding, chime, rumble, whoa, grumble, grumbleLoud, paChime }
+    enum Sound: CaseIterable { case sick, spill, pick, step, ok, fail, nope, ding, chime, rumble, whoa, grumble, grumbleLoud, paChime, count3, count2, count1, go }
     enum Wave { case sine, square, triangle, saw }
     struct Tone { let f: Double; let d: Double; let wave: Wave; let v: Double; let delay: Double; let f2: Double? }
 
@@ -160,6 +160,14 @@ final class Synth {
         case .whoa: return [Tone(f: 300, d: 0.22, wave: .triangle, v: 0.07, delay: 0, f2: 520)]
         // unattended passengers: a grumble, louder and harsher once critical
         case .grumble: return [Tone(f: 190, d: 0.16, wave: .square, v: 0.03, delay: 0, f2: 150), Tone(f: 170, d: 0.18, wave: .square, v: 0.03, delay: 0.17, f2: 130)]
+        // countdown: three rising tones (each a little brighter), then a rising chord with a whoosh for Go!
+        case .count3: return [Tone(f: 392, d: 0.35, wave: .sine, v: 0.08, delay: 0, f2: nil), Tone(f: 196, d: 0.3, wave: .triangle, v: 0.05, delay: 0, f2: nil)]
+        case .count2: return [Tone(f: 494, d: 0.35, wave: .sine, v: 0.08, delay: 0, f2: nil), Tone(f: 988, d: 0.2, wave: .triangle, v: 0.03, delay: 0, f2: nil)]
+        case .count1: return [Tone(f: 587, d: 0.35, wave: .sine, v: 0.085, delay: 0, f2: nil), Tone(f: 1175, d: 0.25, wave: .triangle, v: 0.04, delay: 0, f2: nil),
+                              Tone(f: 587, d: 0.12, wave: .square, v: 0.02, delay: 0, f2: nil)]
+        case .go: return [Tone(f: 250, d: 0.45, wave: .triangle, v: 0.06, delay: 0, f2: 900),
+                          Tone(f: 784, d: 0.7, wave: .sine, v: 0.07, delay: 0.08, f2: nil), Tone(f: 988, d: 0.7, wave: .sine, v: 0.06, delay: 0.1, f2: nil),
+                          Tone(f: 1175, d: 0.8, wave: .sine, v: 0.06, delay: 0.12, f2: nil), Tone(f: 1568, d: 0.5, wave: .triangle, v: 0.03, delay: 0.14, f2: nil)]
         // the cabin PA "bing-bong" before the captain speaks
         case .paChime: return [Tone(f: 880, d: 0.8, wave: .sine, v: 0.07, delay: 0, f2: nil), Tone(f: 1760, d: 0.4, wave: .sine, v: 0.015, delay: 0, f2: nil),
                                Tone(f: 698, d: 1.0, wave: .sine, v: 0.07, delay: 0.5, f2: nil)]

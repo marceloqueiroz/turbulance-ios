@@ -507,6 +507,35 @@ enum Art {
         }
     }
 
+    // MARK: - Crew (the same drawing as CrewNode, for the intro's flat hand-over layer)
+
+    static let crewSize = CGSize(width: 48, height: 48)
+
+    /// The attendant seated in a jump seat, facing aft, strap across: matches CrewNode at the countdown.
+    static func crewSeated(skin: UIColor, hair: UIColor) -> UIImage {
+        image(crewSize.width, crewSize.height) { c in
+            let x = crewSize.width / 2, y = crewSize.height / 2
+            ellipse(c, x + 3, y + 4, 13, 17, ink(0.25))                               // shadow
+            for dy in [-13.5, 13.5] as [CGFloat] {                                     // arms and hands
+                ellipse(c, x, y + dy, 5.5, 3.4, UIColor(hex: 0x197476))
+                dot(c, x + 5, y + dy, 2.4, skin)
+            }
+            let body = CGPath(ellipseIn: CGRect(x: x - 10, y: y - 15.5, width: 20, height: 31), transform: nil)
+            fill(c, body, Palette.teal); stroke(c, body, Palette.navy, 2)
+            ellipse(c, x + 2, y - 6, 5, 6, white(0.16))
+            // facing aft (+x): scarf and face on the right, hair and bun on the left
+            let scarf = CGMutablePath(); scarf.addLines(between: [P(x + 4, y - 5), P(x + 9, y), P(x + 4, y + 5)]); scarf.closeSubpath()
+            fill(c, scarf, Palette.coral); dot(c, x + 8, y, 2.2, Palette.coral)
+            let head = CGPath(ellipseIn: CGRect(x: x + 1 - 8, y: y - 8, width: 16, height: 16), transform: nil)
+            fill(c, head, skin); stroke(c, head, Palette.navy, 1.5)
+            c.setFillColor(hair.cgColor)
+            c.addArc(center: P(x, y), radius: 8, startAngle: .pi / 2, endAngle: .pi * 1.5, clockwise: false); c.fillPath()
+            dot(c, x - 8.5, y, 3.8, hair)
+            let strap = CGPath(roundedRect: CGRect(x: x - 11, y: y - 2, width: 22, height: 4), cornerWidth: 2, cornerHeight: 2, transform: nil)
+            fill(c, strap, Palette.calm); stroke(c, strap, Palette.navy, 1)
+        }
+    }
+
     // MARK: - Passengers (archetypes read from silhouette props, GDD §7/§8a)
 
     static let passengerSize = CGSize(width: 48, height: 64)

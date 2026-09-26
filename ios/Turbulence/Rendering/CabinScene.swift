@@ -436,6 +436,15 @@ final class CabinScene: SKScene {
 
     func setCrewLook(skin: UIColor, hair: UIColor) { crewNode.setLook(skin: skin, hair: hair) }
 
+    /// Clouds hide during the intro hand-over and drift back in afterwards.
+    func setClouds(visible: Bool) {
+        for (i, c) in clouds.enumerated() {
+            let target: CGFloat = visible ? (i % 2 == 1 ? 0.09 : 0.05) : 0
+            c.node.removeAction(forKey: "cloudFade")
+            if visible { c.node.run(.fadeAlpha(to: target, duration: 2.5), withKey: "cloudFade") } else { c.node.alpha = 0 }
+        }
+    }
+
     // MARK: - Input
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {

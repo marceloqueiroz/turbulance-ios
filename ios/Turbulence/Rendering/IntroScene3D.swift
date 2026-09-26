@@ -35,7 +35,12 @@ final class IntroScene3D {
     private let lights = SCNNode()
     private var ambientLight: SCNLight?, sunLight: SCNLight?, lampLights: [SCNLight] = []
 
-    init(sim: FlightSimulation, frame: @escaping () -> (size: CGSize, insets: UIEdgeInsets)) {
+    /// The player's attendant look (skin, hair), so the 3D and flat attendant match the 2D one.
+    private let crewLook: (skin: UIColor, hair: UIColor)
+
+    init(sim: FlightSimulation, crewLook: (skin: UIColor, hair: UIColor),
+         frame: @escaping () -> (size: CGSize, insets: UIEdgeInsets)) {
+        self.crewLook = crewLook
         layout = sim.layout
         passengers = sim.passengers
         self.frame = frame
@@ -189,7 +194,7 @@ final class IntroScene3D {
 
         // the attendant runs the safety demo mid-cabin
         let midX = L.rows[L.rows.count / 2].x + 18
-        let crew = person(shirt: Palette.teal, skin: UIColor(hex: 0xE9B892), hair: UIColor(hex: 0x3A2A20), standing: true)
+        let crew = person(shirt: Palette.teal, skin: crewLook.skin, hair: crewLook.hair, standing: true)
         crew.position = v(midX, 0, a0)
         solid.addChildNode(crew)
         let belt = box(3, 18, 3, at: v(-12, 64, 0), Palette.calm, parent: crew)
@@ -279,6 +284,11 @@ final class IntroScene3D {
         lay(Art.cabin(layout), w: layout.width, h: layout.height, x: layout.width / 2, z: layout.height / 2, y: 0.5)
         for p in passengers {
             lay(Art.passenger(p, sick: false), w: Double(Art.passengerSize.width), h: Double(Art.passengerSize.height), x: p.x, z: p.y, y: 1)
+        }
+        // the attendant, buckled into the forward jump seat exactly where the countdown shows them
+        if let seat = layout.jumpSeats.first(where: { $0.aisle == 0 }) {
+            lay(Art.crewSeated(skin: crewLook.skin, hair: crewLook.hair), w: Double(Art.crewSize.width), h: Double(Art.crewSize.height),
+                x: seat.x, z: layout.aisles[0], y: 1.5)
         }
         flat.opacity = 0
         scene.rootNode.addChildNode(flat)

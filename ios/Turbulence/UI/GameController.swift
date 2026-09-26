@@ -47,6 +47,7 @@ final class GameController {
     @ObservationIgnored let scene: CabinScene
     @ObservationIgnored private let synth = Synth()
     @ObservationIgnored private var haptics = true
+    @ObservationIgnored private var crewLook = Avatar.look(0)
     @ObservationIgnored private var toastTimer = 0.0
     @ObservationIgnored private var grumbleTimer = 0.0
     @ObservationIgnored private var bumpTimer = 0.0
@@ -118,7 +119,10 @@ final class GameController {
         }
         scene.run(.sequence([.wait(forDuration: 0.4), .run { [weak self] in self?.synth.play(.paChime) },
                              .wait(forDuration: 1.3), .run { say(0) }]), withKey: "introCaptions")
-        let intro = IntroScene3D(sim: sim) { [weak self] in (self?.scene.size ?? .zero, self?.scene.contentInsets ?? .zero) }
+        scene.setClouds(visible: false)          // the 3D intro has none: fade them in after Go instead of popping
+        let intro = IntroScene3D(sim: sim, crewLook: crewLook) { [weak self] in
+            (self?.scene.size ?? .zero, self?.scene.contentInsets ?? .zero)
+        }
         intro3D = intro
         let args = ProcessInfo.processInfo.arguments
         if let i = args.firstIndex(of: "-introAt"), i + 1 < args.count, let t = Double(args[i + 1]) {
@@ -138,10 +142,10 @@ final class GameController {
         sim.seatCrewForCountdown()             // buckled into the forward jump seat until Go
         screen = .countdown
         var steps: [SKAction] = [.wait(forDuration: 0.35)]
-        for n in ["3", "2", "1"] {
-            steps += [.run { [weak self] in self?.countdownText = n; self?.synth.play(.pick) }, .wait(forDuration: 0.75)]
+        for (n, sound) in [("3", Synth.Sound.count3), ("2", .count2), ("1", .count1)] {
+            steps += [.run { [weak self] in self?.countdownText = n; self?.synth.play(sound) }, .wait(forDuration: 1.0)]
         }
-        steps += [.run { [weak self] in self?.countdownText = "Go!"; self?.synth.play(.ok); self?.beginFlight() },
+        steps += [.run { [weak self] in self?.countdownText = "Go!"; self?.synth.play(.go); self?.beginFlight() },
                   .wait(forDuration: 0.6), .run { [weak self] in self?.countdownText = nil }]
         scene.run(.sequence(steps), withKey: "countdown")
     }
@@ -149,6 +153,7 @@ final class GameController {
     func skipIntro() { intro3D?.skip() }
 
     private func beginFlight() {
+        scene.setClouds(visible: true)
         sim.start()
         screen = .playing
     }
@@ -169,6 +174,7 @@ final class GameController {
         scene.shakeScale = CGFloat(options.shake.scale)
         largeText = options.largeText
         let look = Avatar.look(avatar)
+        crewLook = look
         scene.setCrewLook(skin: look.skin, hair: look.hair)
     }
 
