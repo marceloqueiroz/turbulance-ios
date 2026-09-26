@@ -16,6 +16,19 @@ final class Synth {
     private let format = AVAudioFormat(standardFormatWithSampleRate: 44_100, channels: 1)!
     private var started = false
 
+    // The captain on the cabin PA (GDD §8b): text-to-speech through a band-pass + radio distortion.
+    private let speech = AVSpeechSynthesizer()
+    private let voicePlayer = AVAudioPlayerNode()
+    private let paBand = AVAudioUnitEQ(numberOfBands: 2)
+    private let paRadio = AVAudioUnitDistortion()
+    private var voiceFormat: AVAudioFormat?
+    private lazy var captainVoice: AVSpeechSynthesisVoice? = {
+        let english = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("en") }
+        return english.first { $0.gender == .male && $0.quality != .default }
+            ?? english.first { $0.gender == .male }
+            ?? AVSpeechSynthesisVoice(language: "en-US")
+    }()
+
     init() {
         for s in Sound.allCases { buffers[s] = render(Synth.recipe(s)) }
         for _ in 0..<6 {
@@ -24,6 +37,63 @@ final class Synth {
             engine.connect(p, to: engine.mainMixerNode, format: format)
             players.append(p)
         }
+        // PA chain: voice → band-pass (like a small ceiling speaker) → radio distortion → mixer
+        let lowCut = paBand.bands[0], highCut = paBand.bands[1]
+        lowCut.filterType = .highPass; lowCut.frequency = 320; lowCut.bypass = false
+        highCut.filterType = .lowPass; highCut.frequency = 3400; highCut.bypass = false
+        paRadio.loadFactoryPreset(.speechRadioTower)
+        paRadio.wetDryMix = 35
+        voicePlayer.volume = 0.9
+        [voicePlayer, paBand, paRadio].forEach(engine.attach)
+        engine.connect(paBand, to: paRadio, format: nil)
+        engine.connect(paRadio, to: engine.mainMixerNode, format: nil)
+    }
+
+    /// The captain says a line over the cabin PA. `text` is what's spoken (it can differ from the subtitle).
+    func captain(say text: String) {
+        guard !muted, started else { return }
+        let u = AVSpeechUtterance(string: text)
+        u.voice = captainVoice
+        u.rate = 0.46
+        u.pitchMultiplier = 0.88
+        speech.write(u) { [weak self] buffer in
+            guard let self, let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0 else { return }
+            DispatchQueue.main.async { self.scheduleVoice(pcm) }
+        }
+    }
+
+    func stopCaptain() {
+        speech.stopSpeaking(at: .immediate)
+        voicePlayer.stop()
+    }
+
+    private func scheduleVoice(_ pcm: AVAudioPCMBuffer) {
+        guard let buffer = floatBuffer(pcm) else { return }
+        if voiceFormat != buffer.format {
+            voiceFormat = buffer.format
+            engine.disconnectNodeOutput(voicePlayer)
+            engine.connect(voicePlayer, to: paBand, format: buffer.format)
+        }
+        if !engine.isRunning { try? engine.start() }
+        voicePlayer.scheduleBuffer(buffer, completionHandler: nil)
+        if !voicePlayer.isPlaying { voicePlayer.play() }
+    }
+
+    /// Speech comes out as 16-bit samples; the player wants float.
+    private func floatBuffer(_ pcm: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        if pcm.format.commonFormat == .pcmFormatFloat32 { return pcm }
+        guard let target = AVAudioFormat(standardFormatWithSampleRate: pcm.format.sampleRate, channels: pcm.format.channelCount),
+              let converter = AVAudioConverter(from: pcm.format, to: target),
+              let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: pcm.frameLength) else { return nil }
+        var fed = false
+        var error: NSError?
+        converter.convert(to: out, error: &error) { _, status in
+            if fed { status.pointee = .noDataNow; return nil }
+            fed = true
+            status.pointee = .haveData
+            return pcm
+        }
+        return error == nil ? out : nil
     }
 
     /// Call from a user action; audio starts only after interaction.
@@ -37,22 +107,6 @@ final class Synth {
     func play(_ s: Sound) {
         guard let buffer = buffers[s] else { return }
         play(buffer)
-    }
-
-    /// The captain on the PA (GDD §8b): a radio-style babble of syllables whose pitch wanders up and down,
-    /// like game characters talking, for about `seconds`.
-    func speak(seconds: Double) {
-        var tones: [Tone] = []
-        var t = 0.0
-        var pitch = 150.0
-        while t < seconds {
-            let d = Double.random(in: 0.07...0.13)
-            pitch = min(210, max(110, pitch + Double.random(in: -25...25)))
-            tones.append(Tone(f: pitch, d: d, wave: .square, v: 0.03, delay: t, f2: pitch * Double.random(in: 0.85...1.1)))
-            tones.append(Tone(f: pitch * 2.02, d: d * 0.9, wave: .triangle, v: 0.018, delay: t, f2: nil))   // radio brightness
-            t += d + (Double.random(in: 0...1) < 0.2 ? 0.16 : 0.035)                                     // now and then a word gap
-        }
-        if let buffer = render(tones) { play(buffer) }
     }
 
     private func play(_ buffer: AVAudioPCMBuffer) {

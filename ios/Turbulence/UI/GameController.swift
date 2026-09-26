@@ -105,13 +105,16 @@ final class GameController {
         let destination = leg?.1 ?? "our destination"
         screen = .intro
         introSubtitle = nil
-        // the captain on the PA: chime, then each line "spoken" as a radio babble under its subtitle
-        let lines = ["Captain: Good day, and welcome aboard flight \(plan.id) to \(destination).",
-                     "Captain: \(plan.story.name) with us today. Cabin crew, prepare for departure."]
-        func say(_ line: String) -> SKAction {
+        // the captain on the PA: chime, then each line spoken over the cabin speakers under its subtitle
+        let spokenCode = plan.id.map(String.init).joined(separator: " ")      // "T B 1 0 3"
+        let lines = [("Good day, and welcome aboard flight \(plan.id) to \(destination).",
+                      "Good day, and welcome aboard flight \(spokenCode), to \(destination)."),
+                     ("\(plan.story.name) with us today. Cabin crew, prepare for departure.",
+                      "\(plan.story.name) with us today. Cabin crew, prepare for departure.")]
+        func say(_ line: (shown: String, spoken: String)) -> SKAction {
             .run { [weak self] in
-                self?.introSubtitle = line
-                self?.synth.speak(seconds: min(3.4, Double(line.count) * 0.045))
+                self?.introSubtitle = "Captain: " + line.shown
+                self?.synth.captain(say: line.spoken)
             }
         }
         scene.run(.sequence([.wait(forDuration: 0.4), .run { [weak self] in self?.synth.play(.paChime) },
@@ -130,6 +133,7 @@ final class GameController {
     /// 3, 2, 1, Go! over the play view, then the flight starts (GDD §8b).
     private func countdown() {
         scene.removeAction(forKey: "introCaptions")
+        synth.stopCaptain()
         introTitle = nil
         introSubtitle = nil
         intro3D = nil
