@@ -21,7 +21,6 @@ final class Synth {
     private let voicePlayer = AVAudioPlayerNode()
     private let paBand = AVAudioUnitEQ(numberOfBands: 2)
     private let paRadio = AVAudioUnitDistortion()
-    private var voiceFormat: AVAudioFormat?
     private lazy var captainVoice: AVSpeechSynthesisVoice? = {
         let english = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix("en") }
         return english.first { $0.gender == .male && $0.quality != .default }
@@ -45,8 +44,10 @@ final class Synth {
         paRadio.wetDryMix = 35
         voicePlayer.volume = 0.9
         [voicePlayer, paBand, paRadio].forEach(engine.attach)
-        engine.connect(paBand, to: paRadio, format: nil)
-        engine.connect(paRadio, to: engine.mainMixerNode, format: nil)
+        // one fixed format for the whole chain; speech is converted into it before playing
+        engine.connect(voicePlayer, to: paBand, format: format)
+        engine.connect(paBand, to: paRadio, format: format)
+        engine.connect(paRadio, to: engine.mainMixerNode, format: format)
     }
 
     /// The captain says a line over the cabin PA. `text` is what's spoken (it can differ from the subtitle).
@@ -68,23 +69,19 @@ final class Synth {
     }
 
     private func scheduleVoice(_ pcm: AVAudioPCMBuffer) {
-        guard let buffer = floatBuffer(pcm) else { return }
-        if voiceFormat != buffer.format {
-            voiceFormat = buffer.format
-            engine.disconnectNodeOutput(voicePlayer)
-            engine.connect(voicePlayer, to: paBand, format: buffer.format)
-        }
+        guard !muted, let buffer = convert(pcm) else { return }
         if !engine.isRunning { try? engine.start() }
         voicePlayer.scheduleBuffer(buffer, completionHandler: nil)
         if !voicePlayer.isPlaying { voicePlayer.play() }
     }
 
-    /// Speech comes out as 16-bit samples; the player wants float.
-    private func floatBuffer(_ pcm: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        if pcm.format.commonFormat == .pcmFormatFloat32 { return pcm }
-        guard let target = AVAudioFormat(standardFormatWithSampleRate: pcm.format.sampleRate, channels: pcm.format.channelCount),
-              let converter = AVAudioConverter(from: pcm.format, to: target),
-              let out = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: pcm.frameLength) else { return nil }
+    /// Speech arrives as 16-bit samples at its own rate; convert to the chain's 44.1 kHz mono float.
+    private func convert(_ pcm: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
+        if pcm.format == format { return pcm }
+        let ratio = format.sampleRate / pcm.format.sampleRate
+        guard let converter = AVAudioConverter(from: pcm.format, to: format),
+              let out = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(Double(pcm.frameLength) * ratio) + 1024)
+        else { return nil }
         var fed = false
         var error: NSError?
         converter.convert(to: out, error: &error) { _, status in
