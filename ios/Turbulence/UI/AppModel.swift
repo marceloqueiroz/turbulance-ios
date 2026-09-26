@@ -49,10 +49,11 @@ final class AppModel {
         screen = .map
     }
 
-    func board(_ plan: FlightPlan) {
+    /// Boards a flight. The intro cutscene plays from a briefing card, not on Retry/Restart (GDD §8b).
+    func board(_ plan: FlightPlan, intro: Bool = true) {
         briefing = nil
         newBest = false
-        game.start(plan)
+        game.start(plan, intro: intro)
         screen = .game
     }
 

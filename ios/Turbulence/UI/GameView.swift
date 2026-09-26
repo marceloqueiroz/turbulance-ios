@@ -11,6 +11,7 @@ struct GameView: View {
             VStack(spacing: 4) {
                 HUDBar(game: game)
                     .padding(.horizontal, 16)
+                    .opacity(game.screen == .intro ? 0 : 1)
                 // The cabin runs edge to edge, under the notch and home-indicator insets.
                 ZStack {
                     SpriteView(scene: game.scene, preferredFramesPerSecond: 60)
@@ -39,25 +40,61 @@ struct GameView: View {
                 .ignoresSafeArea(edges: [.horizontal, .bottom])
             }
             .padding(.top, 6)
+            if game.screen == .intro { IntroLetterbox(game: game).transition(.opacity) }
         }
         .animation(.easeOut(duration: 0.2), value: game.toast)
+        .animation(.easeInOut(duration: 0.4), value: game.screen)
     }
 
     @ViewBuilder private var overlay: some View {
         switch game.screen {
         case .paused:
             Scrim {
-                PauseCard(resume: { game.setPaused(false) }, restart: { app.board(game.plan) },
+                PauseCard(resume: { game.setPaused(false) }, restart: { app.board(game.plan, intro: false) },
                           options: { app.showOptions = true }, map: { app.openMap() })
             }
         case .ended:
             Scrim {
                 EndCard(plan: game.plan, result: game.result, newBest: app.newBest,
                         next: app.nextFlight(after: game.plan).map { next in { app.openMap(brief: next) } },
-                        retry: { app.board(game.plan) }, map: { app.openMap() })
+                        retry: { app.board(game.plan, intro: false) }, map: { app.openMap() })
             }
-        case .idle, .playing: EmptyView()
+        case .idle, .intro, .playing: EmptyView()
         }
+    }
+}
+
+// MARK: - Intro letterbox (GDD §8b): flight title on top, captain's subtitles below, tap to skip
+
+struct IntroLetterbox: View {
+    let game: GameController
+    var body: some View {
+        VStack(spacing: 0) {
+            ZStack {
+                Color.black.opacity(0.85)
+                Text(game.introTitle ?? "").font(rounded(13, .heavy)).tracking(1.5).foregroundStyle(Color.text)
+                    .lineLimit(1).minimumScaleFactor(0.6).padding(.horizontal, 20)
+            }
+            .frame(height: 38)
+            Spacer()
+            ZStack {
+                Color.black.opacity(0.85)
+                if let line = game.introSubtitle {
+                    Text(line).font(rounded(16, .semibold)).foregroundStyle(Color.text)
+                        .multilineTextAlignment(.center).padding(.horizontal, 60)
+                        .transition(.opacity)
+                        .id(line)
+                }
+                HStack {
+                    Spacer()
+                    Text("Tap to skip").font(rounded(11, .heavy)).foregroundStyle(Color.muted).padding(.trailing, 20)
+                }
+            }
+            .frame(height: 56)
+            .animation(.easeInOut(duration: 0.3), value: game.introSubtitle)
+        }
+        .ignoresSafeArea()
+        .allowsHitTesting(false)
     }
 }
 

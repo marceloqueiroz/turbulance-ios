@@ -9,6 +9,13 @@ final class CabinScene: SKScene {
     private let world = SKNode()
     private let skyNode = SKSpriteNode()
     private let vignetteNode = SKSpriteNode()
+    private let cam = SKCameraNode()
+    // intro cutscene state (GDD §8b)
+    private var introActive = false
+    private var introWalkers: [Int: Double] = [:]      // passenger index → facing while walking in
+    private var introDone: (() -> Void)?
+    private var demoSpot: CGPoint = .zero
+    private var camPose = CamPose.identity
     private let paxLayer = SKNode()
     private let spillLayer = SKNode()
     private let iconLayer = SKNode()
@@ -90,7 +97,9 @@ final class CabinScene: SKScene {
 
         skyNode.anchorPoint = .zero; skyNode.zPosition = -100
         vignetteNode.anchorPoint = .zero; vignetteNode.zPosition = 100
-        addChild(skyNode); addChild(vignetteNode); addChild(world)
+        addChild(cam); camera = cam
+        cam.addChild(skyNode); cam.addChild(vignetteNode)     // sky and vignette stay fixed on screen
+        addChild(world)
 
         for i in 0..<16 {
             let layer = i % 2
@@ -150,6 +159,9 @@ final class CabinScene: SKScene {
             skyNode.texture = SKTexture(image: Art.sky(size)); skyNode.size = size
             vignetteNode.texture = SKTexture(image: Art.vignette(size)); vignetteNode.size = size
         }
+        skyNode.position = CGPoint(x: -size.width / 2, y: -size.height / 2)
+        vignetteNode.position = skyNode.position
+        if !introActive { camPose = homePose; applyCamera(camPose) }
     }
 
     /// Cabin art, wings and bin highlights for one aircraft; rebuilt when the flight's aircraft changes.
@@ -290,6 +302,11 @@ final class CabinScene: SKScene {
         let turbulence = sim.turbulenceIntensity
         for (i, p) in sim.passengers.enumerated() where i < paxNodes.count {
             let n = paxNodes[i]
+            if let face = introWalkers[i] {
+                n.sync(p, clock: clock, dt: dt, turbulence: 0)
+                n.face(face)                                 // walking in during the intro
+                continue
+            }
             n.position = pt(p.drawX, p.drawY)
             n.zPosition = p.stroll != nil ? 3 : 0
             n.sync(p, clock: clock, dt: dt, turbulence: turbulence)
@@ -390,9 +407,16 @@ final class CabinScene: SKScene {
         }
 
         let crew = sim.crew
-        crewNode.sync(crew, clock: clock)
-        crewNode.position = pt(crew.x, crew.y)
-        if let t = crew.target {
+        if introActive {
+            var demo = Crew(); demo.face = -1
+            crewNode.sync(demo, clock: clock)
+            crewNode.safetyDemo(clock: clock)
+            crewNode.position = demoSpot
+        } else {
+            crewNode.sync(crew, clock: clock)
+            crewNode.position = pt(crew.x, crew.y)
+        }
+        if let t = crew.target, !introActive {
             targetMarker.isHidden = false
             targetMarker.position = pt(t.x, sim.layout.aisles[min(t.aisle, sim.layout.aisles.count - 1)] + 22)
             targetMarker.setScale(1 + CGFloat(sin(clock * 8)) * 0.2)
@@ -428,6 +452,7 @@ final class CabinScene: SKScene {
 
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
+        if introActive { game?.skipIntro(); return }
         let p = touch.location(in: world)
         let x = Double(p.x), y = worldH - Double(p.y)
         if game?.screen == .playing {
@@ -607,6 +632,9 @@ final class PaxNode: SKNode {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    /// Walking direction during the intro (+1 aft/right, −1 toward the nose).
+    func face(_ dir: Double) { flip.xScale = dir > 0 ? -1 : 1 }
 
     func sync(_ p: Passenger, clock: Double, dt: Double, turbulence: Double) {
         if p.sick != shownSick { shownSick = p.sick; body.texture = p.sick ? sickTex : normalTex }
@@ -820,6 +848,18 @@ final class CrewNode: SKNode {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Safety demo pose for the intro: arms up, showing a seatbelt (GDD §8b).
+    func safetyDemo(clock: Double) {
+        let w = CGFloat(sin(clock * 5)) * 2.5
+        arms[0].position = CGPoint(x: -6, y: 17 + w); arms[1].position = CGPoint(x: -6, y: -17 - w)
+        hands[0].position = CGPoint(x: -12, y: 17 + w); hands[1].position = CGPoint(x: -12, y: -17 - w)
+        strap.isHidden = false
+        strap.zRotation = .pi / 2
+        strap.position = CGPoint(x: -14, y: 0)
+    }
+
+    func endDemo() { strap.zRotation = 0; strap.position = .zero }
+
     func setLook(skin: UIColor, hair: UIColor) {
         (torso.childNode(withName: "head") as? SKShapeNode)?.fillColor = skin
         (torso.childNode(withName: "hair") as? SKShapeNode)?.fillColor = hair
@@ -889,5 +929,134 @@ final class CrewNode: SKNode {
             let bx = min(max(c.x, Double(w / 2 + 24)), worldWidth - Double(w / 2) - 24)
             bubbleNode.position = CGPoint(x: bx - c.x, y: c.tray.isEmpty ? 38 : 56)
         }
+    }
+}
+
+
+// MARK: - Intro cutscene (GDD §8b)
+
+/// Camera framing: zoom, a slight tilt and a vertical squash that reads as a lower, angled view.
+struct CamPose {
+    var pos: CGPoint
+    var zoom: CGFloat
+    var rot: CGFloat
+    var squash: CGFloat
+    static let identity = CamPose(pos: .zero, zoom: 1, rot: 0, squash: 1)
+}
+
+extension CabinScene {
+    /// The play view: the whole cabin, flat and square-on.
+    fileprivate var homePose: CamPose { CamPose(pos: CGPoint(x: size.width / 2, y: size.height / 2), zoom: 1, rot: 0, squash: 1) }
+
+    fileprivate func applyCamera(_ c: CamPose) {
+        cam.position = c.pos
+        cam.xScale = 1 / c.zoom
+        cam.yScale = 1 / (c.zoom * c.squash)
+        cam.zRotation = c.rot
+    }
+
+    /// Scene point for a model point, through the world's fit-to-screen transform.
+    fileprivate func scenePoint(_ x: Double, _ y: Double) -> CGPoint {
+        let p = pt(x, y)
+        return CGPoint(x: worldBase.x + p.x * world.xScale, y: worldBase.y + p.y * world.yScale)
+    }
+
+    fileprivate func camMove(to target: @escaping () -> CamPose, duration: Double) -> SKAction {
+        var from: CamPose?
+        var to: CamPose?
+        return .customAction(withDuration: duration) { [weak self] _, elapsed in
+            guard let self else { return }
+            if from == nil { from = self.camPose; to = target() }
+            let t = Double(elapsed) / duration
+            let k = CGFloat(t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2)      // ease in-out
+            let f = from!, g = to!
+            let c = CamPose(pos: CGPoint(x: f.pos.x + (g.pos.x - f.pos.x) * k, y: f.pos.y + (g.pos.y - f.pos.y) * k),
+                            zoom: f.zoom + (g.zoom - f.zoom) * k, rot: f.rot + (g.rot - f.rot) * k,
+                            squash: f.squash + (g.squash - f.squash) * k)
+            self.camPose = c
+            self.applyCamera(c)
+        }
+    }
+
+    /// Door close-up → along the cabin → sweep to the play view, with the last passengers boarding,
+    /// a bag going into an overhead bin and the safety demo. Calls `done` when finished or skipped.
+    func playIntro(done: @escaping () -> Void) {
+        guard let sim = game?.sim, size.width > 1 else { done(); return }
+        let L = sim.layout
+        let a0 = L.aisles[0]
+        introActive = true
+        introDone = done
+        targetMarker.isHidden = true
+
+        // the last passengers board: walk in from the forward door to their seats
+        let reachX = 70 + 80 * 4.2
+        let candidates = sim.passengers.indices.filter {
+            let p = sim.passengers[$0]
+            return p.aisle == 0 && p.x < reachX && !p.vip
+        }
+        let walkers = Array(candidates.shuffled().prefix(4))
+        for (k, i) in walkers.enumerated() {
+            let p = sim.passengers[i]
+            let n = paxNodes[i]
+            let lane = a0 + (p.y < a0 ? -9 : 9)
+            introWalkers[i] = 1
+            n.position = pt(62, lane)
+            n.zPosition = 3
+            let walk = SKAction.move(to: pt(p.x, lane), duration: (p.x - 62) / 80)
+            let sit = SKAction.move(to: pt(p.x, p.y), duration: 0.45)
+            sit.timingMode = .easeOut
+            n.run(.sequence([.wait(forDuration: 0.15 + 0.55 * Double(k)), walk,
+                             .run { [weak self] in self?.introWalkers[i] = -1 }, sit,
+                             .run { [weak self] in self?.introWalkers[i] = nil; n.zPosition = 0 }]), withKey: "intro")
+        }
+
+        // the attendant runs the safety demo mid-cabin
+        let midX = L.rows[L.rows.count / 2].x
+        demoSpot = pt(midX + 18, a0)
+
+        // a bag goes up into an overhead bin, which snaps shut
+        let binRow = L.rows[max(1, L.rows.count / 2 - 2)]
+        let binAt = pt(binRow.x, a0 - 30)
+        world.run(.sequence([.wait(forDuration: 2.9), .run { [weak self] in
+            guard let self else { return }
+            let bag = SKSpriteNode(texture: Tex.suitcase, size: CGSize(width: 34, height: 30))
+            bag.position = pt(binRow.x, a0); bag.zPosition = 4
+            self.fxLayer.addChild(bag)
+            bag.run(.sequence([.group([.move(to: binAt, duration: 0.6), .scale(to: 0.7, duration: 0.6)]), .fadeOut(withDuration: 0.2), .removeFromParent()]))
+            let bin = SKSpriteNode(texture: Tex.binJam, size: CGSize(width: 44, height: 44))
+            bin.position = binAt; bin.zPosition = 4
+            self.fxLayer.addChild(bin)
+            bin.run(.sequence([.wait(forDuration: 0.8), .scaleY(to: 0.2, duration: 0.12), .run { [weak self] in
+                self?.floatText("Click!", x: binRow.x, y: a0 - 44, color: Palette.teal)
+            }, .fadeOut(withDuration: 0.25), .removeFromParent()]))
+        }]), withKey: "intro")
+
+        // camera: door close-up, along the aisle, then the play view
+        camPose = CamPose(pos: scenePoint(150, a0), zoom: 2.3, rot: -0.17, squash: 0.78)
+        applyCamera(camPose)
+        let shot1 = camMove(to: { [unowned self] in CamPose(pos: self.scenePoint(250, a0), zoom: 2.2, rot: -0.15, squash: 0.8) }, duration: 2.6)
+        let shot2 = camMove(to: { [unowned self] in CamPose(pos: self.scenePoint(midX, a0), zoom: 1.7, rot: -0.07, squash: 0.86) }, duration: 2.4)
+        let shot3 = camMove(to: { [unowned self] in self.homePose }, duration: 1.5)
+        cam.run(.sequence([shot1, shot2, shot3, .run { [weak self] in self?.finishIntro() }]), withKey: "intro")
+    }
+
+    func skipIntro() {
+        guard introActive else { return }
+        cam.removeAction(forKey: "intro")
+        world.removeAction(forKey: "intro")
+        for (i, _) in introWalkers where i < paxNodes.count { paxNodes[i].removeAction(forKey: "intro"); paxNodes[i].zPosition = 0 }
+        finishIntro()
+    }
+
+    private func finishIntro() {
+        guard introActive else { return }
+        introActive = false
+        introWalkers.removeAll()
+        camPose = homePose
+        applyCamera(camPose)
+        crewNode.endDemo()
+        let done = introDone
+        introDone = nil
+        done?()
     }
 }

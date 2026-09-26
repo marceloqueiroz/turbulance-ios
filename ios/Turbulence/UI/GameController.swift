@@ -16,7 +16,7 @@ struct FlightResult: Equatable {
 /// Glue between the model, the SpriteKit renderer and the SwiftUI HUD.
 @Observable
 final class GameController {
-    enum Screen: Equatable { case idle, playing, paused, ended }
+    enum Screen: Equatable { case idle, intro, playing, paused, ended }
 
     var screen: Screen = .idle
     var timeText = "2:30"
@@ -33,6 +33,9 @@ final class GameController {
     enum SeatPrompt: Equatable { case none, takeSeat, buckled }
     var plan = Campaign.route1.flights[0]
     var largeText = false
+    /// Letterbox captions during the intro cutscene (GDD §8b).
+    var introTitle: String?
+    var introSubtitle: String?
 
     /// Called once when a flight lands, before the scorecard shows.
     @ObservationIgnored var onEnded: ((FlightPlan, FlightResult) -> Void)?
@@ -62,9 +65,7 @@ final class GameController {
         } else if let i = args.firstIndex(of: "-flight"), i + 1 < args.count,
                   let p = Campaign.routes.flatMap(\.flights).first(where: { $0.id == args[i + 1] }) {
             plan = p                                 // jump straight into one flight, e.g. -flight TB307
-            sim = FlightSimulation(plan: p)
-            sim.start()
-            screen = .playing
+            debugFlight = p
         } else if args.contains("-autostart") || args.contains("-turbulence") {
             plan = .prototype
             sim = FlightSimulation()
@@ -75,20 +76,45 @@ final class GameController {
             screen = .playing
         }
         scene.reset()
+        if let p = debugFlight { start(p, intro: !args.contains("-nointro")) }
     }
 
-    var isDebugLaunch: Bool { screen == .playing }
+    @ObservationIgnored private var debugFlight: FlightPlan?
+    var isDebugLaunch: Bool { screen != .idle }
 
-    func start(_ plan: FlightPlan) {
+    /// Loads a flight. With `intro`, the cutscene plays first and the flight clock starts when it ends.
+    func start(_ plan: FlightPlan, intro: Bool = true) {
         synth.warmUp()
         self.plan = plan
         sim = FlightSimulation(plan: plan)
-        sim.start()
         result = nil
         toast = nil
         seatbelt = false
-        screen = .playing
         scene.reset()
+        guard intro else { beginFlight(); return }
+        let route = Campaign.route(containing: plan.id)
+        let leg = route.flatMap { r in r.flights.firstIndex(of: plan).map { (r.cities[$0], r.cities[$0 + 1]) } }
+        introTitle = ["FLIGHT \(plan.id)", leg.map { "\($0.0.uppercased()) → \($0.1.uppercased())" }, plan.aircraft.displayName.uppercased()]
+            .compactMap { $0 }.joined(separator: "  ·  ")
+        let destination = leg?.1 ?? "our destination"
+        screen = .intro
+        introSubtitle = nil
+        scene.run(.sequence([.wait(forDuration: 0.4), .run { [weak self] in
+            self?.introSubtitle = "Captain: Good day, and welcome aboard flight \(plan.id) to \(destination)."
+        }, .wait(forDuration: 2.8), .run { [weak self] in
+            self?.introSubtitle = "Captain: \(plan.story.name) with us today. Cabin crew, prepare for departure."
+        }]), withKey: "introCaptions")
+        scene.playIntro { [weak self] in self?.beginFlight() }
+    }
+
+    func skipIntro() { scene.skipIntro() }
+
+    private func beginFlight() {
+        scene.removeAction(forKey: "introCaptions")
+        introTitle = nil
+        introSubtitle = nil
+        sim.start()
+        screen = .playing
     }
 
     /// The quiet cabin shown behind menus and the route map.
