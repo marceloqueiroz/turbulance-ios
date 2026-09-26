@@ -15,6 +15,15 @@ final class IntroScene3D {
     private let bins = SCNNode()
     private var done: (() -> Void)?
     private var finished = false
+    /// The camera waits at the end of the three-quarter shot until the captain has finished (GDD §8b).
+    static let holdAt = 7.6
+    private var released = false
+    private var clock = 0.0
+    private var held = 0.0
+    private var lastElapsed: CGFloat = 0
+
+    /// Lets the camera move on from the hold: call when the captain has finished speaking.
+    func release() { released = true }
     /// Unhurried on purpose: Tap to skip is always there (GDD §8b).
     static let duration = 11.0
     /// The 2D view starts fading in this long before the camera stops, so the two overlap.
@@ -342,16 +351,24 @@ final class IntroScene3D {
         pose(at: 0, ks)
         let total = Self.duration
         _ = ks
-        cameraNode.runAction(.customAction(duration: total) { [weak self] _, elapsed in
+        // our own clock, so the camera can hold at the end of shot 2 until the captain is done
+        cameraNode.runAction(.customAction(duration: 3600) { [weak self] _, elapsed in
             guard let self else { return }
-            self.pose(at: Double(elapsed), self.keys())
+            let dt = Double(elapsed - self.lastElapsed)
+            self.lastElapsed = elapsed
+            if self.clock < Self.holdAt || self.released {
+                self.clock = min(total, self.clock + dt)
+            } else {
+                self.held += dt
+                if self.held > 12 { self.released = true }          // never wait forever on the voice
+            }
+            let t = self.clock
+            self.pose(at: t, self.keys())
+            self.setLights(at: t)                                   // flattens during the swoop
+            self.bins.opacity = t < 4.4 ? 1 : max(0, 1 - CGFloat((t - 4.4) / 1.4))
+            // hand over to 2D a little before the camera stops, so the crossfade overlaps the end of the move
+            if t >= total - Self.handoffLead { DispatchQueue.main.async { self.finish() } }
         }, forKey: "intro")
-        // hand over to 2D a little before the camera stops, so the crossfade overlaps the end of the move
-        cameraNode.runAction(.sequence([.wait(duration: total - Self.handoffLead),
-                                        .run { [weak self] _ in DispatchQueue.main.async { self?.finish() } }]), forKey: "handoff")
-        bins.runAction(.sequence([.wait(duration: 4.4), .fadeOut(duration: 1.4)]))   // clears the view for the 3/4 shot
-        // flatten the light during the swoop so the last frame matches the flat 2D colours
-        lights.runAction(.customAction(duration: total) { [weak self] _, e in self?.setLights(at: Double(e)) })
         scene.rootNode.addChildNode(lights)
     }
 

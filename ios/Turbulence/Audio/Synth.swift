@@ -50,22 +50,50 @@ final class Synth {
         engine.connect(paRadio, to: engine.mainMixerNode, format: format)
     }
 
-    /// The captain says a line over the cabin PA. `text` is what's spoken (it can differ from the subtitle).
-    func captain(say text: String) {
-        guard !muted, started else { return }
+    private var lineID = 0
+
+    /// The captain says a line over the cabin PA; `done` runs once it has finished playing (or straight after an
+    /// estimated reading time when sound is off). `text` is what's spoken (it can differ from the subtitle).
+    func captain(say text: String, done: @escaping () -> Void) {
+        lineID += 1
+        let id = lineID
+        let finish = { [weak self] in if self?.lineID == id { done() } }
+        guard !muted, started else {
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(2, Double(text.count) * 0.065), execute: finish)
+            return
+        }
         let u = AVSpeechUtterance(string: text)
         u.voice = captainVoice
         u.rate = 0.46
         u.pitchMultiplier = 0.88
         speech.write(u) { [weak self] buffer in
-            guard let self, let pcm = buffer as? AVAudioPCMBuffer, pcm.frameLength > 0 else { return }
-            DispatchQueue.main.async { self.scheduleVoice(pcm) }
+            guard let self, let pcm = buffer as? AVAudioPCMBuffer else { return }
+            DispatchQueue.main.async {
+                guard self.lineID == id else { return }
+                if pcm.frameLength > 0 {
+                    self.scheduleVoice(pcm)
+                } else {
+                    // the empty buffer marks the end: call back once everything queued has been heard
+                    self.afterVoicePlays(finish)
+                }
+            }
         }
     }
 
     func stopCaptain() {
+        lineID += 1                          // drops any pending "line finished" callbacks
         speech.stopSpeaking(at: .immediate)
         voicePlayer.stop()
+    }
+
+    private func afterVoicePlays(_ done: @escaping () -> Void) {
+        guard let silence = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 2205) else { done(); return }
+        silence.frameLength = 2205
+        if let p = silence.floatChannelData?[0] { for i in 0..<Int(silence.frameLength) { p[i] = 0 } }
+        voicePlayer.scheduleBuffer(silence, completionCallbackType: .dataPlayedBack) { _ in
+            DispatchQueue.main.async(execute: done)
+        }
+        if !voicePlayer.isPlaying { voicePlayer.play() }
     }
 
     private func scheduleVoice(_ pcm: AVAudioPCMBuffer) {

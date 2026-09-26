@@ -111,15 +111,16 @@ final class GameController {
                       "Good day, and welcome aboard flight \(spokenCode), to \(destination)."),
                      ("\(plan.story.name) with us today. Cabin crew, prepare for departure.",
                       "\(plan.story.name) with us today. Cabin crew, prepare for departure.")]
-        func say(_ line: (shown: String, spoken: String)) -> SKAction {
-            .run { [weak self] in
-                self?.introSubtitle = "Captain: " + line.shown
-                self?.synth.captain(say: line.spoken)
+        // each line starts when the previous one has finished; the camera holds until the last one is done
+        func say(_ k: Int) {
+            guard k < lines.count else { self.intro3D?.release(); return }
+            introSubtitle = "Captain: " + lines[k].0
+            synth.captain(say: lines[k].1) { [weak self] in
+                self?.scene.run(.sequence([.wait(forDuration: 0.5), .run { say(k + 1) }]), withKey: "introCaptions")
             }
         }
         scene.run(.sequence([.wait(forDuration: 0.4), .run { [weak self] in self?.synth.play(.paChime) },
-                             .wait(forDuration: 1.3), say(lines[0]),
-                             .wait(forDuration: 4.2), say(lines[1])]), withKey: "introCaptions")
+                             .wait(forDuration: 1.3), .run { say(0) }]), withKey: "introCaptions")
         let intro = IntroScene3D(sim: sim) { [weak self] in (self?.scene.size ?? .zero, self?.scene.contentInsets ?? .zero) }
         intro3D = intro
         let args = ProcessInfo.processInfo.arguments
