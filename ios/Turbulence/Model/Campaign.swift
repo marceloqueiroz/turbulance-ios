@@ -1,0 +1,314 @@
+import Foundation
+
+/// How the drink cart behaves on a flight.
+enum CartMode: Equatable {
+    case none
+    case service      // rolls down the aisle as a moving obstacle
+    case sticks       // …and now and then gets stuck (push it free with a free hand)
+    case breaks       // …and now and then breaks down (fix it with the toolkit)
+}
+
+/// One rule per flight that changes how you move (GDD §6a).
+enum Twist: Equatable {
+    case boardingRush     // carry-on bags block the aisle at the start
+    case galleyClosed     // the forward galley is out of service
+    case redEye           // dim cabin, most asleep, noise carries further
+    case helper           // a trainee answers call buttons on their own
+    case mealService      // a rush of orders mid-flight, one more problem allowed
+
+    var title: String {
+        switch self {
+        case .boardingRush: return "Boarding rush"
+        case .galleyClosed: return "Forward galley closed"
+        case .redEye: return "Red-eye"
+        case .helper: return "Trainee on board"
+        case .mealService: return "Meal service"
+        }
+    }
+    var detail: String {
+        switch self {
+        case .boardingRush: return "Carry-on bags block the aisle. Stow them with a free hand."
+        case .galleyClosed: return "Supplies come from the middle and back galleys only."
+        case .redEye: return "Most passengers are asleep and noise carries a row further."
+        case .helper: return "A trainee answers call buttons, slowly. Focus on everything else."
+        case .mealService: return "Mid-flight rush of orders. Start coffee and meals early."
+        }
+    }
+}
+
+/// The bonus goal that earns a medal (GDD §6a).
+enum Goal: Equatable {
+    case noMisses
+    case noneWoken
+    case serveAllOrders
+    case vipHappy
+    case quickService          // average fix under 10 s
+    case highScore(Int)
+
+    var title: String {
+        switch self {
+        case .noMisses: return "No missed problems"
+        case .noneWoken: return "Nobody wakes up"
+        case .serveAllOrders: return "Serve every order"
+        case .vipHappy: return "Keep the VIP happy"
+        case .quickService: return "Average fix under 10 s"
+        case .highScore(let s): return "Land with \(s)+ satisfaction"
+        }
+    }
+}
+
+/// Who's on board: shifts the passenger mix and gives the flight a personality (GDD §6a).
+struct Story: Equatable {
+    let name: String
+    let blurb: String
+    var bias: [Archetype: Double] = [:]
+    var vip = false
+
+    static let commuters = Story(name: "Morning commuters", blurb: "Coffee, laptops and call buttons.", bias: [.business: 2.5])
+    static let weekend = Story(name: "Weekend getaway", blurb: "Relaxed travellers who want a drink.", bias: [.chatterbox: 1.5])
+    static let family = Story(name: "Family holiday", blurb: "Lots of little ones on board.", bias: [.family: 3])
+    static let business = Story(name: "Business shuttle", blurb: "Busy people who expect fast service.", bias: [.business: 3])
+    static let skiTrip = Story(name: "Ski trip", blurb: "A chatty group that won't stay seated.", bias: [.chatterbox: 3])
+    static let celebrity = Story(name: "Celebrity on board", blurb: "A famous face is flying today.", bias: [:], vip: true)
+    static let surfClub = Story(name: "Surf club", blurb: "Up and about, chatting across rows.", bias: [.chatterbox: 2.5])
+    static let wedding = Story(name: "Wedding party", blurb: "Celebrations spill into the aisle.", bias: [.chatterbox: 2, .family: 1.5])
+    static let earlyBirds = Story(name: "Early birds", blurb: "Everyone wants to sleep. Let them.", bias: [.sleeper: 3])
+    static let sportsTeam = Story(name: "Sports team", blurb: "Loud, hungry and restless.", bias: [.chatterbox: 2, .business: 0.5])
+    static let charter = Story(name: "Holiday charter", blurb: "Families off to the beach.", bias: [.family: 2.5])
+    static let conference = Story(name: "Conference crowd", blurb: "Laptops open, coffee wanted.", bias: [.business: 3])
+    static let themePark = Story(name: "Theme park trip", blurb: "Excited kids and tired parents.", bias: [.family: 3, .nervous: 1.5])
+    static let lateCommute = Story(name: "Last flight home", blurb: "Tired travellers dozing off.", bias: [.sleeper: 2.5])
+    static let honeymoon = Story(name: "Honeymooners", blurb: "A couple in premium expect perfection.", bias: [:], vip: true)
+    static let finale = Story(name: "Full house", blurb: "Every kind of traveller at once.", bias: [:])
+    static let band = Story(name: "Band on tour", blurb: "Musicians who never sit still.", bias: [.chatterbox: 3])
+    static let backpackers = Story(name: "Backpackers", blurb: "Stuffed overhead bins everywhere.", bias: [.chatterbox: 1.5, .nervous: 1.5])
+    static let skiTeam = Story(name: "Ski team", blurb: "Hungry athletes ordering combos.", bias: [.business: 1.5, .chatterbox: 1.5])
+    static let overnight = Story(name: "Overnight crossing", blurb: "A quiet cabin, if you keep it that way.", bias: [.sleeper: 2.5])
+    static let photographers = Story(name: "Photographers' tour", blurb: "Nervous flyers with heavy bags.", bias: [.nervous: 2.5])
+    static let director = Story(name: "Film director on board", blurb: "A demanding guest and a full cabin.", bias: [.business: 1.5], vip: true)
+    static let tourGroup = Story(name: "Tour group", blurb: "Everyone travelling together, everyone asking.", bias: [.chatterbox: 1.5, .family: 1.5])
+    static let engineers = Story(name: "Engineers' convention", blurb: "They'd fix the cart themselves if you let them.", bias: [.business: 2.5])
+    static let royal = Story(name: "Royal guest", blurb: "The flight everyone will talk about.", bias: [:], vip: true)
+}
+
+/// One flight (level): what can happen on it and when (GDD §6, §6a, §9a).
+struct FlightPlan: Identifiable, Equatable {
+    let id: String                     // flight code, e.g. "TB101"
+    let name: String
+    let aircraft: Aircraft
+    let duration: Double               // seconds, boarding to touchdown
+    let kinds: [OccurrenceKind]        // what the director may roll (toilet = lavatories can clog)
+    let script: [OccurrenceKind]       // teaching beats played first
+    let maxCap: Int                    // most problems at once at the cruise peak
+    var menu: [Item] = [.water, .juice]  // what drink/meal orders can ask for
+    var combos = false                 // orders can need two items at once
+    var strolls = false                // passengers walk the aisle (GDD §4)
+    var dozing = false                 // passengers nod off; noise wakes them (GDD §7)
+    var turbulence: [TurbulenceBump] = []
+    var cart: CartMode = .none
+    var twist: Twist?
+    var story: Story = .commuters
+    var goal: Goal = .noMisses
+    let whatsNew: String               // the one new thing this flight teaches
+
+    var landingAt: Double { duration - Tuning.landingLead }
+
+    /// Warm-up → build → peak, as shares of the flight so any length uses the same curve.
+    func cap(at t: Double) -> Int {
+        let f = t / duration
+        return f < 0.2 ? min(2, maxCap) : f < 0.5 ? min(3, maxCap) : maxCap
+    }
+
+    /// The all-mechanics Comet flight used by tests and `-demo`.
+    static let prototype = FlightPlan(
+        id: "TB100", name: "Prototype", aircraft: .comet, duration: 150,
+        kinds: [.sick, .spill, .call, .drink], script: [.sick, .spill], maxCap: 3, menu: [.water, .juice, .snack, .coffee],
+        strolls: true, dozing: true, turbulence: Tuning.turbulenceSchedule, whatsNew: "")
+}
+
+struct Route: Identifiable, Equatable {
+    let id: Int
+    let name: String
+    let aircraftNames: String
+    let cities: [String]               // one more than flights: each flight is a leg
+    let flights: [FlightPlan]
+    let unlockStars: Int
+    var inDevelopment: Bool { flights.isEmpty }
+}
+
+/// v1.0 routes (GDD §9a, §11): Routes 1–3, 30 flights. Every flight mixes several task types (GDD §6a).
+enum Campaign {
+    private static func bump(_ start: Double, _ duration: Double = 7, _ intensity: Double = 0.375) -> [TurbulenceBump] {
+        [TurbulenceBump(start: start, duration: duration, intensity: intensity)]
+    }
+    private static let service: [OccurrenceKind] = [.call, .drink, .sick]
+    private static let cabin: [OccurrenceKind] = [.call, .drink, .sick, .spill]
+    private static let family: [OccurrenceKind] = [.call, .drink, .sick, .spill, .baby]
+    private static let full: [OccurrenceKind] = [.call, .drink, .sick, .spill, .baby, .toilet]
+    private static let simple: [Item] = [.water, .juice, .snack]
+    private static let cafe: [Item] = [.water, .juice, .snack, .coffee]
+    private static let dining: [Item] = [.water, .juice, .snack, .coffee, .meal]
+
+    // MARK: Route 1 – Regional Hops (RJ-100 Comet, 12 rows)
+
+    static let route1 = Route(
+        id: 1, name: "Regional Hops", aircraftNames: Aircraft.comet.displayName,
+        cities: ["Port Wren", "Halden", "Marisol Bay", "Kestrel Falls", "Ashby Cross", "Lumen Harbour", "Vale City"],
+        flights: [
+            FlightPlan(id: "TB101", name: "First Service", aircraft: .comet, duration: 90,
+                       kinds: service, script: [.call, .drink, .sick], maxCap: 2, menu: [.water, .juice],
+                       story: .commuters, goal: .serveAllOrders,
+                       whatsNew: "Call buttons, drink orders and a sick passenger. Your tray carries two things, so plan each trip."),
+            FlightPlan(id: "TB102", name: "Mind the Aisle", aircraft: .comet, duration: 105,
+                       kinds: cabin, script: [.spill, .drink], maxCap: 2, menu: simple,
+                       twist: .boardingRush, story: .weekend, goal: .noMisses,
+                       whatsNew: "Spills slow you down until mopped. Bags block the aisle while everyone boards."),
+            FlightPlan(id: "TB103", name: "Little Ones", aircraft: .comet, duration: 120,
+                       kinds: family, script: [.baby, .drink], maxCap: 3, menu: simple, strolls: true,
+                       story: .family, goal: .serveAllOrders,
+                       whatsNew: "A crying baby needs a toy, fast, before the noise spreads. Passengers start walking the aisle."),
+            FlightPlan(id: "TB104", name: "Coffee Run", aircraft: .comet, duration: 120,
+                       kinds: cabin, script: [.drink, .call], maxCap: 3, menu: cafe, strolls: true, dozing: true,
+                       twist: .redEye, story: .commuters, goal: .noneWoken,
+                       whatsNew: "Coffee brews for 3 s: start it, do something else, come back. A dim red-eye cabin full of sleepers."),
+            FlightPlan(id: "TB105", name: "Bumpy Ride", aircraft: .comet, duration: 135,
+                       kinds: full, script: [.sick], maxCap: 3, menu: cafe, strolls: true, dozing: true, turbulence: bump(60),
+                       story: .skiTrip, goal: .noMisses,
+                       whatsNew: "Turbulence sends everyone to their seats. Busy lavatories clog: grab the plunger."),
+            FlightPlan(id: "TB106", name: "Full Service", aircraft: .comet, duration: 150,
+                       kinds: full, script: [.drink, .sick], maxCap: 3, menu: dining, combos: true, strolls: true, dozing: true,
+                       turbulence: bump(100), twist: .mealService, story: .celebrity, goal: .vipHappy,
+                       whatsNew: "Meal service: hot meals take 5 s in the oven, and orders come in pairs. A celebrity is on board.")
+        ],
+        unlockStars: 0)
+
+    // MARK: Route 2 – Coastal Shuttle (N737-Swift, then A320-Current)
+
+    static let route2 = Route(
+        id: 2, name: "Coastal Shuttle", aircraftNames: "N737-Swift · A320-Current",
+        cities: ["Vale City", "Seabright", "Corran Point", "Gullhaven", "Tidewell", "Saltmere", "Brightcliff",
+                 "Pelican Reach", "Harrow Sands", "Coralline", "Westwater", "Driftmoor", "Beacon Isle"],
+        flights: [
+            FlightPlan(id: "TB201", name: "Bigger Cabin", aircraft: .swift, duration: 120,
+                       kinds: cabin, script: [.drink, .call], maxCap: 3, menu: simple,
+                       twist: .boardingRush, story: .surfClub, goal: .serveAllOrders,
+                       whatsNew: "Six across: middle and window seats take longer to reach."),
+            FlightPlan(id: "TB202", name: "Behind the Curtain", aircraft: .swift, duration: 135,
+                       kinds: cabin, script: [.call], maxCap: 3, menu: cafe,
+                       story: .celebrity, goal: .vipHappy,
+                       whatsNew: "A curtain hides premium problems until they're urgent. The VIP up front has short fuses."),
+            FlightPlan(id: "TB203", name: "Two Lavatories", aircraft: .swift, duration: 135,
+                       kinds: full, script: [.drink], maxCap: 3, menu: cafe, strolls: true,
+                       story: .wedding, goal: .noMisses,
+                       whatsNew: "Walkers head for both ends, and either lavatory can clog."),
+            FlightPlan(id: "TB204", name: "Morning Nap", aircraft: .swift, duration: 150,
+                       kinds: family, script: [.baby], maxCap: 3, menu: cafe, strolls: true, dozing: true,
+                       twist: .redEye, story: .earlyBirds, goal: .noneWoken,
+                       whatsNew: "A dim, sleepy cabin with a baby on board. Keep it quiet."),
+            FlightPlan(id: "TB205", name: "Sea Breeze", aircraft: .swift, duration: 150,
+                       kinds: full, script: [.drink], maxCap: 3, menu: dining, combos: true, strolls: true, dozing: true,
+                       turbulence: bump(70), twist: .helper, story: .sportsTeam, goal: .highScore(80),
+                       whatsNew: "Combo orders, and a trainee who handles call buttons for you."),
+            FlightPlan(id: "TB206", name: "Swift Finale", aircraft: .swift, duration: 165,
+                       kinds: full, script: [.drink, .sick], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
+                       turbulence: bump(60) + bump(130), twist: .mealService, story: .finale, goal: .noMisses,
+                       whatsNew: "Meal service, two bumps and up to four problems at once."),
+            FlightPlan(id: "TB207", name: "Drink Service", aircraft: .current, duration: 135,
+                       kinds: cabin, script: [.drink], maxCap: 3, menu: cafe, cart: .service,
+                       story: .charter, goal: .serveAllOrders,
+                       whatsNew: "The drink cart rolls down the aisle. Squeezing past it is slow, and service means more spills."),
+            FlightPlan(id: "TB208", name: "Stuck Trolley", aircraft: .current, duration: 135,
+                       kinds: cabin, script: [.call], maxCap: 3, menu: cafe, cart: .sticks,
+                       twist: .boardingRush, story: .conference, goal: .quickService,
+                       whatsNew: "The cart can jam in the aisle. Push it free with a free hand."),
+            FlightPlan(id: "TB209", name: "Rush Hour", aircraft: .current, duration: 150,
+                       kinds: family, script: [.baby], maxCap: 3, menu: cafe, strolls: true, cart: .sticks,
+                       twist: .helper, story: .themePark, goal: .noMisses,
+                       whatsNew: "Walkers, kids and the cart share one aisle. The trainee takes the call buttons."),
+            FlightPlan(id: "TB210", name: "Late Service", aircraft: .current, duration: 150,
+                       kinds: full, script: [.drink], maxCap: 3, menu: dining, strolls: true, dozing: true, cart: .sticks,
+                       twist: .redEye, story: .lateCommute, goal: .noneWoken,
+                       whatsNew: "Night service with the cart. Every grumble wakes someone."),
+            FlightPlan(id: "TB211", name: "Crosswind", aircraft: .current, duration: 165,
+                       kinds: full, script: [.sick], maxCap: 3, menu: dining, combos: true, strolls: true, dozing: true,
+                       turbulence: bump(75), cart: .sticks, story: .honeymoon, goal: .vipHappy,
+                       whatsNew: "Turbulence during service: the cart parks while the seatbelt sign is on."),
+            FlightPlan(id: "TB212", name: "Coastal Finale", aircraft: .current, duration: 180,
+                       kinds: full, script: [.drink, .spill], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
+                       turbulence: bump(70) + bump(140), cart: .sticks, twist: .mealService, story: .finale, goal: .highScore(80),
+                       whatsNew: "Everything the coast has thrown at you, on one long flight.")
+        ],
+        unlockStars: 12)
+
+    // MARK: Route 3 – Transcontinental (B757-Longhaul, then A330-Voyager)
+
+    private static let bins: [OccurrenceKind] = [.call, .drink, .sick, .spill, .binJam]
+    private static let binsFull: [OccurrenceKind] = [.call, .drink, .sick, .spill, .binJam, .baby, .toilet]
+
+    static let route3 = Route(
+        id: 3, name: "Transcontinental", aircraftNames: "B757-Longhaul · A330-Voyager",
+        cities: ["Beacon Isle", "Highmoor", "Estrella", "Cinder Flats", "Northgate", "Redrock", "Silvermere",
+                 "Cobalt Ridge", "Amberlyn", "Frostholm", "Meridian", "Larkspur", "Aurora Bay"],
+        flights: [
+            FlightPlan(id: "TB301", name: "Long Body", aircraft: .longhaul, duration: 135,
+                       kinds: full, script: [.drink], maxCap: 3, menu: cafe, strolls: true,
+                       story: .band, goal: .serveAllOrders,
+                       whatsNew: "A long cabin with lavatories front, middle and back. Pick the nearer galley."),
+            FlightPlan(id: "TB302", name: "Overhead Trouble", aircraft: .longhaul, duration: 135,
+                       kinds: bins, script: [.binJam, .call], maxCap: 3, menu: cafe,
+                       twist: .boardingRush, story: .backpackers, goal: .noMisses,
+                       whatsNew: "Overhead bins pop open and block the aisle. Shut them with a free hand."),
+            FlightPlan(id: "TB303", name: "Full Bins", aircraft: .longhaul, duration: 150,
+                       kinds: binsFull, script: [.drink], maxCap: 3, menu: dining, combos: true, strolls: true,
+                       twist: .helper, story: .skiTeam, goal: .quickService,
+                       whatsNew: "Hungry athletes order combos while the trainee handles calls."),
+            FlightPlan(id: "TB304", name: "Night Crossing", aircraft: .longhaul, duration: 150,
+                       kinds: binsFull, script: [.baby], maxCap: 3, menu: cafe, strolls: true, dozing: true,
+                       twist: .redEye, story: .overnight, goal: .noneWoken,
+                       whatsNew: "A long, dark cabin. Keep everyone asleep."),
+            FlightPlan(id: "TB305", name: "Mountain Wave", aircraft: .longhaul, duration: 165,
+                       kinds: binsFull, script: [.sick], maxCap: 3, menu: dining, strolls: true, dozing: true,
+                       turbulence: bump(65, 9), story: .photographers, goal: .noMisses,
+                       whatsNew: "A long bump over the mountains shakes bins loose and upsets nervous flyers."),
+            FlightPlan(id: "TB306", name: "Longhaul Finale", aircraft: .longhaul, duration: 180,
+                       kinds: binsFull, script: [.drink, .binJam], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
+                       turbulence: bump(70) + bump(140), cart: .sticks, twist: .mealService, story: .director, goal: .vipHappy,
+                       whatsNew: "Meal service with the cart, a demanding director and up to four problems."),
+            FlightPlan(id: "TB307", name: "Two Aisles", aircraft: .voyager, duration: 135,
+                       kinds: full, script: [.drink, .call], maxCap: 3, menu: cafe,
+                       story: .tourGroup, goal: .serveAllOrders,
+                       whatsNew: "Two aisles: you can only cross between them at a galley, front or middle."),
+            FlightPlan(id: "TB308", name: "Twin Galleys", aircraft: .voyager, duration: 150,
+                       kinds: full, script: [.drink], maxCap: 3, menu: simple, strolls: true,
+                       twist: .galleyClosed, story: .weekend, goal: .quickService,
+                       whatsNew: "The forward galley is closed. Work from the middle galley instead."),
+            FlightPlan(id: "TB309", name: "Broken Cart", aircraft: .voyager, duration: 150,
+                       kinds: cabin, script: [.call], maxCap: 3, menu: cafe, cart: .breaks,
+                       twist: .boardingRush, story: .engineers, goal: .noMisses,
+                       whatsNew: "The cart can break down. Grab the toolkit from a galley and fix it."),
+            FlightPlan(id: "TB310", name: "Wide Awake", aircraft: .voyager, duration: 165,
+                       kinds: binsFull, script: [.baby], maxCap: 3, menu: cafe, strolls: true, dozing: true, cart: .breaks,
+                       twist: .redEye, story: .overnight, goal: .noneWoken,
+                       whatsNew: "Eight across in the dark. Noise travels across the whole row."),
+            FlightPlan(id: "TB311", name: "Ocean Chop", aircraft: .voyager, duration: 165,
+                       kinds: binsFull, script: [.sick], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
+                       turbulence: bump(60, 9) + bump(125), cart: .breaks, twist: .helper, story: .sportsTeam, goal: .highScore(80),
+                       whatsNew: "Up to four problems at once over open water, with the trainee's help."),
+            FlightPlan(id: "TB312", name: "Voyager Finale", aircraft: .voyager, duration: 195,
+                       kinds: binsFull, script: [.drink, .sick], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
+                       turbulence: bump(70) + bump(150, 8), cart: .breaks, twist: .mealService, story: .royal, goal: .vipHappy,
+                       whatsNew: "The last flight of the crossing, with a royal guest. Three stars masters the Voyager.")
+        ],
+        unlockStars: 36)
+
+    static let routes = [route1, route2, route3]
+
+    static func route(containing id: String) -> Route? { routes.first { $0.flights.contains { $0.id == id } } }
+
+    static func flight(after plan: FlightPlan) -> FlightPlan? {
+        guard let r = route(containing: plan.id), let i = r.flights.firstIndex(of: plan) else { return nil }
+        if i + 1 < r.flights.count { return r.flights[i + 1] }
+        guard let ri = routes.firstIndex(of: r), ri + 1 < routes.count else { return nil }
+        return routes[ri + 1].flights.first
+    }
+}
