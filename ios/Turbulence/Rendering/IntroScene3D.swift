@@ -13,6 +13,10 @@ final class IntroScene3D {
     /// The live view size and cabin insets (read every frame, so the last shot always matches the 2D view).
     private let frame: () -> (size: CGSize, insets: UIEdgeInsets)
     private let bins = SCNNode()
+    /// The 3D cabin (seats, people, walls, galleys) that fades out during the swoop…
+    private let solid = SCNNode()
+    /// …while this flat copy of the exact 2D art fades in, so the last frame is the game's own picture.
+    private let flat = SCNNode()
     private var done: (() -> Void)?
     private var finished = false
     /// The camera waits at the end of the three-quarter shot until the captain has finished (GDD §8b).
@@ -62,7 +66,7 @@ final class IntroScene3D {
         g.firstMaterial = mat(color)
         let n = SCNNode(geometry: g)
         n.position = p
-        (parent ?? scene.rootNode).addChildNode(n)
+        (parent ?? solid).addChildNode(n)
         return n
     }
 
@@ -76,13 +80,19 @@ final class IntroScene3D {
         let a0 = L.aisles[0]
 
         // hull, livery, wings and tail in the same place as the 2D art, so the last frame matches it
-        func slab(_ path: CGPath, depth: CGFloat, y: Double, _ color: UIColor) {
+        /// An extruded flat shape; `flatShaded` ones are unlit so their colour matches the 2D art exactly.
+        func slab(_ path: CGPath, depth: CGFloat, y: Double, _ color: UIColor, flatShaded: Bool = false) {
             let shape = SCNShape(path: UIBezierPath(cgPath: path), extrusionDepth: depth)
-            shape.firstMaterial = mat(color)
+            if flatShaded {
+                let m = SCNMaterial(); m.lightingModel = .constant; m.diffuse.contents = color
+                shape.firstMaterial = m
+            } else {
+                shape.firstMaterial = mat(color)
+            }
             let n = SCNNode(geometry: shape)
             n.eulerAngles.x = .pi / 2                  // shape y → model y (SceneKit z)
             n.position = v(0, y, 0)
-            scene.rootNode.addChildNode(n)
+            (flatShaded ? scene.rootNode : solid).addChildNode(n)
         }
         slab(Art.rr(12, 12, CGFloat(W - 19), CGFloat(H - 24), [80, 32, 32, 80]), depth: 20, y: -12, UIColor(hex: 0xC9CED5))
         slab(Art.rr(22, 22, CGFloat(W - 39), CGFloat(H - 44), [70, 24, 24, 70]), depth: 2, y: -1, Palette.cream)
@@ -94,14 +104,17 @@ final class IntroScene3D {
             func poly(_ pts: [(Double, Double)]) -> CGPath {
                 let p = CGMutablePath(); p.addLines(between: pts.map { CGPoint(x: $0.0, y: Double(Y($0.1))) }); p.closeSubpath(); return p
             }
-            slab(poly([(430 + dx, 24), (620 + dx, -380), (690 + dx, -380), (610 + dx, 24)]), depth: 6, y: -26, UIColor(hex: 0xA3AAB6))
-            slab(poly([(620 + dx, -380), (690 + dx, -380), (686 + dx, -362), (628 + dx, -362)]), depth: 6, y: -25, Palette.coral)
-            slab(poly([(898 + tx, 24), (972 + tx, -100), (1004 + tx, -100), (985 + tx, 40)]), depth: 6, y: -26, UIColor(hex: 0xA3AAB6))
+            slab(poly([(430 + dx, 24), (620 + dx, -380), (690 + dx, -380), (610 + dx, 24)]), depth: 6, y: -26, UIColor(hex: 0xA3AAB6), flatShaded: true)
+            slab(poly([(620 + dx, -380), (690 + dx, -380), (686 + dx, -362), (628 + dx, -362)]), depth: 6, y: -25, Palette.coral, flatShaded: true)
+            slab(poly([(898 + tx, 24), (972 + tx, -100), (1004 + tx, -100), (985 + tx, 40)]), depth: 6, y: -26, UIColor(hex: 0xA3AAB6), flatShaded: true)
+            let ey = Double(Y(-90))
+            slab(Art.rr(CGFloat(450 + dx), CGFloat(ey - 13), 98, 26, 13), depth: 4, y: -21, UIColor(hex: 0x5B6475), flatShaded: true)
+            slab(CGPath(rect: CGRect(x: 470 + dx, y: ey - 13, width: 3, height: 26), transform: nil), depth: 4, y: -20, Palette.coral, flatShaded: true)
             let engine = SCNNode(geometry: SCNCapsule(capRadius: 13, height: 98))
             engine.geometry?.firstMaterial = mat(UIColor(hex: 0x5B6475))
             engine.eulerAngles.z = .pi / 2
-            engine.position = v(499 + dx, -40, Double(Y(-90)))
-            scene.rootNode.addChildNode(engine)
+            engine.position = v(499 + dx, -40, ey)
+            solid.addChildNode(engine)
         }
 
         // carpet and the coral runner
@@ -123,7 +136,7 @@ final class IntroScene3D {
                 pane.geometry?.firstMaterial = glass
                 pane.position = v(row.x, 72, z)
                 pane.eulerAngles.y = Float(turn)
-                scene.rootNode.addChildNode(pane)
+                solid.addChildNode(pane)
             }
         }
 
@@ -170,7 +183,7 @@ final class IntroScene3D {
         for (i, p) in passengers.enumerated() {
             let node = person(shirt: Palette.shirt(p.archetype), skin: Palette.skins[p.skin], hair: Palette.hairs[p.hair])
             node.position = v(p.x + 1, 0, p.y)
-            scene.rootNode.addChildNode(node)
+            solid.addChildNode(node)
             if walkerIDs.contains(i) { board(node, to: p, delay: 0.3 + 0.9 * Double(walkerIDs.sorted().firstIndex(of: i) ?? 0)) }
         }
 
@@ -178,7 +191,7 @@ final class IntroScene3D {
         let midX = L.rows[L.rows.count / 2].x + 18
         let crew = person(shirt: Palette.teal, skin: UIColor(hex: 0xE9B892), hair: UIColor(hex: 0x3A2A20), standing: true)
         crew.position = v(midX, 0, a0)
-        scene.rootNode.addChildNode(crew)
+        solid.addChildNode(crew)
         let belt = box(3, 18, 3, at: v(-12, 64, 0), Palette.calm, parent: crew)
         belt.runAction(.repeatForever(.sequence([.rotateBy(x: 0.35, y: 0, z: 0, duration: 0.35), .rotateBy(x: -0.35, y: 0, z: 0, duration: 0.35)])))
         for side in [-1.0, 1.0] {
@@ -209,7 +222,9 @@ final class IntroScene3D {
         }
         // a ceiling over the aisles for the eye-level shots; it fades out with the bins
         box(CGFloat(W - 80), 3, CGFloat(H - 60), at: v(W / 2, 132, H / 2), UIColor(hex: 0xF1ECE3), parent: bins)
-        scene.rootNode.addChildNode(bins)
+        solid.addChildNode(bins)
+        scene.rootNode.addChildNode(solid)
+        buildFlat()
 
         // a bag goes up into a bin, and the lid snaps shut
         let binRow = L.rows[max(1, L.rows.count / 2 - 2)]
@@ -246,6 +261,27 @@ final class IntroScene3D {
         camera.wantsHDR = false
         cameraNode.camera = camera
         scene.rootNode.addChildNode(cameraNode)
+    }
+
+    /// The game's own art laid flat on the floor: the 2D cabin image and every passenger's 2D sprite, unlit.
+    private func buildFlat() {
+        func lay(_ image: UIImage, w: Double, h: Double, x: Double, z: Double, y: Double) {
+            let plane = SCNPlane(width: CGFloat(w), height: CGFloat(h))
+            let m = SCNMaterial()
+            m.lightingModel = .constant
+            m.diffuse.contents = image
+            plane.firstMaterial = m
+            let n = SCNNode(geometry: plane)
+            n.eulerAngles.x = -.pi / 2                 // lie flat, image top toward the nose side of the screen
+            n.position = v(x, y, z)
+            flat.addChildNode(n)
+        }
+        lay(Art.cabin(layout), w: layout.width, h: layout.height, x: layout.width / 2, z: layout.height / 2, y: 0.5)
+        for p in passengers {
+            lay(Art.passenger(p, sick: false), w: Double(Art.passengerSize.width), h: Double(Art.passengerSize.height), x: p.x, z: p.y, y: 1)
+        }
+        flat.opacity = 0
+        scene.rootNode.addChildNode(flat)
     }
 
     /// A rounded 3D person: body, head and hair on the back of the head (they face the nose, −x).
@@ -337,16 +373,23 @@ final class IntroScene3D {
 
     /// Debug: hold the cutscene at time t (launch with `-introAt 9.5`) to check framing and the 2D match.
     func freeze(at t: Double) {
-        cameraNode.runAction(.repeatForever(.customAction(duration: 0.1) { [weak self] _, _ in
-            guard let self else { return }
-            self.pose(at: t, self.keys())
-        }))
-        setLights(at: t)
+        cameraNode.runAction(.repeatForever(.customAction(duration: 0.1) { [weak self] _, _ in self?.apply(at: t) }))
+    }
+
+    /// Everything that follows the cutscene clock: camera, light, the bins fading, and the 3D → flat 2D blend.
+    private func apply(at t: Double) {
+        pose(at: t, keys())
+        setLights(at: t)                                            // flattens during the swoop
         bins.opacity = t < 4.4 ? 1 : max(0, 1 - CGFloat((t - 4.4) / 1.4))
+        func smooth(_ x: Double) -> CGFloat { let c = max(0, min(1, x)); return CGFloat(c * c * (3 - 2 * c)) }
+        flat.opacity = smooth((t - 8.2) / 1.4)                      // the game's own art fades in…
+        solid.opacity = 1 - smooth((t - 8.6) / 1.5)                 // …as the 3D cabin fades out
     }
 
     func play(done: @escaping () -> Void) {
         self.done = done
+        let size = frame().size
+        if size.width > 1 { scene.background.contents = Art.sky(size) }   // exactly the 2D sky at this screen size
         let ks = keys()
         pose(at: 0, ks)
         let total = Self.duration
@@ -363,9 +406,7 @@ final class IntroScene3D {
                 if self.held > 12 { self.released = true }          // never wait forever on the voice
             }
             let t = self.clock
-            self.pose(at: t, self.keys())
-            self.setLights(at: t)                                   // flattens during the swoop
-            self.bins.opacity = t < 4.4 ? 1 : max(0, 1 - CGFloat((t - 4.4) / 1.4))
+            self.apply(at: t)
             // hand over to 2D a little before the camera stops, so the crossfade overlaps the end of the move
             if t >= total - Self.handoffLead { DispatchQueue.main.async { self.finish() } }
         }, forKey: "intro")

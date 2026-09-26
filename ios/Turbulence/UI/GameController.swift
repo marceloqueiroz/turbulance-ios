@@ -106,11 +106,8 @@ final class GameController {
         screen = .intro
         introSubtitle = nil
         // the captain on the PA: chime, then each line spoken over the cabin speakers under its subtitle
-        let spokenCode = plan.id.map(String.init).joined(separator: " ")      // "T B 1 0 3"
-        let lines = [("Good day, and welcome aboard flight \(plan.id) to \(destination).",
-                      "Good day, and welcome aboard flight \(spokenCode), to \(destination)."),
-                     ("\(plan.story.name) with us today. Cabin crew, prepare for departure.",
-                      "\(plan.story.name) with us today. Cabin crew, prepare for departure.")]
+        let welcome = Story.captainWelcome(to: destination, flight: plan.id)
+        let lines = [(welcome, welcome), (plan.story.captainQuip, plan.story.captainQuip)]
         // each line starts when the previous one has finished; the camera holds until the last one is done
         func say(_ k: Int) {
             guard k < lines.count else { self.intro3D?.release(); return }

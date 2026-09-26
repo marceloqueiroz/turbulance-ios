@@ -93,6 +93,54 @@ struct Story: Equatable {
     static let royal = Story(name: "Royal guest", blurb: "The flight everyone will talk about.", bias: [:], vip: true)
 }
 
+/// What the captain says on the PA before takeoff (GDD §8b): light-hearted, never formal.
+extension Story {
+    /// A cheeky welcome; which one plays depends on the flight so repeats feel fresh.
+    static func captainWelcome(to destination: String, flight id: String) -> String {
+        let lines = [
+            "Hi folks, captain here. Next stop \(destination). Probably. I'm pretty sure it's that way.",
+            "Good news, everyone: we have wings! Even better news: they're taking us to \(destination).",
+            "Captain speaking. I've read the manual twice, so buckle up for \(destination)!",
+            "Welcome aboard! Please keep your hands, feet and snacks inside the plane all the way to \(destination).",
+            "Hello from the pointy end! We'll be in \(destination) before you finish your peanuts. Maybe.",
+            "Folks, the weather in \(destination) is lovely, and so are all of you. Mostly."
+        ]
+        return lines[id.unicodeScalars.reduce(0) { $0 + Int($1.value) } % lines.count]
+    }
+
+    /// A joke about today's passenger group, ending with the cue for the crew.
+    var captainQuip: String {
+        switch name {
+        case Story.commuters.name: return "Lots of commuters this morning, so the coffee will vanish fast. Crew, brace for refills!"
+        case Story.weekend.name: return "Everyone's in weekend mode. Please don't recline all the way into Monday."
+        case Story.family.name: return "We've got plenty of tiny passengers today. Crew, may the toys be with you."
+        case Story.business.name: return "Lots of laptops out. The Wi-Fi is imaginary. Good luck, crew."
+        case Story.skiTrip.name: return "The ski club is on board. Please do not practise your moves in the aisle."
+        case Story.celebrity.name: return "We have a celebrity on board today. Please act normal. Crew, that includes you."
+        case Story.surfClub.name: return "The surf club is with us. If you see a wave in the aisle, that's just a spilled drink."
+        case Story.wedding.name: return "Congratulations to the wedding party! Please save the dancing for the ground."
+        case Story.earlyBirds.name: return "It's very early, so if anyone snores, we'll count it as a lullaby."
+        case Story.sportsTeam.name: return "The team is on board and they are hungry. Crew, hide the snacks. Kidding. Serve the snacks."
+        case Story.charter.name: return "Beach holiday, everyone! Sunscreen goes on at the hotel, not in row twelve."
+        case Story.conference.name: return "Conference crowd today. Please keep your slide decks under a hundred pages."
+        case Story.themePark.name: return "Next stop, the theme park! This flight has no loops. I checked."
+        case Story.lateCommute.name: return "Last flight home, folks. Pyjamas are optional but encouraged."
+        case Story.honeymoon.name: return "Our honeymooners are up front. Crew, keep the romance and the champagne flowing."
+        case Story.finale.name: return "Full house today! If you can't find your seat, try sitting in the one with your name on it."
+        case Story.band.name: return "The band is on tour with us. No drum solos on the tray tables, please."
+        case Story.backpackers.name: return "Lots of backpackers today. If a bin won't close, it's not the bin's fault."
+        case Story.skiTeam.name: return "The ski team is aboard and they eat like champions. Crew, warm up that oven."
+        case Story.overnight.name: return "It's a long night flight. Lights are dimmed, so please whisper your complaints."
+        case Story.photographers.name: return "Our photographers are with us. Please smile, you're probably in a picture."
+        case Story.director.name: return "A famous film director is on board. Crew, this is your big audition."
+        case Story.tourGroup.name: return "Big tour group today! Please follow the person with the flag, but not into the cockpit."
+        case Story.engineers.name: return "The engineers' convention is here. Please don't take the plane apart to see how it works."
+        case Story.royal.name: return "We have royalty on board! Crew, your best manners, and your best napkin folding."
+        default: return "Crew, the cabin is all yours. Let's make it a smooth one!"
+        }
+    }
+}
+
 /// One flight (level): what can happen on it and when (GDD §6, §6a, §9a).
 struct FlightPlan: Identifiable, Equatable {
     let id: String                     // flight code, e.g. "TB101"
