@@ -64,7 +64,7 @@ final class Synth {
         }
         let u = AVSpeechUtterance(string: text)
         u.voice = captainVoice
-        u.rate = 0.46
+        u.rate = 0.5
         u.pitchMultiplier = 0.88
         speech.write(u) { [weak self] buffer in
             guard let self, let pcm = buffer as? AVAudioPCMBuffer else { return }

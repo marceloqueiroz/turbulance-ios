@@ -113,7 +113,7 @@ final class GameController {
             guard k < lines.count else { self.intro3D?.release(); return }
             introSubtitle = "Captain: " + lines[k].0
             synth.captain(say: lines[k].1) { [weak self] in
-                self?.scene.run(.sequence([.wait(forDuration: 0.5), .run { say(k + 1) }]), withKey: "introCaptions")
+                self?.scene.run(.sequence([.wait(forDuration: 0.25), .run { say(k + 1) }]), withKey: "introCaptions")
             }
         }
         scene.run(.sequence([.wait(forDuration: 0.4), .run { [weak self] in self?.synth.play(.paChime) },

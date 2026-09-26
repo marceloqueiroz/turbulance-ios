@@ -20,7 +20,7 @@ final class IntroScene3D {
     private var done: (() -> Void)?
     private var finished = false
     /// The camera waits at the end of the three-quarter shot until the captain has finished (GDD §8b).
-    static let holdAt = 7.6
+    static let holdAt = 6.8
     private var released = false
     private var clock = 0.0
     private var held = 0.0
@@ -29,7 +29,7 @@ final class IntroScene3D {
     /// Lets the camera move on from the hold: call when the captain has finished speaking.
     func release() { released = true }
     /// Unhurried on purpose: Tap to skip is always there (GDD §8b).
-    static let duration = 11.0
+    static let duration = 9.4
     /// The 2D view starts fading in this long before the camera stops, so the two overlap.
     static let handoffLead = 0.8
     private let lights = SCNNode()
@@ -202,7 +202,7 @@ final class IntroScene3D {
         let seat = L.jumpSeats.first { $0.aisle == 0 } ?? JumpSeat(x: 72, aisle: 0)
         let walkTime = (midX - seat.x) / 110
         crew.runAction(.sequence([
-            .wait(duration: 7.0),
+            .wait(duration: 5.6),
             .run { _ in belt.removeAllActions(); belt.isHidden = true },
             .rotateTo(x: 0, y: 0, z: 0, duration: 0.2, usesShortestUnitArc: true),
             .move(to: v(seat.x, 0, a0), duration: walkTime),
@@ -345,7 +345,7 @@ final class IntroScene3D {
         return [
             Key(t: 0, pos: v(66, 86, a0 - 4), pitch: -0.2, yaw: -.pi / 2, fov: 62),        // over the heads, down the aisle
             Key(t: 4.2, pos: v(200, 88, a0 + 6), pitch: -0.22, yaw: -.pi / 2 + 0.06, fov: 58),
-            Key(t: 7.6, pos: v(midX - 190, 230, a0 + 60), pitch: -0.78, yaw: -.pi / 2 + 0.45, fov: 52),
+            Key(t: Self.holdAt, pos: v(midX - 190, 230, a0 + 60), pitch: -0.78, yaw: -.pi / 2 + 0.45, fov: 52),
             topDown()
         ]
     }
@@ -365,7 +365,7 @@ final class IntroScene3D {
 
     /// Light for time t: warm with shadows early, flattening during the swoop to match the flat 2D art.
     private func setLights(at t: Double) {
-        let k = CGFloat(max(0, min(1, (t - 7.6) / (Self.duration - 7.6))))
+        let k = CGFloat(max(0, min(1, (t - Self.holdAt) / (Self.duration - Self.holdAt))))
         ambientLight?.intensity = 520 + (1150 - 520) * k
         sunLight?.intensity = 850 + (90 - 850) * k
         lampLights.forEach { $0.intensity = 260 * (1 - k) }
@@ -382,8 +382,8 @@ final class IntroScene3D {
         setLights(at: t)                                            // flattens during the swoop
         bins.opacity = t < 4.4 ? 1 : max(0, 1 - CGFloat((t - 4.4) / 1.4))
         func smooth(_ x: Double) -> CGFloat { let c = max(0, min(1, x)); return CGFloat(c * c * (3 - 2 * c)) }
-        flat.opacity = smooth((t - 8.2) / 1.4)                      // the game's own art fades in…
-        solid.opacity = 1 - smooth((t - 8.6) / 1.5)                 // …as the 3D cabin fades out
+        flat.opacity = smooth((t - 7.3) / 1.2)                      // the game's own art fades in…
+        solid.opacity = 1 - smooth((t - 7.6) / 1.3)                 // …as the 3D cabin fades out
     }
 
     func play(done: @escaping () -> Void) {
