@@ -40,6 +40,12 @@ struct CabinRow: Equatable {
     let seats: [SeatSpot]
 }
 
+/// A fold-down crew seat; the crew must be buckled in one during turbulence (GDD §5b).
+struct JumpSeat: Equatable {
+    let x: Double
+    let aisle: Int
+}
+
 struct Lavatory: Equatable {
     let doorX: Double
     let aisle: Int
@@ -104,6 +110,7 @@ struct CabinLayout: Equatable {
     let galleyFloors: [ClosedRange<Double>]
     let curtainX: Double?
     let aftX: Double
+    let jumpSeats: [JumpSeat]
 
     var minX: Double { 70 }
     var maxX: Double { aftX + 96 }
@@ -168,6 +175,7 @@ struct CabinLayout: Equatable {
         var blocks: [CabinBlock] = []
         var bins: [SupplyBin] = []
         var lavs: [Lavatory] = []
+        var jumpXs: [Double] = [72]                 // forward, by the flight deck door
         var crossovers: [Double] = aisles.count > 1 ? [170] : []
         var galleyFloors: [ClosedRange<Double>] = [56...212]
         let last = aisles.count - 1
@@ -225,11 +233,13 @@ struct CabinLayout: Equatable {
                                  SupplyBin(.trash, x: gx + 66, y: (top + bottom) / 2 + 4, aisle: a)]
                     }
                     crossovers.append(gx + 48)
+                    jumpXs.append(gx + 48)
                     galleyFloors.append((gx + 4)...(gx + 92))
                 } else {
                     blocks.append(CabinBlock(kind: .lavatory, x: gx + 14, y: 30, w: 68, h: topAisle - 72, label: "LAV"))
                     blocks.append(CabinBlock(kind: .closet, x: gx + 14, y: bottomAisle + 62, w: 68, h: height - 30 - (bottomAisle + 62)))
                     lavs.append(Lavatory(doorX: gx + 34, aisle: 0))
+                    jumpXs.append(gx + 62)
                 }
                 x += 96
             }
@@ -256,9 +266,12 @@ struct CabinLayout: Equatable {
                  SupplyBin(.trash, x: aftX + 56, y: by, aisle: closetAisle),
                  SupplyBin(item: .plunger, x: aftX + 92, y: by, aisle: closetAisle)]
 
+        jumpXs.append(aftX + 80)                    // aft, past the lavatory
+        let jumps = jumpXs.flatMap { x in aisles.indices.map { JumpSeat(x: x, aisle: $0) } }
+
         return CabinLayout(aircraft: aircraft, width: aftX + 132, height: height, aisles: aisles, rows: rows, bins: bins,
                            lavatories: lavs, blocks: blocks, crossovers: crossovers, galleyFloors: galleyFloors,
-                           curtainX: curtainX, aftX: aftX)
+                           curtainX: curtainX, aftX: aftX, jumpSeats: jumps)
     }
 
     static let comet = build(.comet, seatBlocks: [2, 2], premiumRows: 0, economyRows: 12, fwdLav: false)

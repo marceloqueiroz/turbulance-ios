@@ -84,6 +84,8 @@ struct HUDBar: View {
                 if game.seatbelt { SeatbeltSign() }
             }
             Spacer(minLength: 8)
+            if game.seatPrompt != .none { SeatPromptPill(prompt: game.seatPrompt) }
+            Spacer(minLength: 8)
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("SATISFACTION").font(rounded(9, .heavy)).tracking(1).foregroundStyle(Color.muted)
@@ -116,6 +118,26 @@ struct HUDBar: View {
     }
 }
 
+/// "Take your seat" (blinking coral) until the crew is buckled into a jump seat (GDD §5b).
+struct SeatPromptPill: View {
+    let prompt: GameController.SeatPrompt
+    @State private var on = true
+    var body: some View {
+        let buckled = prompt == .buckled
+        HStack(spacing: 6) {
+            Image(systemName: buckled ? "checkmark.circle.fill" : "chair.fill").font(.system(size: 13, weight: .bold))
+            Text(buckled ? "BUCKLED IN" : "TAKE YOUR SEAT").font(rounded(12, .heavy)).tracking(1)
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 12).padding(.vertical, 6)
+        .fixedSize()
+        .background(buckled ? Color.teal : Color.coral, in: Capsule())
+        .opacity(buckled || on ? 1 : 0.5)
+        .onAppear { withAnimation(.easeInOut(duration: 0.4).repeatForever()) { on = false } }
+        .transition(.scale.combined(with: .opacity))
+    }
+}
+
 /// Lit seatbelt sign shown while turbulence is coming or happening.
 struct SeatbeltSign: View {
     @State private var lit = true
@@ -126,6 +148,7 @@ struct SeatbeltSign: View {
         }
         .foregroundStyle(Color.navy)
         .padding(.horizontal, 9).padding(.vertical, 5)
+        .fixedSize()
         .background(Color(uiColor: Palette.calm), in: Capsule())
         .opacity(lit ? 1 : 0.55)
         .onAppear { withAnimation(.easeInOut(duration: 0.6).repeatForever()) { lit = false } }

@@ -47,6 +47,7 @@ final class CabinScene: SKScene {
         static let hands = SKTexture(image: Art.stepImage(.hands))
         static let bell = SKTexture(image: Art.bell())
         static let trash = SKTexture(image: Art.trashImage())
+        static let order = SKTexture(image: Art.notepad())
         static let suitcase = SKTexture(image: Art.suitcase())
         static let crown = SKTexture(image: Art.crown())
         private static var combos: [String: SKTexture] = [:]
@@ -55,6 +56,7 @@ final class CabinScene: SKScene {
             case .item(let item): return items[item]!
             case .hands: return hands
             case .trash: return trash
+            case .order: return order
             case .combo(let list):
                 let key = list.map(\.rawValue).joined(separator: "+")
                 if let t = combos[key] { return t }
@@ -75,6 +77,7 @@ final class CabinScene: SKScene {
     private var flightNodes: [SKNode] = []          // per-flight overlays (closed galley)
     private let dimNode = SKSpriteNode(color: UIColor(hex: 0x0B1330), size: .zero)
     private let helperNode = CrewNode()
+    private var jumpGlows: [SKShapeNode] = []
 
     /// Model point (y down) → world node point (y up).
     func pt(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: x, y: worldH - y) }
@@ -182,6 +185,15 @@ final class CabinScene: SKScene {
             }
         }
         dimNode.size = CGSize(width: worldW, height: worldH)
+        jumpGlows.forEach { $0.removeFromParent() }
+        jumpGlows = layout.jumpSeats.map { j in
+            let g = SKShapeNode(rect: CGRect(x: -14, y: -9, width: 28, height: 18), cornerRadius: 5)
+            g.strokeColor = Palette.calm; g.lineWidth = 2.5; g.glowWidth = 3; g.fillColor = Palette.calm.withAlphaComponent(0.18)
+            g.position = pt(j.x, layout.aisles[j.aisle] - 30)
+            g.zPosition = 5.6; g.isHidden = true
+            world.addChild(g)
+            return g
+        }
         crewNode.worldWidth = worldW
         layoutWorld()
     }
@@ -351,6 +363,15 @@ final class CabinScene: SKScene {
                 ring.strokeColor = UIColor(hex: 0x6FD08C); ring.glowWidth = 3 + CGFloat(sin(clock * 6)) * 1.5; ring.isHidden = false
             }
         }
+        // jump seats light up while the seatbelt sign is on; the nearest one pulses until you're seated
+        let nearest = sim.crew.seated == nil ? sim.nearestJumpSeat() : nil
+        for (i, g) in jumpGlows.enumerated() {
+            g.isHidden = !sim.seatbeltOn
+            let pulse = i == nearest ? 1 + CGFloat(sin(clock * 9)) * 0.18 : 1
+            g.setScale(pulse)
+            g.strokeColor = sim.crew.seated == i ? Palette.teal : Palette.calm
+        }
+
         if let h = sim.helper {
             var c = Crew()
             c.x = h.x; c.y = sim.layout.aisles[h.aisle]; c.face = h.face; c.walk = h.walk
@@ -445,6 +466,10 @@ final class CabinScene: SKScene {
             shake = max(shake, 0.2)
             burst(.puff, x: x, y: y, count: 6, colors: [UIColor(hex: 0xC8BCAA, alpha: 0.9)])
             floatText("Whoa!", x: x, y: y - 20, color: Palette.urgent)
+        case let .crewStumble(x, y):
+            shake = max(shake, 0.4)
+            burst(.puff, x: x, y: y, count: 8, colors: [UIColor(hex: 0xC8BCAA, alpha: 0.9)])
+            floatText("−5", x: x, y: y - 24, color: Palette.critical)
         case let .wokeUp(x, y):
             burst(.spark, x: x, y: y - 6, count: 4, colors: [Palette.urgent])
             floatText("−1", x: x, y: y - 18, color: Palette.urgent)
@@ -730,6 +755,7 @@ final class CrewNode: SKNode {
     private let busyBG = SKShapeNode(circleOfRadius: 22)
     private let busyFG = SKShapeNode()
     private let bubbleNode = SKNode()
+    private let strap = SKShapeNode(rect: CGRect(x: -11, y: -2, width: 22, height: 4), cornerRadius: 2)
     private var shownBubble: String?
     var worldWidth = 1000.0
 
@@ -781,6 +807,9 @@ final class CrewNode: SKNode {
             addChild(node)
         }
 
+        strap.fillColor = Palette.calm; strap.strokeColor = Palette.navy; strap.lineWidth = 1
+        strap.zPosition = 2.5; strap.isHidden = true
+        addChild(strap)
         busyBG.strokeColor = Art.white(0.85); busyBG.lineWidth = 4; busyBG.fillColor = .clear
         busyFG.strokeColor = Palette.teal; busyFG.lineWidth = 4
         busyBG.zPosition = 2; busyFG.zPosition = 2
@@ -814,6 +843,7 @@ final class CrewNode: SKNode {
         torso.xScale = (face < 0 ? 1 : -1) / sq
         torso.yScale = sq
 
+        strap.isHidden = c.seated == nil               // buckled into a jump seat
         // the tray: up to two items above the crew member's head (the HUD no longer repeats this)
         for k in 0..<heldNodes.count {
             if k < c.tray.count {

@@ -316,16 +316,76 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertEqual(sim.turbulence, .none)
     }
 
-    func testTurbulenceSlowsTheCrew() {
-        let calm = runningSim(), bumpy = runningSim()
-        bumpy.turbulenceSchedule = [TurbulenceBump(start: 6, duration: 30, intensity: 0.375)]
-        for sim in [calm, bumpy] {
-            step(sim, seconds: 7)
-            sim.crew.x = 240
-            sim.crew.target = CrewTarget(x: 700, action: .none)
-            step(sim, seconds: 0.5)
-        }
-        XCTAssertEqual(bumpy.crew.x - 240, (calm.crew.x - 240) * Tuning.turbulenceCrewFactor, accuracy: 6)
+    // MARK: Crew seating in turbulence (GDD §5b)
+
+    func testHeavyTurbulenceWarnsLonger() {
+        XCTAssertEqual(TurbulenceBump(start: 0, duration: 5, intensity: 0.375).warningTime, 6)
+        XCTAssertEqual(TurbulenceBump(start: 0, duration: 5, intensity: 1).warningTime, 9)
+    }
+
+    func testCrewBucklesInAndStaysSeatedUntilClear() {
+        let sim = runningSim()
+        sim.turbulenceSchedule = [TurbulenceBump(start: 20, duration: 4, intensity: 0.375)]
+        step(sim, seconds: 14.5)
+        XCTAssertEqual(sim.turbulence, .warning, "about 6 s of warning")
+        let j = sim.layout.jumpSeats[sim.nearestJumpSeat()!]
+        sim.tap(x: j.x, y: sim.jumpSeatY(j))
+        step(sim, seconds: 6)
+        XCTAssertNotNil(sim.crew.seated)
+        XCTAssertGreaterThan(sim.turbulenceIntensity, 0)
+        XCTAssertEqual(sim.stats.crewStumbles, 0)
+        _ = sim.drainEvents()
+        sim.tap(x: 400, y: 180)
+        step(sim, seconds: 0.5)
+        XCTAssertTrue(sim.drainEvents().contains(.nope), "stay seated while it's bumpy")
+        XCTAssertNotNil(sim.crew.seated)
+        step(sim, seconds: 4)
+        XCTAssertEqual(sim.turbulence, .none)
+        sim.tap(x: 400, y: 180)
+        step(sim, seconds: 3)
+        XCTAssertNil(sim.crew.seated)
+        XCTAssertEqual(sim.crew.x, 400, accuracy: 0.5, "unbuckles, then goes where you tapped")
+        XCTAssertTrue(sim.goalMet || sim.plan.goal != .seatedEveryBump)
+    }
+
+    func testStandingCrewStumblesAndDropsTheTray() {
+        let sim = runningSim()
+        sim.turbulenceSchedule = [TurbulenceBump(start: 12, duration: 6, intensity: 0.375)]
+        sim.crew.x = sim.layout.rows[5].x
+        sim.crew.tray = [.juice, .usedBag]
+        step(sim, seconds: 12.1)
+        XCTAssertEqual(sim.stats.crewStumbles, 1)
+        XCTAssertEqual(sim.crew.tray, [.usedBag], "drinks drop, the tied-off bag stays")
+        XCTAssertTrue(sim.occurrences.contains { $0.kind == .spill }, "the juice spills")
+        step(sim, seconds: 3.1)
+        XCTAssertEqual(sim.stats.crewStumbles, 2, "keeps stumbling until seated")
+    }
+
+    func testFusesRunAtHalfSpeedAndSpawnsWait() {
+        let sim = runningSim()
+        sim.turbulenceSchedule = [TurbulenceBump(start: 10, duration: 20, intensity: 0.375)]
+        step(sim, seconds: 10.5)
+        let id = sim.addSpill(row: 3)
+        let before = sim.occurrences.count
+        step(sim, seconds: 10)
+        XCTAssertEqual(sim.occurrences.first { $0.id == id }!.age, 5, accuracy: 0.1)
+        XCTAssertEqual(sim.occurrences.count, before, "no new problems while strapped in")
+    }
+
+    // MARK: Orders (GDD §5a): hidden until taken
+
+    func testOrderIsHiddenUntilYouTakeIt() {
+        let sim = runningSim()
+        let pi = sim.passengers.firstIndex { $0.reach == 0 && $0.row >= 2 }!
+        let p = sim.passengers[pi]
+        let id = sim.addAtSeat(.drink, passenger: pi, steps: [.order, .item(.juice)], fuse: 26)
+        XCTAssertEqual(sim.occurrences.first { $0.id == id }?.need, .order)
+        sim.crew.x = p.x
+        sim.crew.tray = [.water, .snack]                // a full tray doesn't stop you taking an order
+        sim.tap(x: p.x, y: p.y)
+        step(sim, seconds: 1)
+        XCTAssertEqual(sim.occurrences.first { $0.id == id }?.need, .item(.juice))
+        XCTAssertEqual(sim.crew.tray, [.water, .snack])
     }
 
     func testStandingPassengerStumblesWhenTurbulenceHits() {

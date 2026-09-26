@@ -28,6 +28,9 @@ final class GameController {
     var muted = false
     var result: FlightResult?
     var seatbelt = false
+    /// "Take your seat" while the sign is on and the crew is standing; "buckled" once seated.
+    var seatPrompt: SeatPrompt = .none
+    enum SeatPrompt: Equatable { case none, takeSeat, buckled }
     var plan = Campaign.route1.flights[0]
     var largeText = false
 
@@ -156,6 +159,10 @@ final class GameController {
                 if haptics { jolt.impactOccurred(intensity: min(1, 0.5 + intensity)) }
             }
         case .stumble: synth.play(.whoa)
+        case .crewStumble:
+            synth.play(.fail)
+            if haptics { jolt.impactOccurred(intensity: 1) }
+        case .buckled: synth.play(.pick)
         case .wokeUp: break
         case .cart(let out): if out { synth.play(.chime) }
         case .toast(let text):
@@ -213,6 +220,8 @@ final class GameController {
         if phase != phaseText { phaseText = phase }
         let isLanding = sim.phase == .landing
         if isLanding != landing { landing = isLanding }
+        let prompt: SeatPrompt = !sim.seatbeltOn ? .none : sim.crew.seated != nil ? .buckled : .takeSeat
+        if prompt != seatPrompt { seatPrompt = prompt }
         let sat = Int(sim.satisfaction.rounded())
         if sat != satisfaction { satisfaction = sat }
     }

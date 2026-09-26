@@ -39,8 +39,15 @@ enum Tuning {
     static let toiletDrainPerSecond = 0.1
 
     // Turbulence (GDD §5a): seatbelt chime + warning, then the cabin shakes.
-    static let turbulenceSchedule = [TurbulenceBump(start: 55, duration: 7, intensity: 0.375)]
-    static let turbulenceWarning = 3.0
+    static let turbulenceSchedule = [TurbulenceBump(start: 60, duration: 7, intensity: 0.375)]
+    static let turbulenceWarning = 6.0          // light; heavy bumps warn for 9 s (GDD §5b)
+    static let heavyTurbulenceWarning = 9.0
+    static let turbulenceFuseRate = 0.5         // everyone's strapped in: problems escalate at half speed
+    static let buckleDuration = 0.5
+    static let unbuckleDuration = 0.3
+    static let crewStumblePenalty = 5.0
+    static let crewKnockdown = 1.5
+    static let crewStumbleEvery = 3.0
     static let turbulenceCrewFactor = 0.6
     static let turbulenceSpawnBoost = 1.6
     static let stumbleSpillChance = 0.5
@@ -111,12 +118,16 @@ enum Step: Equatable {
     case combo([Item])       // bring all of these on the tray at once
     case hands               // a free hand (call buttons, bins, carts, bags)
     case trash               // bin the used sick bag you're carrying
+    case order               // go and take their order; the icon only shows the item afterwards
 }
 
 struct TurbulenceBump: Equatable {
     let start: Double
     let duration: Double
     let intensity: Double          // 1 = heavy (≈8 pt shake), 0.375 = light (≈3 pt)
+    var warning: Double? = nil     // default: 6 s light, 9 s heavy
+
+    var warningTime: Double { warning ?? (intensity >= 0.7 ? Tuning.heavyTurbulenceWarning : Tuning.turbulenceWarning) }
 }
 
 enum Turbulence: Equatable { case none, warning, active(intensity: Double) }
@@ -254,6 +265,7 @@ enum TargetAction: Equatable {
     case bin(Int)
     case clear(occurrence: Int)          // mop, shut a bin, stow a bag, push/fix the cart, plunge
     case seat(row: Int, seat: Int)
+    case jumpSeat(Int)
 }
 
 struct CrewTarget: Equatable {
@@ -265,6 +277,9 @@ struct CrewTarget: Equatable {
 enum BusyTask: Equatable {
     case pick(bin: Int)
     case apply(occurrence: Int)
+    case buckle(seat: Int)
+    case unbuckle
+    case knockedDown
 }
 
 struct BusyAction: Equatable {
@@ -283,6 +298,9 @@ struct Crew {
     var busy: BusyAction?
     /// What's on the tray (up to Tuning.trayCapacity).
     var tray: [Item] = []
+    /// Buckled into this jump seat (GDD §5b).
+    var seated: Int?
+    var stumbleTimer = 0.0
     var face = -1.0
     var walk = 0.0
     var wading = false
@@ -304,6 +322,7 @@ struct FlightStats {
     var failed = 0
     var woken = 0
     var ordersMissed = 0
+    var crewStumbles = 0
     var vipFailed = false
     var fixTimes: [Double] = []
     var averageFix: Double? { fixTimes.isEmpty ? nil : fixTimes.reduce(0, +) / Double(fixTimes.count) }
@@ -324,6 +343,8 @@ enum SimEvent: Equatable {
     case seatbelt(on: Bool)
     case turbulence(intensity: Double)     // 0 = calm again
     case stumble(x: Double, y: Double)
+    case crewStumble(x: Double, y: Double)
+    case buckled(Bool)
     case wokeUp(x: Double, y: Double)
     case cart(out: Bool)
 }
@@ -357,6 +378,7 @@ final class FlightSimulation {
     private var hinted = Set<String>()
     private var nextID = 1
     private var bagQueue: [Int] = []           // sick occurrences whose used bag is on the tray
+    private var deferredSpawns = 0             // problems held back while the cabin is strapped in
     private var rng: SplitMix64
     private var events: [SimEvent] = []
 
@@ -414,6 +436,7 @@ final class FlightSimulation {
         case .vipHappy: return !stats.vipFailed
         case .quickService: return (stats.averageFix ?? 99) < 10 && stats.resolved >= 4
         case .highScore(let s): return satisfaction >= Double(s)
+        case .seatedEveryBump: return stats.crewStumbles == 0
         }
     }
 
@@ -459,8 +482,9 @@ final class FlightSimulation {
         updateStrolls(dt: dt)
         updateSleep(dt: dt)
 
+        let fuseDt = turbulenceIntensity > 0 ? dt * Tuning.turbulenceFuseRate : dt
         for i in occurrences.indices where !occurrences[i].dead && !occurrences[i].failed {
-            occurrences[i].age += dt
+            occurrences[i].age += fuseDt
             occurrences[i].life += dt
             let f = occurrences[i].age / occurrences[i].fuse
             occurrences[i].state = Escalation.forFraction(f)
@@ -485,6 +509,12 @@ final class FlightSimulation {
         guard phase == .cruise else { return }
         spawnTimer -= dt * (turbulenceIntensity > 0 ? Tuning.turbulenceSpawnBoost : 1)
         guard spawnTimer <= 0 else { return }
+        if turbulenceIntensity > 0 {
+            // everyone's strapped in: new problems wait and arrive as a rush when it clears (GDD §5b)
+            deferredSpawns = min(2, deferredSpawns + 1)
+            spawnTimer = random(in: Tuning.spawnInterval)
+            return
+        }
         let cap = plan.cap(at: t) + (mealServiceOn ? 1 : 0)
         if activeCount < cap {
             let kind = script.isEmpty ? rollKind() : script.removeFirst()
@@ -549,7 +579,7 @@ final class FlightSimulation {
             addSick(passenger: pi)
             let p = passengers[pi]
             events.append(.spawned(.sick, x: p.x, y: p.y))
-            hint("sick", "\(p.label) is feeling sick. Bring a towel, then bin the used bag and bring water.")
+            hint("sick", "\(p.label) is feeling sick. Their icon shows what they need next, one step at a time.")
             curtainHint(p)
         case .call, .drink:
             let candidates = freePassengers { !$0.asleep }
@@ -561,8 +591,8 @@ final class FlightSimulation {
                 addAtSeat(.call, passenger: pi, steps: [.hands], fuse: 16)
                 hint("call", "Call button at \(p.label). Walk over and tap them. It just needs a free hand.")
             } else {
-                addAtSeat(.drink, passenger: pi, steps: [orderStep()], fuse: 26)
-                hint("drink", "\(p.label) wants something. The icon shows what to bring from the galley.")
+                addAtSeat(.drink, passenger: pi, steps: [.order, orderStep()], fuse: 26)
+                hint("drink", "Someone wants to order. Walk over and take their order, then the icon shows what to bring.")
             }
             events.append(.spawned(kind, x: p.x, y: p.y))
             curtainHint(p)
@@ -572,7 +602,7 @@ final class FlightSimulation {
             let pi = candidates[randomInt(candidates.count)]
             addAtSeat(.baby, passenger: pi, steps: [.item(.toy)], fuse: 26)
             events.append(.spawned(.baby, x: passengers[pi].x, y: passengers[pi].y))
-            hint("baby", "A baby is crying and keeping the rows around them awake. Bring a toy from the galley.")
+            hint("baby", "A baby is crying and keeping the rows around them awake. Check the icon for what will calm them.")
         case .spill, .binJam, .carryOn:
             var candidates: [(Int, Int)] = []
             for r in 1..<layout.rows.count { for a in layout.aisles.indices where obstacleAllowed(row: r, aisle: a) { candidates.append((r, a)) } }
@@ -605,7 +635,7 @@ final class FlightSimulation {
             if kind == .stuckCart {
                 hint("stuckCart", "The drink cart is stuck! Tap it with a free hand to push it free.")
             } else {
-                hint("brokenCart", "The drink cart broke down. Grab the toolkit from a galley and fix it.")
+                hint("brokenCart", "The drink cart broke down. The icon shows what fixes it.")
             }
         }
         return true
@@ -706,7 +736,7 @@ final class FlightSimulation {
         add(o)
         lavUsesSinceClog[li] = 0
         events.append(.spawned(.toilet, x: lav.doorX, y: layout.aisles[lav.aisle]))
-        hint("toilet", "A lavatory is clogged! Grab the plunger from the back closet. Nobody can use it until it's fixed.")
+        hint("toilet", "A lavatory is clogged! Nobody can use it until it's fixed. The icon shows what you need.")
         return o.id
     }
 
@@ -736,7 +766,7 @@ final class FlightSimulation {
         switch occurrences[i].need {
         case .item(let it): take(it)
         case .combo(let items): items.forEach(take)
-        case .hands, .trash: break
+        case .hands, .trash, .order: break
         }
         let o = occurrences[i]
         if o.kind.isCart { cart?.stuck = false }
@@ -789,6 +819,8 @@ final class FlightSimulation {
             say("Bin the bag first")
             events.append(.nope)
             return
+        case .order:
+            break                               // taking an order needs nothing
         case .item(let need):
             guard crew.tray.contains(need) else { missing([need]); return }
         case .combo(let items):
@@ -930,7 +962,7 @@ final class FlightSimulation {
         var next: Turbulence = .none
         if phase == .cruise {
             for b in turbulenceSchedule {
-                if t >= b.start - Tuning.turbulenceWarning && t < b.start { next = .warning }
+                if t >= b.start - b.warningTime && t < b.start { next = .warning }
                 if t >= b.start && t < b.start + b.duration { next = .active(intensity: b.intensity) }
             }
         }
@@ -940,17 +972,47 @@ final class FlightSimulation {
         switch next {
         case .warning:
             events.append(.seatbelt(on: true))
-            emitToast("Seatbelt sign on. Turbulence ahead, so passengers are heading back to their seats.")
+            emitToast("Cabin crew, take your seats! Tap a jump seat (they light up) before the turbulence hits.")
             sendStrollersBack()
         case .active(let intensity):
             if previous == .none { events.append(.seatbelt(on: true)) }
             events.append(.turbulence(intensity: intensity))
             stumbleStandingPassengers()
             sendStrollersBack()
+            if crew.seated == nil && !isBuckling { crewStumble() }
         case .none:
             events.append(.turbulence(intensity: 0))
             events.append(.seatbelt(on: false))
+            if crew.seated != nil { emitToast("All clear. Tap anywhere to unbuckle and get back to work.") }
+            // the problems that waited arrive now
+            for _ in 0..<deferredSpawns { spawn(rollKind()) }
+            deferredSpawns = 0
+            spawnTimer = random(in: Tuning.spawnInterval)
         }
+    }
+
+    private var isBuckling: Bool { if case .buckle? = crew.busy?.task { return true }; return false }
+
+    /// Caught standing when turbulence hits: drinks spill, the tray drops, a knock-down (GDD §5b).
+    private func crewStumble() {
+        stats.crewStumbles += 1
+        satisfaction -= Tuning.crewStumblePenalty
+        crew.stumbleTimer = Tuning.crewStumbleEvery
+        let drinks: Set<Item> = [.water, .juice, .coffee]
+        let spilled = crew.tray.contains { drinks.contains($0) }
+        crew.tray.removeAll { $0 != .usedBag }            // the tied-off bag stays in hand
+        crew.target = nil; crew.queued = nil
+        crew.busy = BusyAction(duration: Tuning.crewKnockdown, task: .knockedDown)
+        events.append(.crewStumble(x: crew.x, y: crew.y))
+        if spilled {
+            let row = layout.nearestRow(toX: crew.x)
+            if !occurrences.contains(where: { $0.kind.slows && !$0.dead && $0.aisle == crew.aisle && abs($0.row - row) <= 1 }) {
+                addSpill(row: row, aisle: crew.aisle)
+                events.append(.spawned(.spill, x: layout.rows[row].x, y: layout.aisles[crew.aisle]))
+            }
+        }
+        say("Whoa!")
+        hint("crewStumble", "You weren't seated! Get to a jump seat: you'll keep stumbling until you buckle in.")
     }
 
     private func stumbleStandingPassengers() {
@@ -1128,10 +1190,29 @@ final class FlightSimulation {
     func tap(x: Double, y: Double) {
         guard running else { return }
         let target = target(forTapAt: x, y)
+        if crew.seated != nil {
+            if seatbeltOn { say("Stay seated!"); events.append(.nope); return }
+            crew.busy = BusyAction(duration: Tuning.unbuckleDuration, task: .unbuckle)
+            crew.queued = target
+            return
+        }
         if crew.busy != nil { crew.queued = target } else { crew.target = target }
     }
 
+    /// Where a jump seat is drawn: at the edge of its aisle.
+    func jumpSeatY(_ j: JumpSeat) -> Double { layout.aisles[j.aisle] - 30 }
+
+    func nearestJumpSeat() -> Int? {
+        layout.jumpSeats.indices.min { a, b in
+            let ja = layout.jumpSeats[a], jb = layout.jumpSeats[b]
+            return abs(ja.x - crew.x) + (ja.aisle == crew.aisle ? 0 : 400) < abs(jb.x - crew.x) + (jb.aisle == crew.aisle ? 0 : 400)
+        }
+    }
+
     func target(forTapAt x: Double, _ y: Double) -> CrewTarget {
+        for (i, j) in layout.jumpSeats.enumerated() where abs(x - j.x) < 22 && abs(y - jumpSeatY(j)) < 18 {
+            return CrewTarget(x: j.x, aisle: j.aisle, action: .jumpSeat(i))
+        }
         for (i, b) in layout.bins.enumerated() where abs(x - b.x) < 18 && abs(y - b.y) < 40 {
             return CrewTarget(x: b.x, aisle: b.aisle, action: .bin(i))
         }
@@ -1174,6 +1255,10 @@ final class FlightSimulation {
             crew.bubbleTime -= dt
             if crew.bubbleTime <= 0 { crew.bubble = nil }
         }
+        if crew.seated == nil && turbulenceIntensity > 0 && !isBuckling {
+            crew.stumbleTimer -= dt                  // still standing: stumble every few seconds until seated
+            if crew.stumbleTimer <= 0 && crew.busy?.task != .knockedDown { crewStumble() }
+        }
         if var busy = crew.busy {
             busy.t += dt
             if busy.t >= busy.duration {
@@ -1185,6 +1270,7 @@ final class FlightSimulation {
             }
             return
         }
+        if crew.seated != nil { return }                // buckled in: not going anywhere
         guard let target = crew.target else { return }
         let turbulent = turbulenceIntensity > 0 ? Tuning.turbulenceCrewFactor : 1
 
@@ -1246,6 +1332,8 @@ final class FlightSimulation {
             break
         case .bin(let i):
             crew.busy = BusyAction(duration: Tuning.pickDuration, task: .pick(bin: i))
+        case .jumpSeat(let i):
+            crew.busy = BusyAction(duration: Tuning.buckleDuration, task: .buckle(seat: i))
         case .clear(let id):
             guard let o = occurrences.first(where: { $0.id == id }) else { return }
             let d: Double
@@ -1261,7 +1349,8 @@ final class FlightSimulation {
                 guard !o.dead, let pi = o.passenger else { return false }
                 return passengers[pi].row == row && passengers[pi].seat == seat
             }), let pi = o.passenger {
-                use(on: o.id, duration: o.kind == .call ? Tuning.callDuration : seatDuration(passengers[pi]))
+                let quick = o.kind == .call || o.need == .order
+                use(on: o.id, duration: quick ? Tuning.callDuration : seatDuration(passengers[pi]))
             }
         }
     }
@@ -1279,6 +1368,16 @@ final class FlightSimulation {
             useStation(i)
         case .apply(let id):
             applyStep(occurrence: id)
+        case .buckle(let i):
+            crew.seated = i
+            crew.target = nil; crew.queued = nil
+            events.append(.buckled(true))
+            if seatbeltOn { say("Buckled in") }
+        case .unbuckle:
+            crew.seated = nil
+            events.append(.buckled(false))
+        case .knockedDown:
+            break
         }
     }
 

@@ -320,6 +320,16 @@ enum Art {
                 text(b.label.uppercased(), bx, by + 22, size: 6.5, color: Palette.navy)
             }
 
+            // jump seats: fold-down crew seats at the edge of the aisle (GDD §5b)
+            for j in L.jumpSeats {
+                let x = CGFloat(j.x), y = aisles[j.aisle] - 30
+                let seat = rr(x - 11, y - 6, 22, 12, 3)
+                c.saveGState(); shadow(c, ink(0.3), blur: 3, dy: 2); fill(c, seat, UIColor(hex: 0x4E6A7A)); c.restoreGState()
+                stroke(c, seat, Palette.navy, 1.5)
+                c.setFillColor(Palette.coral.cgColor); c.fill(CGRect(x: x - 7, y: y - 1, width: 14, height: 2))
+                c.setFillColor(Palette.navy.cgColor); c.fill(CGRect(x: x - 11, y: y - 9, width: 22, height: 3))
+            }
+
             // warm light pools from the overhead panels
             for a in aisles {
                 for r in stride(from: 0, to: L.rows.count, by: 2) {
@@ -422,6 +432,24 @@ enum Art {
         }
     }
 
+    /// An order not taken yet: a notepad and pencil (what they want stays hidden until you ask).
+    static func notepad(size: CGFloat = 28) -> UIImage {
+        image(size, size) { c in
+            c.translateBy(x: size / 2, y: size / 2); c.scaleBy(x: size / 28, y: size / 28)
+            c.setStrokeColor(Palette.navy.cgColor); c.setLineWidth(2); c.setLineJoin(.round)
+            let pad = CGPath(roundedRect: CGRect(x: -8, y: -10, width: 15, height: 20), cornerWidth: 2, cornerHeight: 2, transform: nil)
+            c.setFillColor(UIColor.white.cgColor); c.addPath(pad); c.drawPath(using: .fillStroke)
+            c.setFillColor(Palette.coral.cgColor); c.fill(CGRect(x: -8, y: -10, width: 15, height: 4))
+            c.setStrokeColor(Palette.navy.withAlphaComponent(0.5).cgColor); c.setLineWidth(1.4)
+            for ly in [-2.0, 2.0, 6.0] { c.move(to: P(-5, CGFloat(ly))); c.addLine(to: P(4, CGFloat(ly))) }
+            c.strokePath()
+            c.setStrokeColor(Palette.navy.cgColor); c.setLineWidth(2)
+            c.setFillColor(UIColor(hex: 0xF5B942).cgColor)
+            let pencil = CGMutablePath(); pencil.addLines(between: [P(6, 8), P(11, -6), P(13, -5), P(8, 9)]); pencil.closeSubpath()
+            c.addPath(pencil); c.drawPath(using: .fillStroke)
+        }
+    }
+
     static func trashImage(size: CGFloat = 28) -> UIImage { image(size, size) { c in drawTrash(c, size / 2, size / 2, size / 28) } }
 
     /// Two items side by side, for combo orders.
@@ -460,6 +488,7 @@ enum Art {
         case .item(let item): return itemImage(item, size: size)
         case .combo(let items): return comboImage(items, size: size)
         case .trash: return trashImage(size: size)
+        case .order: return notepad(size: size)
         case .hands:
             return image(size, size) { c in
                 c.translateBy(x: size / 2, y: size / 2); c.scaleBy(x: size / 28, y: size / 28)

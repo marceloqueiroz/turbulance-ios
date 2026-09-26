@@ -44,6 +44,7 @@ enum Goal: Equatable {
     case vipHappy
     case quickService          // average fix under 10 s
     case highScore(Int)
+    case seatedEveryBump       // buckled in before every turbulence bump (GDD §5b)
 
     var title: String {
         switch self {
@@ -53,6 +54,7 @@ enum Goal: Equatable {
         case .vipHappy: return "Keep the VIP happy"
         case .quickService: return "Average fix under 10 s"
         case .highScore(let s): return "Land with \(s)+ satisfaction"
+        case .seatedEveryBump: return "Seated for every bump"
         }
     }
 }
@@ -172,9 +174,10 @@ enum Campaign {
                        twist: .redEye, story: .commuters, goal: .noneWoken,
                        whatsNew: "Coffee brews for 3 s: start it, do something else, come back. A dim red-eye cabin full of sleepers."),
             FlightPlan(id: "TB105", name: "Bumpy Ride", aircraft: .comet, duration: 135,
-                       kinds: full, script: [.sick], maxCap: 3, menu: cafe, strolls: true, dozing: true, turbulence: bump(60),
-                       story: .skiTrip, goal: .noMisses,
-                       whatsNew: "Turbulence sends everyone to their seats. Busy lavatories clog: grab the plunger."),
+                       kinds: full, script: [.sick], maxCap: 3, menu: cafe, strolls: true, dozing: true,
+                       turbulence: [TurbulenceBump(start: 60, duration: 7, intensity: 0.375, warning: 8)],
+                       story: .skiTrip, goal: .seatedEveryBump,
+                       whatsNew: "Turbulence! When the seatbelt sign comes on, get to a jump seat before it hits. Busy lavatories clog too."),
             FlightPlan(id: "TB106", name: "Full Service", aircraft: .comet, duration: 150,
                        kinds: full, script: [.drink, .sick], maxCap: 3, menu: dining, combos: true, strolls: true, dozing: true,
                        turbulence: bump(100), twist: .mealService, story: .celebrity, goal: .vipHappy,
