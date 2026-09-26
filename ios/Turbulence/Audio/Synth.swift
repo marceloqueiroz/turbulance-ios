@@ -2,7 +2,7 @@ import AVFoundation
 
 /// Tiny synth for the per-occurrence stings (GDD §8): each sound is rendered once into a PCM buffer.
 final class Synth {
-    enum Sound: CaseIterable { case sick, spill, pick, step, ok, fail, nope, ding, chime, rumble, whoa, grumble, grumbleLoud, paChime, count3, count2, count1, go }
+    enum Sound: CaseIterable { case sick, spill, pick, step, ok, fail, nope, ding, chime, rumble, whoa, grumble, grumbleLoud, paChime, count3, count2, count1, go, streakUp, streakLost }
     enum Wave { case sine, square, triangle, saw }
     struct Tone { let f: Double; let d: Double; let wave: Wave; let v: Double; let delay: Double; let f2: Double? }
 
@@ -171,6 +171,10 @@ final class Synth {
         // the cabin PA "bing-bong" before the captain speaks
         case .paChime: return [Tone(f: 880, d: 0.8, wave: .sine, v: 0.07, delay: 0, f2: nil), Tone(f: 1760, d: 0.4, wave: .sine, v: 0.015, delay: 0, f2: nil),
                                Tone(f: 698, d: 1.0, wave: .sine, v: 0.07, delay: 0.5, f2: nil)]
+        // streak: a quick rising arpeggio when it climbs, a falling slide when it resets
+        case .streakUp: return [Tone(f: 784, d: 0.09, wave: .triangle, v: 0.07, delay: 0, f2: nil), Tone(f: 988, d: 0.09, wave: .triangle, v: 0.07, delay: 0.07, f2: nil),
+                                Tone(f: 1319, d: 0.22, wave: .sine, v: 0.08, delay: 0.14, f2: nil)]
+        case .streakLost: return [Tone(f: 520, d: 0.35, wave: .triangle, v: 0.06, delay: 0, f2: 220)]
         case .grumbleLoud: return [Tone(f: 240, d: 0.14, wave: .saw, v: 0.05, delay: 0, f2: 180), Tone(f: 260, d: 0.14, wave: .saw, v: 0.05, delay: 0.15, f2: 170), Tone(f: 220, d: 0.2, wave: .saw, v: 0.05, delay: 0.3, f2: 140)]
         }
     }

@@ -18,13 +18,15 @@ enum Tuning {
 
     static let calmUntil = 0.45
     static let urgentUntil = 0.78
-    static let criticalDrainPerSecond = 0.35
     static let stepRelief = 0.35
     static let vipFuseScale = 0.8
 
-    static let startingSatisfaction = 70.0
-    static let unresolvedAtLandingPenalty = 8.0
-    static let starThresholds: [Double] = [40, 65, 85]
+    // Scoring (GDD §2 Scoring): satisfaction only goes up; mistakes reset the streak multiplier.
+    static let streakStep = 2                   // clean fixes per streak level
+    static let maxStreak = 4
+    static let moppedPay = 1.0
+    static let vipPay = 1.5
+    static let starPace = 4.0                   // fallback 3-star satisfaction per cruise second at a load of 2 (campaign flights use Campaign.starTargets)
 
     static let aisleSeatDuration = 0.5
     static let reachPerSeat = 0.25     // each seat further from the aisle takes longer
@@ -35,8 +37,6 @@ enum Tuning {
     static let spawnInterval = 4.0...7.0
 
     static let lavUsesBeforeClog = 3
-    static let babyDrainPerSecond = 0.12
-    static let toiletDrainPerSecond = 0.1
 
     // Turbulence (GDD §5a): seatbelt chime + warning, then the cabin shakes.
     static let turbulenceSchedule = [TurbulenceBump(start: 60, duration: 7, intensity: 0.375)]
@@ -45,7 +45,6 @@ enum Tuning {
     static let turbulenceFuseRate = 0.5         // everyone's strapped in: problems escalate at half speed
     static let buckleDuration = 0.5
     static let unbuckleDuration = 0.3
-    static let crewStumblePenalty = 5.0
     static let crewKnockdown = 1.5
     static let crewStumbleEvery = 3.0
     static let turbulenceCrewFactor = 0.6
@@ -76,10 +75,7 @@ enum Tuning {
 
     // Dozing and noise (GDD §7): passengers nod off; unattended problems get louder and wake them.
     static let dozeChancePerSecond = 0.0015          // per seated, awake passenger during cruise
-    static let wakePenalty = 1.0
     static func noiseRows(_ state: Escalation) -> Int { state == .urgent ? 1 : state == .critical ? 2 : 0 }
-
-    static func stars(for satisfaction: Double) -> Int { starThresholds.filter { satisfaction >= $0 }.count }
 }
 
 struct SplitMix64: RandomNumberGenerator {
@@ -196,14 +192,9 @@ enum OccurrenceKind: Equatable, CaseIterable {
     /// Stays put after failing, until someone clears it.
     var lingers: Bool { !atSeat }
 
-    var penalty: Double {
-        switch self {
-        case .sick: return 15
-        case .spill, .baby: return 10
-        case .call: return 4
-        default: return 8
-        }
-    }
+    /// What fixing it pays before the speed bonus and streak (GDD §2 Scoring).
+    var basePay: Double { self == .call ? 3 : 6 }
+    var speedPay: Double { self == .call ? 2 : 4 }
 }
 
 enum Escalation: Equatable {
@@ -228,6 +219,7 @@ struct Occurrence: Identifiable {
     var vip = false
     /// Spills grow (1–3) when someone slips in them carrying drinks (GDD §5a).
     var size = 1
+    var peaked = false                 // reached critical at some point: pays no speed bonus
     var step = 0
     var age = 0.0
     var life = 0.0
@@ -336,6 +328,7 @@ struct FlightStats {
     var ordersMissed = 0
     var crewStumbles = 0
     var vipFailed = false
+    var bestStreak = 1
     var fixTimes: [Double] = []
     var averageFix: Double? { fixTimes.isEmpty ? nil : fixTimes.reduce(0, +) / Double(fixTimes.count) }
 }
@@ -343,8 +336,8 @@ struct FlightStats {
 enum SimEvent: Equatable {
     case spawned(OccurrenceKind, x: Double, y: Double)
     case stepDone(x: Double, y: Double)
-    case resolved(x: Double, y: Double, bonus: Int, passenger: Int?)
-    case failed(x: Double, y: Double, penalty: Int)
+    case resolved(x: Double, y: Double, bonus: Int, streak: Int, passenger: Int?)
+    case failed(x: Double, y: Double)
     case mopped(x: Double, y: Double)
     case picked
     case trashed
@@ -361,6 +354,8 @@ enum SimEvent: Equatable {
     case buckled(Bool)
     case wokeUp(x: Double, y: Double)
     case cart(out: Bool)
+    case streakUp(Int)
+    case streakLost(x: Double, y: Double)
 }
 
 final class FlightSimulation {
@@ -368,7 +363,9 @@ final class FlightSimulation {
     private(set) var phase: Phase = .boarding
     private(set) var passengers: [Passenger] = []
     private(set) var occurrences: [Occurrence] = []
-    private(set) var satisfaction = Tuning.startingSatisfaction
+    private(set) var satisfaction = 0.0
+    private(set) var streak = 1
+    private(set) var streakProgress = 0
     private(set) var stats = FlightStats()
     private(set) var running = false
     let plan: FlightPlan
@@ -434,7 +431,7 @@ final class FlightSimulation {
         if plan.twist == .helper { helper = Helper(x: layout.lastRowX, aisle: 0) }
     }
 
-    var stars: Int { Tuning.stars(for: satisfaction) }
+    var stars: Int { plan.stars(for: satisfaction) }
     var timeRemaining: Double { max(0, plan.duration - t) }
     var liveOccurrences: [Occurrence] { occurrences.filter { !$0.dead } }
     var seatbeltOn: Bool { turbulence != .none }
@@ -450,7 +447,7 @@ final class FlightSimulation {
         case .serveAllOrders: return stats.ordersMissed == 0
         case .vipHappy: return !stats.vipFailed
         case .quickService: return (stats.averageFix ?? 99) < 10 && stats.resolved >= 4
-        case .highScore(let s): return satisfaction >= Double(s)
+        case .maxStreak: return stats.bestStreak >= Tuning.maxStreak
         case .seatedEveryBump: return stats.crewStumbles == 0
         }
     }
@@ -515,9 +512,7 @@ final class FlightSimulation {
             occurrences[i].life += dt
             let f = occurrences[i].age / occurrences[i].fuse
             occurrences[i].state = Escalation.forFraction(f)
-            if occurrences[i].state == .critical { satisfaction -= Tuning.criticalDrainPerSecond * dt }
-            if occurrences[i].kind == .baby { satisfaction -= Tuning.babyDrainPerSecond * dt }
-            if occurrences[i].kind == .toilet { satisfaction -= Tuning.toiletDrainPerSecond * dt }
+            if occurrences[i].state == .critical { occurrences[i].peaked = true }
             if f >= 1 { fail(i) }
         }
         occurrences.removeAll { $0.dead }
@@ -526,7 +521,6 @@ final class FlightSimulation {
         coolTray(dt: dt)
         moveHelper(dt: dt)
         occurrences.removeAll { $0.dead }
-        satisfaction = min(100, max(0, satisfaction))
 
         if t >= plan.duration { endFlight() }
     }
@@ -576,12 +570,11 @@ final class FlightSimulation {
 
     private func endFlight() {
         for o in occurrences where !o.dead && !o.failed {
-            satisfaction -= Tuning.unresolvedAtLandingPenalty
+            breakStreak(x: o.x, y: o.y)
             stats.failed += 1
             if o.kind == .drink { stats.ordersMissed += 1 }
             if o.vip { stats.vipFailed = true }
         }
-        satisfaction = min(100, max(0, satisfaction))
         running = false
         phase = .ended
         events.append(.phase(.ended))
@@ -775,9 +768,8 @@ final class FlightSimulation {
         let o = occurrences[i]
         if o.kind == .drink { stats.ordersMissed += 1 }
         if o.vip { stats.vipFailed = true }
-        let penalty = o.kind.penalty * (o.vip ? 2 : 1)
-        satisfaction -= penalty
-        events.append(.failed(x: o.x, y: o.y, penalty: Int(penalty)))
+        events.append(.failed(x: o.x, y: o.y))
+        breakStreak(x: o.x, y: o.y)
         if o.kind.lingers {
             // Obstacles and clogs stay put (and keep causing trouble) until someone clears them.
             occurrences[i].failed = true
@@ -786,6 +778,26 @@ final class FlightSimulation {
             if let pi = o.passenger { passengers[pi].sick = false; passengers[pi].grumpy = true }
             occurrences[i].dead = true
         }
+    }
+
+    /// A clean fix moves the streak on, unless something in the cabin is critical (GDD §2 Scoring).
+    private func climbStreak() {
+        guard streak < Tuning.maxStreak,
+              !occurrences.contains(where: { !$0.dead && !$0.failed && $0.state == .critical }) else { return }
+        streakProgress += 1
+        if streakProgress >= Tuning.streakStep {
+            streak += 1
+            streakProgress = 0
+            stats.bestStreak = max(stats.bestStreak, streak)
+            events.append(.streakUp(streak))
+        }
+    }
+
+    /// Mistakes never take points away; they reset the multiplier.
+    private func breakStreak(x: Double, y: Double) {
+        if streak > 1 { events.append(.streakLost(x: x, y: y)) }
+        streak = 1
+        streakProgress = 0
     }
 
     /// Completes the current step of an occurrence; consumes what it used from the tray.
@@ -800,22 +812,24 @@ final class FlightSimulation {
         if o.kind.isCart { cart?.stuck = false }
         if o.failed {
             occurrences[i].dead = true
-            satisfaction += 1
+            satisfaction += Tuning.moppedPay
             events.append(.mopped(x: o.x, y: o.y))
             return
         }
         occurrences[i].step += 1
         if occurrences[i].step >= o.steps.count {
             occurrences[i].dead = true
-            let base: Double = o.kind == .call ? 3 : 6
-            let speed: Double = o.kind == .call ? 2 : 4
-            var bonus = base + (speed * min(1, max(0, 1 - o.life / (o.fuse * 1.6)))).rounded()
-            if o.vip { bonus = (bonus * 1.5).rounded() }
+            let speed = o.peaked ? 0 : (o.kind.speedPay * min(1, max(0, 1 - o.life / (o.fuse * 1.6)))).rounded()
+            var pay = o.kind.basePay + speed
+            if o.vip { pay = (pay * Tuning.vipPay).rounded() }
+            let bonus = pay * Double(streak)
+            let paidAt = streak
             satisfaction += bonus
+            climbStreak()
             stats.resolved += 1
             stats.fixTimes.append(o.life)
             if let pi = o.passenger { passengers[pi].sick = false }
-            events.append(.resolved(x: o.x, y: o.y, bonus: Int(bonus), passenger: o.passenger))
+            events.append(.resolved(x: o.x, y: o.y, bonus: Int(bonus), streak: paidAt, passenger: o.passenger))
         } else {
             occurrences[i].age *= Tuning.stepRelief       // each completed step buys back time
             if occurrences[i].need == .trash {
@@ -1008,7 +1022,7 @@ final class FlightSimulation {
                     occurrences[i].dead = true
                     satisfaction += 2
                     stats.resolved += 1
-                    events.append(.resolved(x: occurrences[i].x, y: occurrences[i].y, bonus: 2, passenger: occurrences[i].passenger))
+                    events.append(.resolved(x: occurrences[i].x, y: occurrences[i].y, bonus: 2, streak: 1, passenger: occurrences[i].passenger))
                 }
                 h.target = nil
             }
@@ -1068,7 +1082,7 @@ final class FlightSimulation {
     /// Caught standing when turbulence hits: drinks spill, the tray drops, a knock-down (GDD §5b).
     private func crewStumble() {
         stats.crewStumbles += 1
-        satisfaction -= Tuning.crewStumblePenalty
+        breakStreak(x: crew.x, y: crew.y)
         crew.stumbleTimer = Tuning.crewStumbleEvery
         let spilled = crew.tray.contains { Item.liquids.contains($0) }
         crew.tray.removeAll { $0 != .usedBag }            // the tied-off bag stays in hand
@@ -1124,7 +1138,7 @@ final class FlightSimulation {
             guard rows > 0 else { continue }
             for i in passengers.indices where passengers[i].asleep && abs(passengers[i].row - o.row) <= rows {
                 passengers[i].asleep = false
-                satisfaction -= Tuning.wakePenalty
+                breakStreak(x: passengers[i].x, y: passengers[i].y)
                 stats.woken += 1
                 events.append(.wokeUp(x: passengers[i].x, y: passengers[i].y))
                 hint("woke", "Unattended passengers get noisy and wake the people sleeping around them.")
@@ -1318,7 +1332,7 @@ final class FlightSimulation {
         }) else { return }
         crew.tray.removeAll { Item.liquids.contains($0) }
         occurrences[i].size = min(3, occurrences[i].size + 1)
-        satisfaction -= 2
+        breakStreak(x: crew.x, y: crew.y)
         say("Slipped!")
         events.append(.slipped(x: crew.x, y: crew.y))
         hint("slip", "You slipped and your drinks splashed out, so the spill got bigger. Mop spills before carrying drinks through.")
@@ -1582,6 +1596,8 @@ final class FlightSimulation {
 
     /// A busy mid-flight moment (launch with `-demo`).
     func stageDemo() {
+        satisfaction = 450                    // mid-flight: two stars and a ×3 streak on the HUD
+        streak = 3
         running = true
         phase = .cruise
         t = 58

@@ -115,7 +115,7 @@ struct HUDBar: View {
     let game: GameController
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 10) {
             HStack(spacing: 10) {
                 ZStack {
                     Circle().stroke(Color.panelLine, lineWidth: 5)
@@ -129,30 +129,45 @@ struct HUDBar: View {
                     (Text(game.phaseText).bold().foregroundColor(.text) + Text(" · \(game.flightLabel)"))
                         .font(rounded(10, .semibold)).foregroundStyle(Color.muted).lineLimit(1)
                 }
+                .fixedSize()
                 if game.seatbelt { SeatbeltSign() }
             }
-            Spacer(minLength: 8)
+            Spacer(minLength: 4)
             if game.seatPrompt != .none { SeatPromptPill(prompt: game.seatPrompt) }
-            Spacer(minLength: 8)
+            Spacer(minLength: 4)
+            StreakBadge(streak: game.streak)
             VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Text("SATISFACTION").font(rounded(9, .heavy)).tracking(1).foregroundStyle(Color.muted)
-                    Spacer()
-                    Text("\(game.satisfaction)").font(rounded(11, .heavy)).monospacedDigit().foregroundStyle(Color.text)
+                HStack(spacing: 6) {
+                    Text("SATISFACTION").font(rounded(8, .heavy)).tracking(0.5).foregroundStyle(Color.muted)
+                        .lineLimit(1).minimumScaleFactor(0.6)
+                    Spacer(minLength: 0)
+                    Text("\(game.satisfaction)").font(rounded(13, .heavy)).monospacedDigit().foregroundStyle(Color.text)
+                        .contentTransition(.numericText(value: Double(game.satisfaction)))
+                        .fixedSize()
+                    HStack(spacing: 1) {
+                        ForEach(0..<3, id: \.self) { i in
+                            Image(systemName: i < earned ? "star.fill" : "star")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundStyle(i < earned ? Color.calm : Color.muted)
+                        }
+                    }
+                    .fixedSize()
+                    .accessibilityLabel("\(earned) of 3 stars")
                 }
                 GeometryReader { geo in
                     ZStack(alignment: .leading) {
                         Capsule().fill(Color.panel).overlay(Capsule().stroke(Color.panelLine, lineWidth: 1))
-                        Capsule().fill(satColor).frame(width: geo.size.width * CGFloat(game.satisfaction) / 100)
-                        ForEach(Tuning.starThresholds, id: \.self) { t in
-                            Rectangle().fill(Color.sky.opacity(0.7)).frame(width: 2).offset(x: geo.size.width * t / 100)
+                        Capsule().fill(satColor).frame(width: geo.size.width * progress)
+                        ForEach(game.starTargets.dropLast(), id: \.self) { t in
+                            Rectangle().fill(Color.sky.opacity(0.7)).frame(width: 2)
+                                .offset(x: geo.size.width * CGFloat(t) / CGFloat(max(1, top)))
                         }
                     }
                     .animation(.easeOut(duration: 0.25), value: game.satisfaction)
                 }
                 .frame(height: 10)
             }
-            .frame(width: 170)
+            .frame(width: 140)
             HStack(spacing: 8) {
                 RoundButton(system: game.muted ? "speaker.slash.fill" : "speaker.wave.2.fill", label: "Sound") { game.toggleMute() }
                 RoundButton(system: "pause.fill", label: "Pause") { game.setPaused(game.screen == .playing) }
@@ -161,8 +176,34 @@ struct HUDBar: View {
         .frame(height: 40)
     }
 
-    private var satColor: Color {
-        game.satisfaction >= 65 ? .teal : game.satisfaction >= 40 ? Color(uiColor: Palette.calm) : Color(uiColor: Palette.critical)
+    private var top: Int { game.starTargets.last ?? 1 }
+    private var earned: Int { game.starTargets.filter { game.satisfaction >= $0 }.count }
+    /// The bar fills towards the 3-star target; the ticks mark 1 and 2 stars.
+    private var progress: CGFloat { min(1, CGFloat(game.satisfaction) / CGFloat(max(1, top))) }
+    private var satColor: Color { earned >= 2 ? .teal : Color(uiColor: Palette.calm) }
+}
+
+/// The ×1–×4 streak multiplier: it pops when it climbs and drops back to ×1 on a mistake (GDD §2 Scoring).
+struct StreakBadge: View {
+    let streak: Int
+    var body: some View {
+        Text("×\(streak)")
+            .font(rounded(streak > 1 ? 17 : 14, .heavy)).monospacedDigit()
+            .foregroundStyle(streak > 1 ? .white : Color.muted)
+            .frame(minWidth: 34, minHeight: 28)
+            .background(Capsule().fill(color))
+            .overlay(Capsule().stroke(Color.navy.opacity(streak > 1 ? 0.9 : 0.25), lineWidth: 2))
+            .scaleEffect(streak > 1 ? 1.08 : 1)
+            .animation(.spring(response: 0.3, dampingFraction: 0.45), value: streak)
+            .accessibilityLabel("Streak times \(streak)")
+    }
+    private var color: Color {
+        switch streak {
+        case 1: return Color.panel
+        case 2: return .teal
+        case 3: return Color(uiColor: Palette.urgent)
+        default: return .coral
+        }
     }
 }
 
@@ -311,6 +352,7 @@ struct EndCard: View {
     let map: () -> Void
     var body: some View {
         let r = result ?? FlightResult(stars: 0, resolved: 0, missed: 0, averageFix: nil, satisfaction: 0)
+        let t = plan.targets
         Card {
             Eyebrow(text: "Landed · \(plan.id) \(plan.name)")
             HStack(spacing: 14) {
@@ -333,6 +375,7 @@ struct EndCard: View {
                 Stat(label: "Resolved", value: "\(r.resolved)")
                 Stat(label: "Missed", value: "\(r.missed)")
                 Stat(label: "Avg fix", value: r.averageFix.map { String(format: "%.1fs", $0) } ?? "–")
+                Stat(label: "Best streak", value: "×\(r.bestStreak)")
                 Stat(label: "Satisfaction", value: "\(r.satisfaction)")
             }
             HStack(spacing: 8) {
@@ -342,8 +385,8 @@ struct EndCard: View {
                 Text("Bonus goal: \(r.goal.title) \(r.goalMet ? "· medal earned" : "· not this time")")
                     .font(rounded(13, .bold))
             }
-            Text(r.stars == 0 ? "Earn at least one star (40 satisfaction) to open the next flight."
-                              : "Stars: 40 · 65 · 85 satisfaction (the ticks on the HUD bar).")
+            Text(r.stars == 0 ? "Earn at least one star (\(t[0]) satisfaction) to open the next flight."
+                              : "Stars: \(t[0]) · \(t[1]) · \(t[2]) satisfaction. Keep the streak going to earn faster.")
                 .font(rounded(11, .medium)).foregroundStyle(Color.finePrint)
             HStack(spacing: 12) {
                 if let next { CTA(title: "Next flight", action: next) }

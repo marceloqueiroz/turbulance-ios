@@ -467,17 +467,17 @@ final class CabinScene: SKScene {
 
     func play(_ event: SimEvent) {
         switch event {
-        case let .resolved(x, y, bonus, passenger):
+        case let .resolved(x, y, bonus, streak, passenger):
             burst(.spark, x: x, y: y, count: 16, colors: [Palette.calm, Palette.teal, .white, Palette.coral])
-            floatText("+\(bonus)", x: x, y: y - 18, color: Palette.teal)
+            floatText(streak > 1 ? "+\(bonus) ×\(streak)" : "+\(bonus)", x: x, y: y - 18, color: Palette.teal)
             if passenger != nil { heartPop(x: x, y: y - 14) }
         case let .stepDone(x, y):
             burst(.spark, x: x, y: y, count: 6, colors: [Palette.teal, .white])
             floatText("✓", x: x, y: y - 18, color: Palette.teal)
-        case let .failed(x, y, penalty):
+        case let .failed(x, y):
             shake = 0.35
             burst(.puff, x: x, y: y, count: 10, colors: [UIColor(hex: 0x78808C, alpha: 0.8), UIColor(hex: 0x5A6270, alpha: 0.7)])
-            floatText("−\(penalty)", x: x, y: y - 18, color: Palette.critical)
+            floatText("Missed", x: x, y: y - 18, color: Palette.critical)
         case let .mopped(x, y):
             floatText("+1", x: x, y: y - 18, color: Palette.teal)
         case .trashed:
@@ -492,14 +492,21 @@ final class CabinScene: SKScene {
         case let .slipped(x, y):
             shake = max(shake, 0.25)
             burst(.puff, x: x, y: y, count: 10, colors: [UIColor(hex: 0x8A4B22, alpha: 0.85), UIColor(hex: 0xF29B30, alpha: 0.8)])
-            floatText("Slipped! −2", x: x, y: y - 26, color: Palette.critical)
+            floatText("Slipped!", x: x, y: y - 26, color: Palette.critical)
         case let .crewStumble(x, y):
             shake = max(shake, 0.4)
             burst(.puff, x: x, y: y, count: 8, colors: [UIColor(hex: 0xC8BCAA, alpha: 0.9)])
-            floatText("−5", x: x, y: y - 24, color: Palette.critical)
+            floatText("Ouch!", x: x, y: y - 24, color: Palette.critical)
         case let .wokeUp(x, y):
             burst(.spark, x: x, y: y - 6, count: 4, colors: [Palette.urgent])
-            floatText("−1", x: x, y: y - 18, color: Palette.urgent)
+            floatText("!", x: x, y: y - 18, color: Palette.urgent)
+        case let .streakLost(x, y):
+            floatText("Streak lost", x: x, y: y - 44, color: Palette.critical)
+        case .streakUp(let n):
+            if let c = game?.sim.crew {
+                burst(.spark, x: c.x, y: c.y - 20, count: 10, colors: [Palette.calm, Palette.coral, .white])
+                floatText("×\(n)!", x: c.x, y: c.y - 40, color: Palette.coral)
+            }
         default:
             break
         }

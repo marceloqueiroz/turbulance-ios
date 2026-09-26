@@ -24,6 +24,61 @@ final class FlightSimulationTests: XCTestCase {
         sim.layout.bins.first { $0.kind == kind }!
     }
 
+    /// Stands at a passenger's seat and serves them.
+    private func serve(_ sim: FlightSimulation, passenger pi: Int) {
+        let p = sim.passengers[pi]
+        sim.crew.x = p.x
+        sim.crew.aisle = p.aisle
+        sim.crew.y = sim.layout.aisles[p.aisle]
+        sim.tap(x: p.x, y: p.y)
+        step(sim, seconds: 1.5)
+    }
+
+    /// One decision for the greedy bot: buckle up, bin junk, then work on the most urgent problem.
+    private func botAct(_ sim: FlightSimulation) {
+        let crew = sim.crew
+        if sim.seatbeltOn {
+            if crew.seated == nil, let j = sim.nearestJumpSeat() {
+                let js = sim.layout.jumpSeats[j]
+                sim.tap(x: js.x, y: sim.jumpSeatY(js))
+            }
+            return
+        }
+        func nearest(_ match: (StationKind) -> Bool) -> Int? {
+            sim.layout.bins.indices.filter { sim.stationOpen($0) && match(sim.layout.bins[$0].kind) }
+                .min { abs(sim.layout.bins[$0].x - crew.x) < abs(sim.layout.bins[$1].x - crew.x) }
+        }
+        func tapStation(_ i: Int) { let b = sim.layout.bins[i]; sim.tap(x: b.x, y: b.y) }
+        func trash() { if let i = nearest({ $0 == .trash }) { tapStation(i) } }
+        func tapProblem(_ o: Occurrence) {
+            if let pi = o.passenger { sim.tap(x: sim.passengers[pi].x, y: sim.passengers[pi].y) } else { sim.tap(x: o.x, y: o.y) }
+        }
+        func fetch(_ it: Item) {
+            guard crew.hasFreeHand else { return trash() }
+            if let i = nearest({ $0 == .bin(it) }) { return tapStation(i) }
+            if let i = nearest({ if case .machine(it, _) = $0 { return true }; return false }) {
+                if case .working? = sim.machines[i] { return }
+                tapStation(i)
+            }
+        }
+        if crew.tray.contains(where: { $0 == .coldCoffee || $0 == .coldMeal }) { return trash() }
+        let live = sim.occurrences.filter { !$0.dead }
+            .sorted { ($0.failed ? -1 : $0.age / $0.fuse) > ($1.failed ? -1 : $1.age / $1.fuse) }
+        for o in live {
+            switch o.need {
+            case .trash:
+                if crew.tray.contains(.usedBag) { return trash() }
+            case .hands, .order:
+                return crew.hasFreeHand ? tapProblem(o) : trash()
+            case .item(let it):
+                return crew.tray.contains(it) ? tapProblem(o) : fetch(it)
+            case .combo(let items):
+                if let missing = items.first(where: { !crew.tray.contains($0) }) { return fetch(missing) }
+                return tapProblem(o)
+            }
+        }
+    }
+
     /// Walks to a station and uses it.
     private func use(_ sim: FlightSimulation, _ b: SupplyBin) {
         sim.crew.aisle = b.aisle
@@ -251,7 +306,7 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertTrue(sim.layout.bins.indices.contains { sim.stationOpen($0) && sim.layout.bins[$0].item == .towel })
     }
 
-    func testVipHasShorterFusesAndDoublePenalties() {
+    func testVipHasShorterFusesAndPaysMore() {
         let sim = runningSim(plan: flight("TB106"))
         guard let v = sim.vipIndex else { return XCTFail("celebrity flight has a VIP") }
         let id = sim.addAtSeat(.call, passenger: v, steps: [.hands], fuse: 16)
@@ -259,8 +314,11 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertTrue(o.vip)
         XCTAssertEqual(o.fuse, 16 * Tuning.vipFuseScale, accuracy: 0.001)
         let before = sim.satisfaction
+        serve(sim, passenger: v)
+        XCTAssertEqual(sim.satisfaction - before, ((3 + 2) * Tuning.vipPay).rounded(), accuracy: 0.01, "a quick VIP call pays 1.5×")
+        let late = sim.addAtSeat(.call, passenger: v, steps: [.hands], fuse: 16)
         step(sim, seconds: 16)
-        XCTAssertLessThanOrEqual(sim.satisfaction, before - OccurrenceKind.call.penalty * 2 + 0.01)
+        XCTAssertTrue(sim.occurrences.allSatisfy { $0.id != late })
         XCTAssertTrue(sim.stats.vipFailed)
     }
 
@@ -272,12 +330,97 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertFalse(sim.goalMet)
     }
 
-    func testStars() {
-        XCTAssertEqual(Tuning.stars(for: 39), 0)
-        XCTAssertEqual(Tuning.stars(for: 40), 1)
-        XCTAssertEqual(Tuning.stars(for: 65), 2)
-        XCTAssertEqual(Tuning.stars(for: 85), 3)
-        XCTAssertEqual(Tuning.stars(for: 100), 3)
+    func testStarsUseEachFlightsTargets() {
+        for plan in Campaign.routes.flatMap(\.flights) {
+            let t = plan.targets
+            XCTAssertEqual(t.count, 3)
+            XCTAssertTrue(t[0] > 0 && t[0] < t[1] && t[1] < t[2], plan.id)
+            XCTAssertEqual(plan.stars(for: Double(t[0] - 1)), 0)
+            XCTAssertEqual(plan.stars(for: Double(t[0])), 1)
+            XCTAssertEqual(plan.stars(for: Double(t[1])), 2)
+            XCTAssertEqual(plan.stars(for: Double(t[2] + 50)), 3)
+        }
+        XCTAssertEqual(Set(Campaign.routes.flatMap(\.flights).map(\.id)), Set(Campaign.starTargets.keys), "every flight has authored targets")
+    }
+
+    // MARK: Scoring (GDD §2): satisfaction only goes up; mistakes reset the streak
+
+    func testSatisfactionStartsAtZero() {
+        XCTAssertEqual(FlightSimulation(plan: .prototype, seed: 1).satisfaction, 0)
+    }
+
+    func testStreakClimbsWithCleanFixesAndMultipliesPay() {
+        let sim = runningSim()
+        var multipliers: [Int] = []
+        for pi in 0..<5 {
+            sim.addAtSeat(.call, passenger: pi, steps: [.hands], fuse: 30)
+            serve(sim, passenger: pi)
+            for case let .resolved(_, _, _, streak, _) in sim.drainEvents() { multipliers.append(streak) }
+        }
+        XCTAssertEqual(multipliers, [1, 1, 2, 2, 3], "every 2 clean fixes raise the streak")
+        XCTAssertEqual(sim.streak, 3)
+        XCTAssertEqual(sim.stats.bestStreak, 3)
+    }
+
+    func testMistakeResetsTheStreakButNeverTakesPoints() {
+        let sim = runningSim()
+        for pi in 0..<2 {
+            sim.addAtSeat(.call, passenger: pi, steps: [.hands], fuse: 30)
+            serve(sim, passenger: pi)
+        }
+        XCTAssertEqual(sim.streak, 2)
+        let before = sim.satisfaction
+        _ = sim.drainEvents()
+        sim.addSpill(row: 10, age: 22 - 0.01)
+        step(sim, seconds: 0.1)
+        XCTAssertEqual(sim.streak, 1)
+        XCTAssertEqual(sim.satisfaction, before, "a miss costs the streak, not points")
+        XCTAssertTrue(sim.drainEvents().contains { if case .streakLost = $0 { return true }; return false })
+    }
+
+    func testStreakCannotClimbWhileSomethingIsCritical() {
+        let sim = runningSim()
+        sim.addAtSeat(.call, passenger: 9, steps: [.hands], fuse: 30, age: 30 * 0.8)
+        for pi in 0..<2 {
+            sim.addAtSeat(.call, passenger: pi, steps: [.hands], fuse: 60)
+            serve(sim, passenger: pi)
+        }
+        XCTAssertEqual(sim.streak, 1)
+    }
+
+    func testCriticalFixPaysOnlyTheBase() {
+        let sim = runningSim()
+        sim.addAtSeat(.call, passenger: 0, steps: [.hands], fuse: 30, age: 30 * 0.8)
+        let before = sim.satisfaction
+        serve(sim, passenger: 0)
+        XCTAssertEqual(sim.satisfaction - before, OccurrenceKind.call.basePay, accuracy: 0.01)
+    }
+
+    /// A simple greedy player: every flight is winnable and satisfaction never goes down.
+    func testBotEarnsStarsOnEveryFlightAndScoreNeverDrops() {
+        var report: [String] = []
+        for plan in Campaign.routes.flatMap(\.flights) {
+            var scores: [Double] = []
+            for seed: UInt64 in [3, 11, 29, 41, 57, 73, 88] {
+                let sim = FlightSimulation(plan: plan, seed: seed)
+                sim.start()
+                var last = 0.0
+                var n = 0
+                while sim.phase != .ended && n < 20_000 {
+                    if sim.crew.busy == nil && sim.crew.target == nil && sim.crew.queued == nil { botAct(sim) }
+                    sim.update(dt: 1.0 / 30)
+                    XCTAssertGreaterThanOrEqual(sim.satisfaction, last, "\(plan.id) satisfaction dropped")
+                    last = sim.satisfaction
+                    n += 1
+                }
+                scores.append(sim.satisfaction)
+            }
+            let median = scores.sorted()[scores.count / 2]
+            report.append("CAL \(plan.id) \(Int(median)) targets \(plan.targets) bot \(scores.map { Int($0) }) → \(plan.stars(for: median))★")
+            XCTAssertGreaterThanOrEqual(plan.stars(for: median), 1, "\(plan.id): a plain run earns a star")
+            XCTAssertLessThan(plan.stars(for: median), 3, "\(plan.id): three stars needs better than the bot")
+        }
+        print("BOT REPORT\n" + report.joined(separator: "\n"))
     }
 
     // MARK: Director
@@ -618,7 +761,7 @@ final class FlightSimulationTests: XCTestCase {
         step(sim, seconds: 0.5)
         XCTAssertEqual(sim.crew.tray, [.snack], "the juice splashed out, the snack stayed")
         XCTAssertEqual(spill.size, 2)
-        XCTAssertEqual(sim.satisfaction, sat - 2, accuracy: 0.5)
+        XCTAssertEqual(sim.satisfaction, sat, "a slip resets the streak, it doesn't take points")
         XCTAssertTrue(sim.drainEvents().contains { if case .slipped = $0 { return true }; return false })
         XCTAssertGreaterThan(sim.reach(spill), Tuning.stopDistance, "a bigger puddle covers more aisle")
     }

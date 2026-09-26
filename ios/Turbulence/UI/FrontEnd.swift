@@ -416,6 +416,9 @@ struct BriefingCard: View {
                     Image(systemName: profile.medals.contains(plan.id) ? "medal.fill" : "medal")
                         .foregroundStyle(profile.medals.contains(plan.id) ? Color.calm : Color.navy)
                 }
+                Label { Text("**Stars:** \(plan.targets.map(String.init).joined(separator: " · ")) satisfaction") } icon: {
+                    Image(systemName: "star.fill").foregroundStyle(Color.calm)
+                }
             }
             .font(rounded(13, .medium))
             if i == 0 {

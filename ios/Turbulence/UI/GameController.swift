@@ -9,6 +9,7 @@ struct FlightResult: Equatable {
     let missed: Int
     let averageFix: Double?
     let satisfaction: Int
+    var bestStreak = 1
     var goal: Goal = .noMisses
     var goalMet = false
 }
@@ -23,7 +24,10 @@ final class GameController {
     var clockFraction = 1.0
     var phaseText = "Boarding"
     var landing = false
-    var satisfaction = 70
+    var satisfaction = 0
+    /// Streak multiplier (×1–×4) and the flight's star targets for the HUD pips (GDD §2 Scoring).
+    var streak = 1
+    var starTargets: [Int] = [1, 2, 3]
     var toast: String?
     var muted = false
     var result: FlightResult?
@@ -236,6 +240,10 @@ final class GameController {
             if haptics { jolt.impactOccurred(intensity: 0.8) }
         case .wentCold: synth.play(.nope)
         case .wokeUp: break
+        case .streakUp:
+            synth.play(.streakUp)
+            if haptics { bump.impactOccurred(intensity: 0.5) }
+        case .streakLost: synth.play(.streakLost)
         case .cart(let out): if out { synth.play(.chime) }
         case .toast(let text):
             toast = text
@@ -246,7 +254,7 @@ final class GameController {
                 toast = nil
                 let r = FlightResult(stars: sim.stars, resolved: sim.stats.resolved, missed: sim.stats.failed,
                                      averageFix: sim.stats.averageFix, satisfaction: Int(sim.satisfaction.rounded()),
-                                     goal: sim.plan.goal, goalMet: sim.goalMet)
+                                     bestStreak: sim.stats.bestStreak, goal: sim.plan.goal, goalMet: sim.goalMet)
                 result = r
                 onEnded?(plan, r)
                 screen = .ended
@@ -296,5 +304,7 @@ final class GameController {
         if prompt != seatPrompt { seatPrompt = prompt }
         let sat = Int(sim.satisfaction.rounded())
         if sat != satisfaction { satisfaction = sat }
+        if sim.streak != streak { streak = sim.streak }
+        if sim.plan.targets != starTargets { starTargets = sim.plan.targets }
     }
 }

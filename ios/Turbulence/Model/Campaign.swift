@@ -43,7 +43,7 @@ enum Goal: Equatable {
     case serveAllOrders
     case vipHappy
     case quickService          // average fix under 10 s
-    case highScore(Int)
+    case maxStreak             // reach the ×4 streak (GDD §2 Scoring)
     case seatedEveryBump       // buckled in before every turbulence bump (GDD §5b)
 
     var title: String {
@@ -53,7 +53,7 @@ enum Goal: Equatable {
         case .serveAllOrders: return "Serve every order"
         case .vipHappy: return "Keep the VIP happy"
         case .quickService: return "Average fix under 10 s"
-        case .highScore(let s): return "Land with \(s)+ satisfaction"
+        case .maxStreak: return "Reach a ×\(Tuning.maxStreak) streak"
         case .seatedEveryBump: return "Seated for every bump"
         }
     }
@@ -163,6 +163,16 @@ struct FlightPlan: Identifiable, Equatable {
 
     var landingAt: Double { duration - Tuning.landingLead }
 
+    /// Satisfaction needed for 1, 2 and 3 stars. Busier, longer flights pay out more (GDD §2 Scoring).
+    var targets: [Int] {
+        if let t = Campaign.starTargets[id] { return t }
+        let three = Tuning.starPace * (duration - Tuning.landingLead) * (0.6 + 0.2 * Double(maxCap))
+        func round5(_ v: Double) -> Int { Int((v / 5).rounded()) * 5 }
+        return [round5(three * 0.35), round5(three * 0.65), round5(three)]
+    }
+
+    func stars(for satisfaction: Double) -> Int { targets.filter { satisfaction >= Double($0) }.count }
+
     /// Warm-up → build → peak, as shares of the flight so any length uses the same curve.
     func cap(at t: Double) -> Int {
         let f = t / duration
@@ -188,6 +198,21 @@ struct Route: Identifiable, Equatable {
 
 /// v1.0 routes (GDD §9a, §11): Routes 1–3, 30 flights. Every flight mixes several task types (GDD §6a).
 enum Campaign {
+    /// Satisfaction for 1/2/3 stars, set from a greedy bot's median run over 7 seeds (0.4× · 0.85× · 1.3×):
+    /// a plain run earns one or two stars, three needs clean streaks and full trays (GDD §2 Scoring).
+    static let starTargets: [String: [Int]] = [
+        "TB101": [110, 235, 360], "TB102": [205, 430, 660], "TB103": [200, 425, 650],
+        "TB104": [150, 320, 495], "TB105": [130, 270, 415], "TB106": [110, 235, 360],
+        "TB201": [180, 385, 590], "TB202": [120, 250, 385], "TB203": [95, 205, 310],
+        "TB204": [75, 155, 235], "TB205": [50, 100, 155], "TB206": [50, 105, 160],
+        "TB207": [85, 180, 280], "TB208": [135, 290, 440], "TB209": [155, 330, 505],
+        "TB210": [45, 100, 150], "TB211": [60, 130, 195], "TB212": [40, 85, 130],
+        "TB301": [115, 250, 380], "TB302": [210, 445, 680], "TB303": [140, 290, 445],
+        "TB304": [95, 200, 310], "TB305": [75, 160, 245], "TB306": [70, 145, 220],
+        "TB307": [200, 430, 660], "TB308": [85, 180, 280], "TB309": [220, 470, 720],
+        "TB310": [115, 250, 380], "TB311": [60, 130, 195], "TB312": [50, 110, 165]
+    ]
+
     private static func bump(_ start: Double, _ duration: Double = 7, _ intensity: Double = 0.375) -> [TurbulenceBump] {
         [TurbulenceBump(start: start, duration: duration, intensity: intensity)]
     }
@@ -258,7 +283,7 @@ enum Campaign {
                        whatsNew: "A dim, sleepy cabin with a baby on board. Keep it quiet."),
             FlightPlan(id: "TB205", name: "Sea Breeze", aircraft: .swift, duration: 150,
                        kinds: full, script: [.drink], maxCap: 3, menu: dining, combos: true, strolls: true, dozing: true,
-                       turbulence: bump(70), twist: .helper, story: .sportsTeam, goal: .highScore(80),
+                       turbulence: bump(70), twist: .helper, story: .sportsTeam, goal: .maxStreak,
                        whatsNew: "Combo orders, and a trainee who handles call buttons for you."),
             FlightPlan(id: "TB206", name: "Swift Finale", aircraft: .swift, duration: 165,
                        kinds: full, script: [.drink, .sick], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
@@ -286,7 +311,7 @@ enum Campaign {
                        whatsNew: "Turbulence during service: the cart parks while the seatbelt sign is on."),
             FlightPlan(id: "TB212", name: "Coastal Finale", aircraft: .current, duration: 180,
                        kinds: full, script: [.drink, .spill], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
-                       turbulence: bump(70) + bump(140), cart: .sticks, twist: .mealService, story: .finale, goal: .highScore(80),
+                       turbulence: bump(70) + bump(140), cart: .sticks, twist: .mealService, story: .finale, goal: .maxStreak,
                        whatsNew: "Everything the coast has thrown at you, on one long flight.")
         ],
         unlockStars: 12)
@@ -343,7 +368,7 @@ enum Campaign {
                        whatsNew: "Eight across in the dark. Noise travels across the whole row."),
             FlightPlan(id: "TB311", name: "Ocean Chop", aircraft: .voyager, duration: 165,
                        kinds: binsFull, script: [.sick], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
-                       turbulence: bump(60, 9) + bump(125), cart: .breaks, twist: .helper, story: .sportsTeam, goal: .highScore(80),
+                       turbulence: bump(60, 9) + bump(125), cart: .breaks, twist: .helper, story: .sportsTeam, goal: .maxStreak,
                        whatsNew: "Up to four problems at once over open water, with the trainee's help."),
             FlightPlan(id: "TB312", name: "Voyager Finale", aircraft: .voyager, duration: 195,
                        kinds: binsFull, script: [.drink, .sick], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
