@@ -581,4 +581,15 @@ final class FlightSimulationTests: XCTestCase {
             XCTAssertGreaterThan(sim.stats.resolved + sim.stats.failed, 0, "\(plan.id) spawned something")
         }
     }
+
+    func testBoardingRushBagsArriveOneAtATime() {
+        let sim = FlightSimulation(plan: flight("TB201"), seed: 5)
+        sim.start()
+        var bags: Int { sim.occurrences.filter { $0.kind == .carryOn }.count }
+        XCTAssertEqual(bags, 1)
+        step(sim, seconds: 2.1)
+        XCTAssertEqual(bags, 2)
+        step(sim, seconds: 2)
+        XCTAssertEqual(bags, 3)
+    }
 }

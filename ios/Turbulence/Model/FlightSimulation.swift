@@ -379,6 +379,7 @@ final class FlightSimulation {
     private var nextID = 1
     private var bagQueue: [Int] = []           // sick occurrences whose used bag is on the tray
     private var deferredSpawns = 0             // problems held back while the cabin is strapped in
+    private var carryOnsLeft = 0               // boarding rush: bags still to be dropped in the aisle
     private var rng: SplitMix64
     private var events: [SimEvent] = []
 
@@ -451,7 +452,8 @@ final class FlightSimulation {
         running = true
         emitToast("Boarding. Tap the aisle to walk. Your tray carries two things at once.")
         if plan.twist == .boardingRush {
-            for _ in 0..<3 { spawn(.carryOn) }
+            spawn(.carryOn)                          // the rest follow one at a time while boarding
+            carryOnsLeft = 2
             hint("carryOn", "Boarding rush! Carry-on bags are blocking the aisle. Tap them with a free hand to stow them.")
         }
         if plan.twist == .galleyClosed {
@@ -474,6 +476,10 @@ final class FlightSimulation {
             emitToast("Final approach. Clear what you can before touchdown.")
         }
 
+        if carryOnsLeft > 0 && t >= Double(3 - carryOnsLeft) * 2 {
+            carryOnsLeft -= 1
+            spawn(.carryOn)
+        }
         updateTurbulence()
         updateMealService()
         runDirector(dt: dt)

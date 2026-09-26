@@ -6,44 +6,55 @@ struct GameView: View {
     let game: GameController
 
     var body: some View {
-        ZStack {
-            Color.sky.ignoresSafeArea()
-            VStack(spacing: 4) {
+        GeometryReader { geo in
+            ZStack(alignment: .top) {
+                Color.sky.ignoresSafeArea()
+                // the cabin uses the whole screen; the scene keeps it clear of the cutout, home indicator and HUD
+                SpriteView(scene: game.scene, preferredFramesPerSecond: 60)
+                    .ignoresSafeArea()
+                if let intro = game.intro3D {
+                    IntroSceneView(intro: intro)
+                        .ignoresSafeArea()
+                        .onTapGesture { game.skipIntro() }
+                        .transition(.opacity)
+                }
                 HUDBar(game: game)
                     .padding(.horizontal, 16)
+                    .padding(.top, 6)
                     .opacity(game.screen == .intro ? 0 : 1)
-                // The cabin runs edge to edge, under the notch and home-indicator insets.
-                ZStack {
-                    SpriteView(scene: game.scene, preferredFramesPerSecond: 60)
-                        .ignoresSafeArea()
-                    if let toast = game.toast {
-                        VStack {
-                            Spacer()
-                            Text(toast)
-                                .font(rounded(game.largeText ? 23 : 18, .semibold))
-                                .foregroundStyle(Color.text)
-                                .multilineTextAlignment(.center)
-                                .lineSpacing(2)
-                                .padding(.horizontal, 22).padding(.vertical, 14)
-                                .background(Color.navy, in: RoundedRectangle(cornerRadius: 18))
-                                .overlay(RoundedRectangle(cornerRadius: 18).stroke(Color(uiColor: Palette.calm), lineWidth: 3))
-                                .shadow(color: .black.opacity(0.35), radius: 12, y: 6)
-                                .frame(maxWidth: 720)
-                                .padding(.horizontal, 24)
-                                .padding(.bottom, 14)
-                                .allowsHitTesting(false)
-                        }
-                        .transition(.opacity)
-                    }
-                    overlay
+                if let n = game.countdownText {
+                    Text(n)
+                        .font(rounded(n == "Go!" ? 96 : 120, .heavy))
+                        .foregroundStyle(n == "Go!" ? Color.calm : Color.text)
+                        .shadow(color: .black.opacity(0.55), radius: 12, y: 6)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .id(n)
+                        .transition(.scale(scale: 1.8).combined(with: .opacity))
+                        .allowsHitTesting(false)
                 }
-                .ignoresSafeArea(edges: [.horizontal, .bottom])
+                overlay.ignoresSafeArea()
+                if game.screen == .intro { IntroLetterbox(game: game).transition(.opacity) }
             }
-            .padding(.top, 6)
-            if game.screen == .intro { IntroLetterbox(game: game).transition(.opacity) }
+            .onAppear { updateInsets(geo) }
+            .onChange(of: geo.size) { _, _ in updateInsets(geo) }
+            .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { updateInsets(geo) }   // the cutout switches sides
+            }
         }
-        .animation(.easeOut(duration: 0.2), value: game.toast)
         .animation(.easeInOut(duration: 0.4), value: game.screen)
+        .animation(.easeOut(duration: 0.35), value: game.intro3D == nil)
+        .animation(.spring(response: 0.3, dampingFraction: 0.6), value: game.countdownText)
+    }
+
+    /// Keeps the cabin clear of the HUD and of the camera cutout — only on the side the cutout is on, and only
+    /// as deep as the cutout itself (iOS reports the full safe inset on both sides in landscape).
+    private func updateInsets(_ geo: GeometryProxy) {
+        let safe = geo.safeAreaInsets
+        let orientation = (UIApplication.shared.connectedScenes.first as? UIWindowScene)?.effectiveGeometry.interfaceOrientation
+        let cutout = max(0, max(safe.leading, safe.trailing) - 22)     // ≈ the cutout's depth
+        let cutoutOnLeft = orientation != .landscapeLeft                // landscapeLeft: the top of the phone is on the right
+        game.scene.contentInsets = UIEdgeInsets(top: safe.top + 50, left: cutoutOnLeft ? cutout : 6,
+                                                bottom: 2, right: cutoutOnLeft ? 6 : cutout)
     }
 
     @ViewBuilder private var overlay: some View {
@@ -59,7 +70,7 @@ struct GameView: View {
                         next: app.nextFlight(after: game.plan).map { next in { app.openMap(brief: next) } },
                         retry: { app.board(game.plan) }, map: { app.openMap() })
             }
-        case .idle, .intro, .playing: EmptyView()
+        case .idle, .intro, .countdown, .playing: EmptyView()
         }
     }
 }

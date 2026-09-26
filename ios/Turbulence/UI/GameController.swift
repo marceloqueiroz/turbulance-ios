@@ -16,7 +16,7 @@ struct FlightResult: Equatable {
 /// Glue between the model, the SpriteKit renderer and the SwiftUI HUD.
 @Observable
 final class GameController {
-    enum Screen: Equatable { case idle, intro, playing, paused, ended }
+    enum Screen: Equatable { case idle, intro, countdown, playing, paused, ended }
 
     var screen: Screen = .idle
     var timeText = "2:30"
@@ -36,6 +36,10 @@ final class GameController {
     /// Letterbox captions during the intro cutscene (GDD §8b).
     var introTitle: String?
     var introSubtitle: String?
+    /// The 3D cutscene while it plays (GDD §8b).
+    var intro3D: IntroScene3D?
+    /// "3", "2", "1", "Go!" after the intro, before the flight clock starts.
+    var countdownText: String?
 
     /// Called once when a flight lands, before the scorecard shows.
     @ObservationIgnored var onEnded: ((FlightPlan, FlightResult) -> Void)?
@@ -85,13 +89,15 @@ final class GameController {
     /// Loads a flight. With `intro`, the cutscene plays first and the flight clock starts when it ends.
     func start(_ plan: FlightPlan, intro: Bool = true) {
         synth.warmUp()
+        scene.removeAction(forKey: "countdown")
+        countdownText = nil
         self.plan = plan
         sim = FlightSimulation(plan: plan)
         result = nil
         toast = nil
         seatbelt = false
         scene.reset()
-        guard intro else { beginFlight(); return }
+        guard intro else { countdown(); return }
         let route = Campaign.route(containing: plan.id)
         let leg = route.flatMap { r in r.flights.firstIndex(of: plan).map { (r.cities[$0], r.cities[$0 + 1]) } }
         introTitle = ["FLIGHT \(plan.id)", leg.map { "\($0.0.uppercased()) → \($0.1.uppercased())" }, plan.aircraft.displayName.uppercased()]
@@ -104,15 +110,30 @@ final class GameController {
         }, .wait(forDuration: 2.8), .run { [weak self] in
             self?.introSubtitle = "Captain: \(plan.story.name) with us today. Cabin crew, prepare for departure."
         }]), withKey: "introCaptions")
-        scene.playIntro { [weak self] in self?.beginFlight() }
+        let intro = IntroScene3D(sim: sim, viewSize: scene.size, insets: scene.contentInsets)
+        intro3D = intro
+        intro.play { [weak self] in self?.countdown() }
     }
 
-    func skipIntro() { scene.skipIntro() }
-
-    private func beginFlight() {
+    /// 3, 2, 1, Go! over the play view, then the flight starts (GDD §8b).
+    private func countdown() {
         scene.removeAction(forKey: "introCaptions")
         introTitle = nil
         introSubtitle = nil
+        intro3D = nil
+        screen = .countdown
+        var steps: [SKAction] = [.wait(forDuration: 0.35)]
+        for n in ["3", "2", "1"] {
+            steps += [.run { [weak self] in self?.countdownText = n; self?.synth.play(.pick) }, .wait(forDuration: 0.75)]
+        }
+        steps += [.run { [weak self] in self?.countdownText = "Go!"; self?.synth.play(.ok); self?.beginFlight() },
+                  .wait(forDuration: 0.6), .run { [weak self] in self?.countdownText = nil }]
+        scene.run(.sequence(steps), withKey: "countdown")
+    }
+
+    func skipIntro() { intro3D?.skip() }
+
+    private func beginFlight() {
         sim.start()
         screen = .playing
     }
