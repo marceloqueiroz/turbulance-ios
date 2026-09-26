@@ -13,10 +13,24 @@ struct RootView: View {
             switch app.screen {
             case .studio: StudioSplash { app.finishStudio() }
             case .splash: SplashView { app.finishSplash() }
-            case .onboarding: CabinBackdrop(game: app.game) { OnboardingCard { app.createProfile(name: $0, avatar: $1) } }
-            case .menu: CabinBackdrop(game: app.game) { MenuView(app: app) }
             case .map: RouteMapView(app: app)
             case .game: GameView(app: app, game: app.game)
+            }
+            if app.showProfiles {
+                Scrim {
+                    ProfileSwitcherCard(slots: app.slots, switchTo: app.switchProfile, create: app.startNewCrew,
+                                        delete: app.deleteProfile) { app.showProfiles = false }
+                }
+                .ignoresSafeArea()
+                .transition(.opacity)
+            }
+            if app.newCrewSlot != nil {
+                Scrim {
+                    OnboardingCard(firstRun: app.profile == nil, create: { app.createProfile(name: $0, avatar: $1) },
+                                   cancel: { app.cancelNewCrew() })
+                }
+                .ignoresSafeArea()
+                .transition(.opacity)
             }
             if app.showOptions {
                 Scrim { OptionsCard(options: app.options, update: app.update) { app.showOptions = false } }
@@ -28,32 +42,21 @@ struct RootView: View {
         .persistentSystemOverlays(.hidden)
         .animation(.easeInOut(duration: 0.25), value: app.screen)
         .animation(.easeOut(duration: 0.2), value: app.showOptions)
+        .animation(.easeOut(duration: 0.2), value: app.showProfiles)
+        .animation(.easeOut(duration: 0.2), value: app.newCrewSlot)
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { app.game.setPaused(true) }
         }
     }
 }
 
-/// The idle cabin, dimmed, behind menus.
-struct CabinBackdrop<Content: View>: View {
-    let game: GameController
-    @ViewBuilder let content: Content
-    var body: some View {
-        ZStack {
-            SpriteView(scene: game.scene, preferredFramesPerSecond: 30).ignoresSafeArea()
-            Color(red: 9 / 255, green: 16 / 255, blue: 33 / 255).opacity(0.6).ignoresSafeArea()
-            content.padding(16)
-        }
-    }
-}
-
-// MARK: - Splash (GDD §9a): a plane taxis in, the logo lands, "Tap to board"
+// MARK: - Splash (GDD §9a): a plane taxis in, the logo lands, then on to the map by itself
 
 struct SplashView: View {
     let done: () -> Void
     @State private var taxied = false
     @State private var logo = false
-    @State private var prompt = false
+    @State private var finished = false
 
     var body: some View {
         GeometryReader { geo in
@@ -71,39 +74,51 @@ struct SplashView: View {
                     .foregroundStyle(Color.cream)
                     .shadow(color: .black.opacity(0.4), radius: 8, y: 6)
                     .offset(x: taxied ? 0 : -geo.size.width * 0.7, y: 10)
-                VStack(spacing: 10) {
-                    Logo(size: 56).scaleEffect(logo ? 1 : 0.6).opacity(logo ? 1 : 0)
-                    Text("Tap to board").font(rounded(18, .semibold)).foregroundStyle(Color.text)
-                        .opacity(prompt ? 1 : 0.35)
-                        .opacity(logo ? 1 : 0)
-                }
-                .offset(y: -80)
+                Logo(size: 56).scaleEffect(logo ? 1 : 0.6).opacity(logo ? 1 : 0)
+                    .offset(y: -80)
             }
             .contentShape(Rectangle())
-            .onTapGesture { done() }
+            .onTapGesture { finish() }                 // a tap skips ahead
         }
         .onAppear {
             withAnimation(.easeOut(duration: 1.1)) { taxied = true }
             withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.9)) { logo = true }
-            withAnimation(.easeInOut(duration: 0.8).repeatForever().delay(1.4)) { prompt = true }
+        }
+        .task {
+            try? await Task.sleep(for: .seconds(2.2))
+            finish()
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Turbulence. Tap to board.")
-        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("Turbulence")
+    }
+
+    private func finish() {
+        guard !finished else { return }
+        finished = true
+        done()
     }
 }
 
 // MARK: - First run: name + avatar
 
 struct OnboardingCard: View {
+    var firstRun = true
     let create: (String, Int) -> Void
+    var cancel: () -> Void = {}
     @State private var name = ""
     @State private var avatar = 0
     @FocusState private var focused: Bool
 
     var body: some View {
         Card {
-            Eyebrow(text: "Welcome aboard")
+            HStack {
+                Eyebrow(text: firstRun ? "Welcome aboard" : "New crew member")
+                Spacer()
+                if !firstRun {
+                    Button(action: cancel) { Image(systemName: "xmark").font(.system(size: 14, weight: .bold)) }
+                        .buttonStyle(.plain).accessibilityLabel("Cancel")
+                }
+            }
             Text("Who's working this flight?").font(rounded(26, .bold))
             TextField("Your name", text: $name)
                 .font(rounded(18, .semibold))
@@ -126,7 +141,7 @@ struct OnboardingCard: View {
                 }
             }
             .padding(.vertical, 4)
-            CTA(title: "Start first flight") { create(name, avatar) }
+            CTA(title: firstRun ? "Let's fly" : "Join the crew") { create(name, avatar) }
                 .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
                 .opacity(name.trimmingCharacters(in: .whitespaces).isEmpty ? 0.5 : 1)
                 .padding(.bottom, 4)
@@ -134,43 +149,124 @@ struct OnboardingCard: View {
     }
 }
 
-// MARK: - Main menu
+// MARK: - Profiles (GDD §9a): the chip on the map and the four-slot switcher
 
-struct MenuView: View {
-    let app: AppModel
+/// The active crew member in the map's top bar; tapping it opens the switcher.
+struct ProfileChip: View {
+    let profile: Profile?
+    let tap: () -> Void
     var body: some View {
-        HStack(alignment: .center, spacing: 40) {
-            VStack(alignment: .leading, spacing: 14) {
-                Logo(size: 54)
-                if let p = app.profile {
-                    HStack(spacing: 10) {
-                        AvatarView(index: p.avatar, size: 40)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(p.name).font(rounded(17, .bold)).foregroundStyle(Color.text)
-                            HStack(spacing: 4) {
-                                Image(systemName: "star.fill").foregroundStyle(Color.calm)
-                                Text("\(p.totalStars) stars").foregroundStyle(Color.muted)
-                            }
-                            .font(rounded(13, .semibold))
-                        }
-                    }
-                    .padding(.leading, 4).padding(.trailing, 16).padding(.vertical, 4)
-                    .background(Color.panel, in: Capsule())
-                    .overlay(Capsule().stroke(Color.panelLine, lineWidth: 1))
+        Button(action: tap) {
+            HStack(spacing: 8) {
+                AvatarView(index: profile?.avatar ?? 0, size: 34)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(profile?.name ?? "Crew").font(rounded(15, .bold)).foregroundStyle(Color.text).lineLimit(1)
+                    Text("Switch crew").font(rounded(10, .heavy)).foregroundStyle(Color.muted)
                 }
+                Image(systemName: "chevron.down").font(.system(size: 11, weight: .heavy)).foregroundStyle(Color.muted)
             }
-            VStack(alignment: .leading, spacing: 14) {
-                CTA(title: "Fly") { app.openMap(brief: app.profile?.nextFlight) }
-                CTA(title: "Options", color: .teal) { app.showOptions = true }
-                HStack(spacing: 8) {
-                    CTA(title: "Co-op", color: .muted) {}
-                        .disabled(true)
-                    Text("Coming soon").font(rounded(12, .heavy)).foregroundStyle(Color.muted)
-                }
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Co-op, coming soon")
-            }
+            .padding(.leading, 4).padding(.trailing, 12).padding(.vertical, 3)
+            .background(Color.panel, in: Capsule())
+            .overlay(Capsule().stroke(Color.panelLine, lineWidth: 1))
         }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(profile?.name ?? "Crew"), switch crew member")
+    }
+}
+
+struct ProfileSwitcherCard: View {
+    let slots: ProfileSlots
+    let switchTo: (Int) -> Void
+    let create: (Int) -> Void
+    let delete: (Int) -> Void
+    let close: () -> Void
+
+    var body: some View {
+        Card {
+            HStack {
+                Eyebrow(text: "Crew on this device")
+                Spacer()
+                Button(action: close) { Image(systemName: "xmark").font(.system(size: 14, weight: .bold)) }
+                    .buttonStyle(.plain).accessibilityLabel("Close")
+            }
+            Text("Who's flying?").font(rounded(26, .bold))
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                ForEach(0..<ProfileSlots.count, id: \.self) { i in
+                    if let p = slots.slots[i] {
+                        ProfileSlotView(profile: p, active: i == slots.active,
+                                        select: { switchTo(i) }, delete: { delete(i) })
+                    } else {
+                        Button { create(i) } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "plus.circle.fill").font(.system(size: 22, weight: .bold))
+                                Text("New crew").font(rounded(15, .bold))
+                            }
+                            .foregroundStyle(Color.finePrint)
+                            .frame(maxWidth: .infinity, minHeight: 58)
+                            .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color.navy.opacity(0.35), style: StrokeStyle(lineWidth: 2, dash: [6, 5])))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Empty slot \(i + 1), add new crew member")
+                    }
+                }
+            }
+            Text("Each crew member keeps their own stars, unlocks and options. Hold the bin to delete one.")
+                .font(rounded(11, .medium)).foregroundStyle(Color.finePrint)
+                .padding(.bottom, 4)
+        }
+    }
+}
+
+/// A filled slot: tap to switch; hold the bin for 1.2 s to delete (it can't be undone).
+struct ProfileSlotView: View {
+    let profile: Profile
+    let active: Bool
+    let select: () -> Void
+    let delete: () -> Void
+    @State private var hold: CGFloat = 0
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button(action: select) {
+                HStack(spacing: 10) {
+                    AvatarView(index: profile.avatar, size: 40)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(profile.name).font(rounded(15, .bold)).lineLimit(1)
+                        HStack(spacing: 3) {
+                            Image(systemName: "star.fill").foregroundStyle(Color.calm)
+                            Text("\(profile.totalStars)").monospacedDigit()
+                            if active { Text("· flying").foregroundStyle(Color.teal) }
+                        }
+                        .font(rounded(12, .heavy))
+                    }
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("\(profile.name), \(profile.totalStars) stars\(active ? ", active" : "")")
+            ZStack {
+                Circle().fill(Color.white)
+                Circle().trim(from: 0, to: hold).stroke(Color.critical, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+                Image(systemName: "trash.fill").font(.system(size: 13, weight: .bold))
+                    .foregroundStyle(hold > 0 ? Color.critical : Color.finePrint)
+            }
+            .frame(width: 34, height: 34)
+            .onLongPressGesture(minimumDuration: 1.2) {
+                hold = 0
+                delete()
+            } onPressingChanged: { pressing in
+                withAnimation(pressing ? .linear(duration: 1.2) : .easeOut(duration: 0.2)) { hold = pressing ? 1 : 0 }
+            }
+            .accessibilityLabel("Delete \(profile.name)")
+            .accessibilityHint("Hold to delete. This can't be undone.")
+            .accessibilityAction(named: "Delete") { delete() }
+        }
+        .padding(.horizontal, 10).frame(minHeight: 58)
+        .background(active ? Color(red: 1, green: 0.97, blue: 0.93) : Color.white.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(active ? Color.coral : Color.navy.opacity(0.3), lineWidth: active ? 3 : 1.5))
     }
 }
 
@@ -239,7 +335,7 @@ struct RouteMapView: View {
                 // top bar
                 VStack {
                     HStack(spacing: 12) {
-                        RoundButton(system: "chevron.left", label: "Main menu") { app.openMenu() }
+                        ProfileChip(profile: app.profile) { app.showProfiles = true }
                         VStack(alignment: .leading, spacing: 0) {
                             Eyebrow(text: "Route \(route.id) · \(route.aircraftNames)")
                             Text(route.name).font(rounded(22, .bold)).foregroundStyle(Color.text)

@@ -795,4 +795,42 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertTrue(sim.drainEvents().contains(.nope), "cold coffee is refused")
         XCTAssertNotNil(sim.occurrences.first { $0.id == id })
     }
+
+    // MARK: Profile slots (GDD §9a)
+
+    func testProfileSlotsCreateSwitchAndDelete() {
+        var s = ProfileSlots()
+        XCTAssertTrue(s.isEmpty)
+        XCTAssertNil(s.current)
+        XCTAssertEqual(s.firstEmpty, 0)
+        s.create(in: 0, name: " Ana ", avatar: 2)
+        s.create(in: 2, name: "Bo", avatar: 1)
+        XCTAssertEqual(s.active, 2, "a new profile becomes the active one")
+        XCTAssertEqual(s.current?.name, "Bo")
+        XCTAssertEqual(s.firstEmpty, 1)
+        XCTAssertNil(s.create(in: 0, name: "X", avatar: 0), "can't overwrite a filled slot")
+
+        s.current?.stars["TB101"] = 3
+        s.switchTo(0)
+        XCTAssertEqual(s.current?.name, "Ana")
+        XCTAssertEqual(s.current?.totalStars, 0, "stars belong to each profile")
+        s.switchTo(1)
+        XCTAssertEqual(s.active, 0, "can't switch to an empty slot")
+
+        s.delete(0)
+        XCTAssertEqual(s.active, 2, "deleting the active profile moves to the one left")
+        XCTAssertEqual(s.current?.totalStars, 3)
+        s.delete(2)
+        XCTAssertTrue(s.isEmpty)
+        XCTAssertNil(s.current)
+    }
+
+    func testProfileSlotsHoldFourAndRoundTrip() throws {
+        var s = ProfileSlots()
+        for i in 0..<ProfileSlots.count { s.create(in: i, name: "P\(i)", avatar: i) }
+        XCTAssertNil(s.firstEmpty)
+        XCTAssertNil(s.create(in: 4, name: "Five", avatar: 0))
+        let back = try JSONDecoder().decode(ProfileSlots.self, from: JSONEncoder().encode(s))
+        XCTAssertEqual(back, s)
+    }
 }

@@ -14,6 +14,7 @@ extension Color {
     static let text = Color(uiColor: Palette.text)
     static let muted = Color(uiColor: Palette.muted)
     static let calm = Color(uiColor: Palette.calm)
+    static let critical = Color(uiColor: Palette.critical)
     static let finePrint = Color(red: 0x55 / 255, green: 0x60 / 255, blue: 0x7A / 255)
 }
 

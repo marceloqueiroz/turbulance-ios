@@ -14,7 +14,7 @@ struct GameOptions: Codable, Equatable {
     var largeText = false
 }
 
-/// A local player profile (GDD §9a). v1.0 step 1 keeps one per device.
+/// A local player profile (GDD §9a); up to four per device in `ProfileSlots`.
 struct Profile: Codable, Equatable {
     var name: String
     var avatar: Int
@@ -51,23 +51,73 @@ struct Profile: Codable, Equatable {
     }
 }
 
-/// Saves the profile as JSON in Application Support. iCloud sync comes in build step 2.
+/// Up to four local profiles per device, one of them active (GDD §9a).
+struct ProfileSlots: Codable, Equatable {
+    static let count = 4
+    var slots: [Profile?] = Array(repeating: nil, count: count)
+    var active = 0
+
+    var current: Profile? {
+        get { slots.indices.contains(active) ? slots[active] : nil }
+        set { if slots.indices.contains(active) { slots[active] = newValue } }
+    }
+    var firstEmpty: Int? { slots.firstIndex { $0 == nil } }
+    var isEmpty: Bool { slots.allSatisfy { $0 == nil } }
+
+    /// Creates a profile in an empty slot and makes it active.
+    @discardableResult
+    mutating func create(in slot: Int, name: String, avatar: Int) -> Profile? {
+        guard slots.indices.contains(slot), slots[slot] == nil else { return nil }
+        let p = Profile(name: name.trimmingCharacters(in: .whitespaces), avatar: avatar)
+        slots[slot] = p
+        active = slot
+        return p
+    }
+
+    mutating func switchTo(_ slot: Int) {
+        guard slots.indices.contains(slot), slots[slot] != nil else { return }
+        active = slot
+    }
+
+    /// Deleting the active profile moves to the first one left (or none).
+    mutating func delete(_ slot: Int) {
+        guard slots.indices.contains(slot) else { return }
+        slots[slot] = nil
+        if slot == active { active = slots.firstIndex { $0 != nil } ?? slot }
+    }
+}
+
+/// Saves the profile slots as JSON in Application Support. iCloud sync comes in build step 2.
 enum ProfileStore {
-    static var url: URL {
+    private static var dir: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        return dir.appendingPathComponent("profile.json")
+        return dir
+    }
+    static var url: URL { dir.appendingPathComponent("profiles.json") }
+    /// The single-profile save from before profile slots.
+    static var legacyURL: URL { dir.appendingPathComponent("profile.json") }
+
+    static func load() -> ProfileSlots {
+        if let data = try? Data(contentsOf: url), let s = try? JSONDecoder().decode(ProfileSlots.self, from: data) {
+            return s
+        }
+        var s = ProfileSlots()
+        if let data = try? Data(contentsOf: legacyURL), let p = try? JSONDecoder().decode(Profile.self, from: data) {
+            s.slots[0] = p                       // keep the old save's progress in slot 1
+            save(s)
+            try? FileManager.default.removeItem(at: legacyURL)
+        }
+        return s
     }
 
-    static func load() -> Profile? {
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(Profile.self, from: data)
-    }
-
-    static func save(_ p: Profile) {
-        guard let data = try? JSONEncoder().encode(p) else { return }
+    static func save(_ s: ProfileSlots) {
+        guard let data = try? JSONEncoder().encode(s) else { return }
         try? data.write(to: url, options: .atomic)
     }
 
-    static func delete() { try? FileManager.default.removeItem(at: url) }
+    static func delete() {
+        try? FileManager.default.removeItem(at: url)
+        try? FileManager.default.removeItem(at: legacyURL)
+    }
 }
