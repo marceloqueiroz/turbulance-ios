@@ -126,12 +126,36 @@ enum Art {
             fillStroke(CGPath(roundedRect: CGRect(x: -11, y: -6, width: 22, height: 16), cornerWidth: 2.5, cornerHeight: 2.5, transform: nil), UIColor(hex: 0x7E8693))
             c.move(to: P(-11, 0)); c.addLine(to: P(11, 0)); c.strokePath()
             c.setFillColor(Palette.coral.cgColor); c.fill(CGRect(x: -2.5, y: -2, width: 5, height: 5))
+        case .coldCoffee:
+            // gone cold: pale, no steam, a frost mark
+            let mug = CGPath(roundedRect: CGRect(x: -8, y: -5, width: 14, height: 15), cornerWidth: 3, cornerHeight: 3, transform: nil)
+            fillStroke(mug, UIColor(hex: 0xE3ECF4))
+            c.setFillColor(UIColor(hex: 0x8A9BB0).cgColor); c.fill(CGRect(x: -6.5, y: -3.5, width: 11, height: 3))
+            c.addEllipse(in: CGRect(x: 5, y: -1, width: 6, height: 7)); c.strokePath()
+            frost(c, 7, -9)
+        case .coldMeal:
+            fillStroke(CGPath(roundedRect: CGRect(x: -11, y: 4, width: 22, height: 6), cornerWidth: 2, cornerHeight: 2, transform: nil), UIColor(hex: 0xB9C2CC))
+            let dome = CGMutablePath(); dome.move(to: P(-9, 4)); dome.addQuadCurve(to: P(9, 4), control: P(0, -14)); dome.closeSubpath()
+            fillStroke(dome, UIColor(hex: 0xC9D7E6))
+            frost(c, 8, -10)
         case .usedBag:
             // a crumpled, tied-off sick bag
             fillStroke(poly([(-8, -4), (8, -4), (9, 11), (-9, 11)]), UIColor(hex: 0xC9D6A0))
             fillStroke(poly([(-3, -4), (-5, -11), (5, -11), (3, -4)]), UIColor(hex: 0xB4C487))
             c.move(to: P(-5, 3)); c.addLine(to: P(-1, 6)); c.addLine(to: P(4, 2)); c.strokePath()
         }
+        c.restoreGState()
+    }
+
+    /// A little snowflake: this item has gone cold.
+    static func frost(_ c: CGContext, _ x: CGFloat, _ y: CGFloat) {
+        c.saveGState()
+        c.setStrokeColor(UIColor(hex: 0x3D8FD1).cgColor); c.setLineWidth(1.6); c.setLineCap(.round)
+        for a in [0.0, Double.pi / 3, 2 * Double.pi / 3] {
+            let dx = CGFloat(cos(a)) * 4, dy = CGFloat(sin(a)) * 4
+            c.move(to: P(x - dx, y - dy)); c.addLine(to: P(x + dx, y + dy))
+        }
+        c.strokePath()
         c.restoreGState()
     }
 

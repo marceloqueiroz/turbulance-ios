@@ -402,6 +402,7 @@ final class CabinScene: SKScene {
         }
 
         let crew = sim.crew
+        crewNode.trayWarmth = crew.tray.indices.map { sim.warmth(ofTraySlot: $0) }
         crewNode.sync(crew, clock: clock)
         crewNode.position = pt(crew.x, crew.y)
         if let t = crew.target {
@@ -488,6 +489,10 @@ final class CabinScene: SKScene {
             shake = max(shake, 0.2)
             burst(.puff, x: x, y: y, count: 6, colors: [UIColor(hex: 0xC8BCAA, alpha: 0.9)])
             floatText("Whoa!", x: x, y: y - 20, color: Palette.urgent)
+        case let .slipped(x, y):
+            shake = max(shake, 0.25)
+            burst(.puff, x: x, y: y, count: 10, colors: [UIColor(hex: 0x8A4B22, alpha: 0.85), UIColor(hex: 0xF29B30, alpha: 0.8)])
+            floatText("Slipped! −2", x: x, y: y - 26, color: Palette.critical)
         case let .crewStumble(x, y):
             shake = max(shake, 0.4)
             burst(.puff, x: x, y: y, count: 8, colors: [UIColor(hex: 0xC8BCAA, alpha: 0.9)])
@@ -667,6 +672,7 @@ final class SpillNode: SKNode {
     private let ripple = SKShapeNode(ellipseOf: CGSize(width: 20, height: 12))
     private let seed: Double
     private var shownFailed = false
+    private var shownSize: CGFloat = 1
 
     init(_ o: Occurrence) {
         seed = o.seed
@@ -686,7 +692,8 @@ final class SpillNode: SKNode {
             shownFailed = true
             sprite.texture = SKTexture(image: Art.spill(seed: seed, failed: true))
         }
-        sprite.setScale(0.4 + 0.6 * min(1, o.life / 0.4))
+        shownSize += (CGFloat(o.size) - shownSize) * 0.15            // grows smoothly after a slip
+        sprite.setScale((0.4 + 0.6 * min(1, o.life / 0.4)) * (1 + 0.35 * (shownSize - 1)))
         let rt = (clock + seed).truncatingRemainder(dividingBy: 2.4)
         if rt < 1 && !o.failed {
             ripple.isHidden = false
@@ -774,6 +781,17 @@ final class CrewNode: SKNode {
     private let torso = SKNode()
     private let heldNodes = [SKNode(), SKNode()]
     private let heldItems = [SKSpriteNode(), SKSpriteNode()]
+    private let warmthRings = [SKShapeNode(), SKShapeNode()]
+    private let steams: [SKShapeNode] = (0..<2).map { _ in
+        let p = CGMutablePath()
+        p.move(to: CGPoint(x: 0, y: 0))
+        p.addCurve(to: CGPoint(x: 0, y: 10), control1: CGPoint(x: 4, y: 3), control2: CGPoint(x: -4, y: 7))
+        let n = SKShapeNode(path: p)
+        n.lineWidth = 1.8; n.lineCap = .round; n.strokeColor = Art.white(0.85)
+        return n
+    }
+    /// 0…1 heat left for each tray slot (nil = not a hot item), set by the scene each frame.
+    var trayWarmth: [Double?] = []
     private let busyBG = SKShapeNode(circleOfRadius: 22)
     private let busyFG = SKShapeNode()
     private let bubbleNode = SKNode()
@@ -868,6 +886,28 @@ final class CrewNode: SKNode {
         strap.isHidden = c.seated == nil               // buckled into a jump seat
         // the tray: up to two items above the crew member's head (the HUD no longer repeats this)
         for k in 0..<heldNodes.count {
+            if warmthRings[k].parent == nil {
+                warmthRings[k].lineWidth = 2.5; warmthRings[k].strokeColor = Palette.urgent; warmthRings[k].lineCap = .round
+                warmthRings[k].zPosition = 1
+                heldNodes[k].addChild(warmthRings[k])
+                steams[k].position = CGPoint(x: 0, y: 12)
+                heldNodes[k].addChild(steams[k])
+            }
+            // hot items: a shrinking warmth ring and a wisp of steam; nothing once they've gone cold
+            let heat = k < trayWarmth.count ? trayWarmth[k] : nil
+            if let heat, heat > 0 {
+                let path = CGMutablePath()
+                path.addArc(center: .zero, radius: 13.5, startAngle: .pi / 2, endAngle: .pi / 2 - heat * 2 * .pi, clockwise: true)
+                warmthRings[k].path = path
+                warmthRings[k].strokeColor = heat > 0.3 ? Palette.urgent : Palette.critical
+                warmthRings[k].isHidden = false
+                steams[k].isHidden = false
+                steams[k].alpha = 0.4 + 0.4 * CGFloat(heat)
+                steams[k].position = CGPoint(x: 0, y: 13 + CGFloat(sin(clock * 4 + Double(k))) * 1.5)
+            } else {
+                warmthRings[k].isHidden = true
+                steams[k].isHidden = true
+            }
             if k < c.tray.count {
                 heldNodes[k].isHidden = false
                 heldItems[k].texture = CabinScene.Tex.items[c.tray[k]]

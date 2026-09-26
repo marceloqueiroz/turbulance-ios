@@ -602,4 +602,54 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertNil(sim.crew.seated)
         XCTAssertEqual(sim.crew.x, 120, accuracy: 0.5, "walked to the start position")
     }
+
+    // MARK: Slipping and cold food (GDD §5a, §6a)
+
+    func testSlippingWithDrinksSplashesThemAndGrowsTheSpill() {
+        let sim = runningSim()
+        let id = sim.addSpill(row: 6)
+        var spill: Occurrence { sim.occurrences.first { $0.id == id }! }
+        let before = spill.x - 60
+        sim.crew.x = before
+        sim.crew.tray = [.juice, .snack]
+        let sat = sim.satisfaction
+        _ = sim.drainEvents()
+        sim.crew.target = CrewTarget(x: spill.x + 100, action: .none)
+        step(sim, seconds: 0.5)
+        XCTAssertEqual(sim.crew.tray, [.snack], "the juice splashed out, the snack stayed")
+        XCTAssertEqual(spill.size, 2)
+        XCTAssertEqual(sim.satisfaction, sat - 2, accuracy: 0.5)
+        XCTAssertTrue(sim.drainEvents().contains { if case .slipped = $0 { return true }; return false })
+        XCTAssertGreaterThan(sim.reach(spill), Tuning.stopDistance, "a bigger puddle covers more aisle")
+    }
+
+    func testNoSlipWithoutDrinks() {
+        let sim = runningSim()
+        let id = sim.addSpill(row: 6)
+        let spill = sim.occurrences.first { $0.id == id }!
+        sim.crew.x = spill.x - 60
+        sim.crew.tray = [.towel]
+        sim.crew.target = CrewTarget(x: spill.x + 100, action: .none)
+        step(sim, seconds: 0.5)
+        XCTAssertEqual(sim.occurrences.first { $0.id == id }!.size, 1)
+        XCTAssertEqual(sim.crew.tray, [.towel])
+    }
+
+    func testCoffeeGoesColdOnTheTrayAndIsRefused() {
+        let sim = runningSim()
+        sim.crew.tray = [.coffee]
+        step(sim, seconds: 1)
+        XCTAssertLessThan(sim.warmth(ofTraySlot: 0) ?? 1, 1)
+        step(sim, seconds: Item.coffee.keepsHotFor!)
+        XCTAssertEqual(sim.crew.tray, [.coldCoffee])
+        let pi = sim.passengers.firstIndex { $0.reach == 0 && $0.row >= 2 }!
+        let p = sim.passengers[pi]
+        let id = sim.addAtSeat(.drink, passenger: pi, steps: [.item(.coffee)], fuse: 26)
+        sim.crew.x = p.x
+        _ = sim.drainEvents()
+        sim.tap(x: p.x, y: p.y)
+        step(sim, seconds: 1)
+        XCTAssertTrue(sim.drainEvents().contains(.nope), "cold coffee is refused")
+        XCTAssertNotNil(sim.occurrences.first { $0.id == id })
+    }
 }
