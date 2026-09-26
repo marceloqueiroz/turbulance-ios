@@ -49,7 +49,7 @@ final class AppModel {
         screen = .map
     }
 
-    /// Boards a flight. The intro cutscene plays from a briefing card, not on Retry/Restart (GDD §8b).
+    /// Boards a flight. The intro cutscene plays before every flight, retries included (GDD §8b).
     func board(_ plan: FlightPlan, intro: Bool = true) {
         briefing = nil
         newBest = false

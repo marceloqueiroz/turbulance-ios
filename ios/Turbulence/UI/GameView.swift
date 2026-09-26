@@ -50,14 +50,14 @@ struct GameView: View {
         switch game.screen {
         case .paused:
             Scrim {
-                PauseCard(resume: { game.setPaused(false) }, restart: { app.board(game.plan, intro: false) },
+                PauseCard(resume: { game.setPaused(false) }, restart: { app.board(game.plan) },
                           options: { app.showOptions = true }, map: { app.openMap() })
             }
         case .ended:
             Scrim {
                 EndCard(plan: game.plan, result: game.result, newBest: app.newBest,
                         next: app.nextFlight(after: game.plan).map { next in { app.openMap(brief: next) } },
-                        retry: { app.board(game.plan, intro: false) }, map: { app.openMap() })
+                        retry: { app.board(game.plan) }, map: { app.openMap() })
             }
         case .idle, .intro, .playing: EmptyView()
         }
