@@ -2,7 +2,7 @@ import AVFoundation
 
 /// Tiny synth for the per-occurrence stings (GDD §8): each sound is rendered once into a PCM buffer.
 final class Synth {
-    enum Sound: CaseIterable { case sick, spill, pick, step, ok, fail, nope, ding, chime, rumble, whoa, grumble, grumbleLoud }
+    enum Sound: CaseIterable { case sick, spill, pick, step, ok, fail, nope, ding, chime, rumble, whoa, grumble, grumbleLoud, paChime }
     enum Wave { case sine, square, triangle, saw }
     struct Tone { let f: Double; let d: Double; let wave: Wave; let v: Double; let delay: Double; let f2: Double? }
 
@@ -35,7 +35,28 @@ final class Synth {
     }
 
     func play(_ s: Sound) {
-        guard !muted, started, let buffer = buffers[s] else { return }
+        guard let buffer = buffers[s] else { return }
+        play(buffer)
+    }
+
+    /// The captain on the PA (GDD §8b): a radio-style babble of syllables whose pitch wanders up and down,
+    /// like game characters talking, for about `seconds`.
+    func speak(seconds: Double) {
+        var tones: [Tone] = []
+        var t = 0.0
+        var pitch = 150.0
+        while t < seconds {
+            let d = Double.random(in: 0.07...0.13)
+            pitch = min(210, max(110, pitch + Double.random(in: -25...25)))
+            tones.append(Tone(f: pitch, d: d, wave: .square, v: 0.03, delay: t, f2: pitch * Double.random(in: 0.85...1.1)))
+            tones.append(Tone(f: pitch * 2.02, d: d * 0.9, wave: .triangle, v: 0.018, delay: t, f2: nil))   // radio brightness
+            t += d + (Double.random(in: 0...1) < 0.2 ? 0.16 : 0.035)                                     // now and then a word gap
+        }
+        if let buffer = render(tones) { play(buffer) }
+    }
+
+    private func play(_ buffer: AVAudioPCMBuffer) {
+        guard !muted, started else { return }
         if !engine.isRunning { try? engine.start() }
         let p = players[nextPlayer]
         nextPlayer = (nextPlayer + 1) % players.count
@@ -60,6 +81,9 @@ final class Synth {
         case .whoa: return [Tone(f: 300, d: 0.22, wave: .triangle, v: 0.07, delay: 0, f2: 520)]
         // unattended passengers: a grumble, louder and harsher once critical
         case .grumble: return [Tone(f: 190, d: 0.16, wave: .square, v: 0.03, delay: 0, f2: 150), Tone(f: 170, d: 0.18, wave: .square, v: 0.03, delay: 0.17, f2: 130)]
+        // the cabin PA "bing-bong" before the captain speaks
+        case .paChime: return [Tone(f: 880, d: 0.8, wave: .sine, v: 0.07, delay: 0, f2: nil), Tone(f: 1760, d: 0.4, wave: .sine, v: 0.015, delay: 0, f2: nil),
+                               Tone(f: 698, d: 1.0, wave: .sine, v: 0.07, delay: 0.5, f2: nil)]
         case .grumbleLoud: return [Tone(f: 240, d: 0.14, wave: .saw, v: 0.05, delay: 0, f2: 180), Tone(f: 260, d: 0.14, wave: .saw, v: 0.05, delay: 0.15, f2: 170), Tone(f: 220, d: 0.2, wave: .saw, v: 0.05, delay: 0.3, f2: 140)]
         }
     }

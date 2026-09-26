@@ -10,19 +10,23 @@ final class IntroScene3D {
     let cameraNode = SCNNode()
     private let layout: CabinLayout
     private let passengers: [Passenger]
-    private let viewSize: CGSize
-    private let insets: UIEdgeInsets
+    /// The live view size and cabin insets (read every frame, so the last shot always matches the 2D view).
+    private let frame: () -> (size: CGSize, insets: UIEdgeInsets)
     private let bins = SCNNode()
     private var done: (() -> Void)?
     private var finished = false
-    static let duration = 6.4
+    /// Unhurried on purpose: Tap to skip is always there (GDD §8b).
+    static let duration = 11.0
+    /// The 2D view starts fading in this long before the camera stops, so the two overlap.
+    static let handoffLead = 0.8
+    private let lights = SCNNode()
+    private var ambientLight: SCNLight?, sunLight: SCNLight?, lampLights: [SCNLight] = []
 
-    init(sim: FlightSimulation, viewSize: CGSize, insets: UIEdgeInsets) {
+    init(sim: FlightSimulation, frame: @escaping () -> (size: CGSize, insets: UIEdgeInsets)) {
         layout = sim.layout
         passengers = sim.passengers
-        self.viewSize = viewSize
-        self.insets = insets
-        scene.background.contents = Palette.sky
+        self.frame = frame
+        scene.background.contents = Art.sky(CGSize(width: 900, height: 420))   // the same night sky as the 2D view
         build()
     }
 
@@ -62,8 +66,36 @@ final class IntroScene3D {
         let W = L.width, H = L.height
         let a0 = L.aisles[0]
 
-        // floor, carpet and the coral runner
-        box(CGFloat(W - 40), 2, CGFloat(H - 44), at: v(W / 2, -1, H / 2), Palette.cream)
+        // hull, livery, wings and tail in the same place as the 2D art, so the last frame matches it
+        func slab(_ path: CGPath, depth: CGFloat, y: Double, _ color: UIColor) {
+            let shape = SCNShape(path: UIBezierPath(cgPath: path), extrusionDepth: depth)
+            shape.firstMaterial = mat(color)
+            let n = SCNNode(geometry: shape)
+            n.eulerAngles.x = .pi / 2                  // shape y → model y (SceneKit z)
+            n.position = v(0, y, 0)
+            scene.rootNode.addChildNode(n)
+        }
+        slab(Art.rr(12, 12, CGFloat(W - 19), CGFloat(H - 24), [80, 32, 32, 80]), depth: 20, y: -12, UIColor(hex: 0xC9CED5))
+        slab(Art.rr(22, 22, CGFloat(W - 39), CGFloat(H - 44), [70, 24, 24, 70]), depth: 2, y: -1, Palette.cream)
+        box(CGFloat(W - 168), 1, 5, at: v(150 + (W - 168) / 2, -1.5, 15.5), Palette.coral)
+        box(CGFloat(W - 168), 1, 5, at: v(150 + (W - 168) / 2, -1.5, H - 15.5), Palette.coral)
+        let dx = (W - 1000) * 0.45, tx = W - 1000
+        for m in [1.0, -1.0] {
+            let Y: (Double) -> CGFloat = { CGFloat(m == 1 ? $0 : H - $0) }
+            func poly(_ pts: [(Double, Double)]) -> CGPath {
+                let p = CGMutablePath(); p.addLines(between: pts.map { CGPoint(x: $0.0, y: Double(Y($0.1))) }); p.closeSubpath(); return p
+            }
+            slab(poly([(430 + dx, 24), (620 + dx, -380), (690 + dx, -380), (610 + dx, 24)]), depth: 6, y: -26, UIColor(hex: 0xA3AAB6))
+            slab(poly([(620 + dx, -380), (690 + dx, -380), (686 + dx, -362), (628 + dx, -362)]), depth: 6, y: -25, Palette.coral)
+            slab(poly([(898 + tx, 24), (972 + tx, -100), (1004 + tx, -100), (985 + tx, 40)]), depth: 6, y: -26, UIColor(hex: 0xA3AAB6))
+            let engine = SCNNode(geometry: SCNCapsule(capRadius: 13, height: 98))
+            engine.geometry?.firstMaterial = mat(UIColor(hex: 0x5B6475))
+            engine.eulerAngles.z = .pi / 2
+            engine.position = v(499 + dx, -40, Double(Y(-90)))
+            scene.rootNode.addChildNode(engine)
+        }
+
+        // carpet and the coral runner
         for a in L.aisles {
             box(CGFloat(L.aftX - 172), 0.6, 76, at: v((172 + L.aftX) / 2, 0.3, a), Palette.carpet)
             box(CGFloat(L.aftX - 56), 0.8, 8, at: v((56 + L.aftX) / 2, 0.7, a), Palette.coral)
@@ -85,6 +117,9 @@ final class IntroScene3D {
                 scene.rootNode.addChildNode(pane)
             }
         }
+
+        // jump seats at the edge of each aisle
+        for j in L.jumpSeats { box(22, 10, 12, at: v(j.x, 22, L.aisles[j.aisle] - 30), UIColor(hex: 0x4E6A7A), chamfer: 2) }
 
         // galleys, lavatories, closets
         for b in L.blocks {
@@ -120,14 +155,14 @@ final class IntroScene3D {
         }
 
         // passengers (the walkers start at the door and board during the cutscene)
-        let reachX = 70 + 80 * 4.0
-        let walkerIDs = Set(passengers.indices.filter { passengers[$0].aisle == 0 && passengers[$0].x < reachX && !passengers[$0].vip }
+        let reachX = 70 + 60 * 5.0
+        let walkerIDs = Set(passengers.indices.filter { passengers[$0].aisle == 0 && passengers[$0].x > 260 && passengers[$0].x < reachX && !passengers[$0].vip }
             .shuffled().prefix(4))
         for (i, p) in passengers.enumerated() {
             let node = person(shirt: Palette.shirt(p.archetype), skin: Palette.skins[p.skin], hair: Palette.hairs[p.hair])
             node.position = v(p.x + 1, 0, p.y)
             scene.rootNode.addChildNode(node)
-            if walkerIDs.contains(i) { board(node, to: p, delay: 0.15 + 0.55 * Double(walkerIDs.sorted().firstIndex(of: i) ?? 0)) }
+            if walkerIDs.contains(i) { board(node, to: p, delay: 0.3 + 0.9 * Double(walkerIDs.sorted().firstIndex(of: i) ?? 0)) }
         }
 
         // the attendant runs the safety demo mid-cabin
@@ -141,6 +176,17 @@ final class IntroScene3D {
             let arm = box(4, 18, 4, at: v(-6, 58, side * 11), Palette.teal, chamfer: 2, parent: crew)
             arm.eulerAngles.x = Float(side * 0.5)
         }
+        // after the demo the attendant walks forward and buckles into the jump seat they start from
+        let seat = L.jumpSeats.first { $0.aisle == 0 } ?? JumpSeat(x: 72, aisle: 0)
+        let walkTime = (midX - seat.x) / 110
+        crew.runAction(.sequence([
+            .wait(duration: 7.0),
+            .run { _ in belt.removeAllActions(); belt.isHidden = true },
+            .rotateTo(x: 0, y: 0, z: 0, duration: 0.2, usesShortestUnitArc: true),
+            .move(to: v(seat.x, 0, a0), duration: walkTime),
+            .rotateTo(x: 0, y: .pi, z: 0, duration: 0.25, usesShortestUnitArc: true),
+            .move(to: v(seat.x, -8, a0 - 8), duration: 0.35)
+        ]))
 
         // overhead bins over every seat block: they frame the eye-level shots, then fade for the top-down view
         let binColor = UIColor(hex: 0xECE7DE)
@@ -152,20 +198,22 @@ final class IntroScene3D {
             box(CGFloat(x1 - x0), 26, CGFloat(z1 - z0), at: v((x0 + x1) / 2, 104, (z0 + z1) / 2), binColor, chamfer: 3, parent: bins)
             box(CGFloat(x1 - x0), 3, 3, at: v((x0 + x1) / 2, 92, z0 < a0 ? z1 : z0), UIColor(hex: 0xB8BEC7), parent: bins)
         }
+        // a ceiling over the aisles for the eye-level shots; it fades out with the bins
+        box(CGFloat(W - 80), 3, CGFloat(H - 60), at: v(W / 2, 132, H / 2), UIColor(hex: 0xF1ECE3), parent: bins)
         scene.rootNode.addChildNode(bins)
 
         // a bag goes up into a bin, and the lid snaps shut
         let binRow = L.rows[max(1, L.rows.count / 2 - 2)]
         let bag = box(18, 12, 10, at: v(binRow.x, 40, a0 - 12), UIColor(hex: 0x3D6E8C), chamfer: 2)
-        bag.runAction(.sequence([.wait(duration: 1.2), .move(to: v(binRow.x, 104, a0 - 58), duration: 0.6), .fadeOut(duration: 0.15)]))
+        bag.runAction(.sequence([.wait(duration: 2.2), .move(to: v(binRow.x, 104, a0 - 58), duration: 0.7), .fadeOut(duration: 0.15)]))
         let lid = box(36, 2, 24, at: v(binRow.x, 92, a0 - 40), binColor, chamfer: 1, parent: bins)   // fades with the bins
         lid.eulerAngles.x = -1.1
-        lid.runAction(.sequence([.wait(duration: 1.9), .rotateTo(x: 0, y: 0, z: 0, duration: 0.15)]))
+        lid.runAction(.sequence([.wait(duration: 3.0), .rotateTo(x: 0, y: 0, z: 0, duration: 0.15)]))
 
         // warm cabin light with soft shadows
         let ambient = SCNNode(); ambient.light = SCNLight(); ambient.light!.type = .ambient
         ambient.light!.intensity = 520; ambient.light!.color = UIColor(red: 1, green: 0.95, blue: 0.88, alpha: 1)
-        scene.rootNode.addChildNode(ambient)
+        scene.rootNode.addChildNode(ambient); ambientLight = ambient.light
         let sun = SCNNode(); sun.light = SCNLight(); sun.light!.type = .directional
         sun.light!.intensity = 850; sun.light!.castsShadow = true
         sun.light!.shadowMode = .forward; sun.light!.shadowRadius = 4; sun.light!.shadowSampleCount = 8
@@ -173,18 +221,19 @@ final class IntroScene3D {
         sun.light!.orthographicScale = CGFloat(max(W, H) / 1.6)
         sun.position = v(W / 2, 400, H / 2)
         sun.eulerAngles = SCNVector3(-Float.pi / 2.4, 0.3, 0)
-        scene.rootNode.addChildNode(sun)
+        scene.rootNode.addChildNode(sun); sunLight = sun.light
         for k in 0..<3 {
             let lamp = SCNNode(); lamp.light = SCNLight(); lamp.light!.type = .omni
             lamp.light!.intensity = 260; lamp.light!.color = UIColor(red: 1, green: 0.88, blue: 0.7, alpha: 1)
             lamp.light!.attenuationEndDistance = 420
             lamp.position = v(L.firstRowX + (L.lastRowX - L.firstRowX) * Double(k) / 2, 110, a0)
-            scene.rootNode.addChildNode(lamp)
+            scene.rootNode.addChildNode(lamp); lampLights.append(lamp.light!)
         }
 
         // camera
         let camera = SCNCamera()
         camera.zNear = 1; camera.zFar = 6000
+        camera.projectionDirection = .vertical     // the field of view is measured on the height (framing maths)
         camera.wantsHDR = false
         cameraNode.camera = camera
         scene.rootNode.addChildNode(cameraNode)
@@ -214,11 +263,12 @@ final class IntroScene3D {
     private func board(_ node: SCNNode, to p: Passenger, delay: Double) {
         let a0 = layout.aisles[0]
         let lane = a0 + (p.y < a0 ? -9 : 9)
-        node.position = v(62, 12, lane)
+        node.position = v(170, 12, lane)              // a few rows in, walking away from the lens
         node.eulerAngles.y = .pi                       // facing aft while walking in
-        let walk = SCNAction.move(to: v(p.x + 1, 12, lane), duration: (p.x - 62) / 80)
-        let bob = SCNAction.repeat(.sequence([.moveBy(x: 0, y: 2, z: 0, duration: 0.18), .moveBy(x: 0, y: -2, z: 0, duration: 0.18)]),
-                                   count: Int((p.x - 62) / 80 / 0.36))
+        let walkTime = max(0.4, (p.x - 170) / 60)
+        let walk = SCNAction.move(to: v(p.x + 1, 12, lane), duration: walkTime)
+        let bob = SCNAction.repeat(.sequence([.moveBy(x: 0, y: 2, z: 0, duration: 0.2), .moveBy(x: 0, y: -2, z: 0, duration: 0.2)]),
+                                   count: Int(walkTime / 0.4))
         let turn = SCNAction.rotateTo(x: 0, y: 0, z: 0, duration: 0.25, usesShortestUnitArc: true)
         let sit = SCNAction.move(to: v(p.x + 1, 0, p.y), duration: 0.45)
         sit.timingMode = .easeOut
@@ -232,6 +282,7 @@ final class IntroScene3D {
     /// The final shot: straight down, a long lens, framed like the 2D play view.
     private func topDown() -> Key {
         let fov: CGFloat = 12
+        let (viewSize, insets) = frame()
         let availW = Double(viewSize.width - insets.left - insets.right)
         let availH = Double(viewSize.height - insets.top - insets.bottom)
         let s = min(availW / layout.width, availH / layout.height)
@@ -247,9 +298,9 @@ final class IntroScene3D {
         let a0 = layout.aisles[0]
         let midX = layout.rows[layout.rows.count / 2].x
         return [
-            Key(t: 0, pos: v(66, 60, a0 - 4), pitch: -0.05, yaw: -.pi / 2, fov: 64),
-            Key(t: 2.4, pos: v(170, 62, a0 + 6), pitch: -0.1, yaw: -.pi / 2 + 0.06, fov: 60),
-            Key(t: 4.5, pos: v(midX - 190, 230, a0 + 60), pitch: -0.78, yaw: -.pi / 2 + 0.45, fov: 52),
+            Key(t: 0, pos: v(66, 86, a0 - 4), pitch: -0.2, yaw: -.pi / 2, fov: 62),        // over the heads, down the aisle
+            Key(t: 4.2, pos: v(200, 88, a0 + 6), pitch: -0.22, yaw: -.pi / 2 + 0.06, fov: 58),
+            Key(t: 7.6, pos: v(midX - 190, 230, a0 + 60), pitch: -0.78, yaw: -.pi / 2 + 0.45, fov: 52),
             topDown()
         ]
     }
@@ -267,24 +318,51 @@ final class IntroScene3D {
         cameraNode.eulerAngles = SCNVector3(mix(a.pitch, b.pitch), mix(a.yaw, b.yaw), 0)
     }
 
+    /// Light for time t: warm with shadows early, flattening during the swoop to match the flat 2D art.
+    private func setLights(at t: Double) {
+        let k = CGFloat(max(0, min(1, (t - 7.6) / (Self.duration - 7.6))))
+        ambientLight?.intensity = 520 + (1150 - 520) * k
+        sunLight?.intensity = 850 + (90 - 850) * k
+        lampLights.forEach { $0.intensity = 260 * (1 - k) }
+    }
+
+    /// Debug: hold the cutscene at time t (launch with `-introAt 9.5`) to check framing and the 2D match.
+    func freeze(at t: Double) {
+        cameraNode.runAction(.repeatForever(.customAction(duration: 0.1) { [weak self] _, _ in
+            guard let self else { return }
+            self.pose(at: t, self.keys())
+        }))
+        setLights(at: t)
+        bins.opacity = t < 4.4 ? 1 : max(0, 1 - CGFloat((t - 4.4) / 1.4))
+    }
+
     func play(done: @escaping () -> Void) {
         self.done = done
         let ks = keys()
         pose(at: 0, ks)
         let total = Self.duration
-        cameraNode.runAction(.sequence([
-            .customAction(duration: total) { [weak self] _, elapsed in self?.pose(at: Double(elapsed), ks) },
-            .run { [weak self] _ in DispatchQueue.main.async { self?.finish() } }
-        ]), forKey: "intro")
-        bins.runAction(.sequence([.wait(duration: 2.5), .fadeOut(duration: 1.0)]))   // clears the view for the 3/4 shot
+        _ = ks
+        cameraNode.runAction(.customAction(duration: total) { [weak self] _, elapsed in
+            guard let self else { return }
+            self.pose(at: Double(elapsed), self.keys())
+        }, forKey: "intro")
+        // hand over to 2D a little before the camera stops, so the crossfade overlaps the end of the move
+        cameraNode.runAction(.sequence([.wait(duration: total - Self.handoffLead),
+                                        .run { [weak self] _ in DispatchQueue.main.async { self?.finish() } }]), forKey: "handoff")
+        bins.runAction(.sequence([.wait(duration: 4.4), .fadeOut(duration: 1.4)]))   // clears the view for the 3/4 shot
+        // flatten the light during the swoop so the last frame matches the flat 2D colours
+        lights.runAction(.customAction(duration: total) { [weak self] _, e in self?.setLights(at: Double(e)) })
+        scene.rootNode.addChildNode(lights)
     }
 
-    func skip() { finish() }
+    func skip() {
+        cameraNode.removeAllActions()
+        finish()
+    }
 
     private func finish() {
         guard !finished else { return }
         finished = true
-        cameraNode.removeAllActions()
         let d = done
         done = nil
         d?()

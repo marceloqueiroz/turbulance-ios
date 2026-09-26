@@ -592,4 +592,14 @@ final class FlightSimulationTests: XCTestCase {
         step(sim, seconds: 2)
         XCTAssertEqual(bags, 3)
     }
+
+    func testCrewWaitsInTheJumpSeatThenWalksToTheStart() {
+        let sim = FlightSimulation(plan: flight("TB103"), seed: 2)
+        sim.seatCrewForCountdown()
+        XCTAssertNotNil(sim.crew.seated, "buckled in during the countdown")
+        sim.start()                                   // Go!
+        step(sim, seconds: 2)
+        XCTAssertNil(sim.crew.seated)
+        XCTAssertEqual(sim.crew.x, 120, accuracy: 0.5, "walked to the start position")
+    }
 }

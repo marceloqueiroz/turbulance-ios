@@ -105,13 +105,25 @@ final class GameController {
         let destination = leg?.1 ?? "our destination"
         screen = .intro
         introSubtitle = nil
-        scene.run(.sequence([.wait(forDuration: 0.4), .run { [weak self] in
-            self?.introSubtitle = "Captain: Good day, and welcome aboard flight \(plan.id) to \(destination)."
-        }, .wait(forDuration: 2.8), .run { [weak self] in
-            self?.introSubtitle = "Captain: \(plan.story.name) with us today. Cabin crew, prepare for departure."
-        }]), withKey: "introCaptions")
-        let intro = IntroScene3D(sim: sim, viewSize: scene.size, insets: scene.contentInsets)
+        // the captain on the PA: chime, then each line "spoken" as a radio babble under its subtitle
+        let lines = ["Captain: Good day, and welcome aboard flight \(plan.id) to \(destination).",
+                     "Captain: \(plan.story.name) with us today. Cabin crew, prepare for departure."]
+        func say(_ line: String) -> SKAction {
+            .run { [weak self] in
+                self?.introSubtitle = line
+                self?.synth.speak(seconds: min(3.4, Double(line.count) * 0.045))
+            }
+        }
+        scene.run(.sequence([.wait(forDuration: 0.4), .run { [weak self] in self?.synth.play(.paChime) },
+                             .wait(forDuration: 1.3), say(lines[0]),
+                             .wait(forDuration: 4.2), say(lines[1])]), withKey: "introCaptions")
+        let intro = IntroScene3D(sim: sim) { [weak self] in (self?.scene.size ?? .zero, self?.scene.contentInsets ?? .zero) }
         intro3D = intro
+        let args = ProcessInfo.processInfo.arguments
+        if let i = args.firstIndex(of: "-introAt"), i + 1 < args.count, let t = Double(args[i + 1]) {
+            intro.freeze(at: t)                    // debug: hold one frame of the cutscene
+            return
+        }
         intro.play { [weak self] in self?.countdown() }
     }
 
@@ -121,6 +133,7 @@ final class GameController {
         introTitle = nil
         introSubtitle = nil
         intro3D = nil
+        sim.seatCrewForCountdown()             // buckled into the forward jump seat until Go
         screen = .countdown
         var steps: [SKAction] = [.wait(forDuration: 0.35)]
         for n in ["3", "2", "1"] {

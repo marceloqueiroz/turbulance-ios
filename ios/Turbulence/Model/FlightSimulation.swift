@@ -457,8 +457,15 @@ final class FlightSimulation {
             hint("carryOn", "Boarding rush! Carry-on bags are blocking the aisle. Tap them with a free hand to stow them.")
         }
         if plan.twist == .galleyClosed {
-            crew.x = layout.firstRowX + 40
             hint("galleyClosed", "The forward galley is closed today. Supplies come from the middle and the back.")
+        }
+        let startX = plan.twist == .galleyClosed ? layout.firstRowX + 40 : 120
+        if crew.seated != nil {
+            // buckled in for the countdown: unbuckle on Go and walk to the start position (GDD §8b)
+            crew.busy = BusyAction(duration: Tuning.unbuckleDuration, task: .unbuckle)
+            crew.queued = CrewTarget(x: startX, aisle: 0, action: .none)
+        } else {
+            crew.x = startX
         }
     }
 
@@ -1468,6 +1475,15 @@ final class FlightSimulation {
         addSpill(row: min(6, layout.rows.count - 1), age: 4)
         crew.x = 150
         crew.tray = [.towel, .juice]
+    }
+
+    /// The attendant ends the intro buckled into the forward jump seat, and waits there through the countdown.
+    func seatCrewForCountdown() {
+        guard let i = layout.jumpSeats.indices.first(where: { layout.jumpSeats[$0].aisle == 0 }) else { return }
+        let j = layout.jumpSeats[i]
+        crew.x = j.x; crew.aisle = j.aisle; crew.y = layout.aisles[j.aisle]
+        crew.seated = i
+        crew.face = 1
     }
 
     /// Puts a passenger in the aisle (tests and staged scenes).

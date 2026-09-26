@@ -42,7 +42,7 @@ struct GameView: View {
             }
         }
         .animation(.easeInOut(duration: 0.4), value: game.screen)
-        .animation(.easeOut(duration: 0.35), value: game.intro3D == nil)
+        .animation(.easeInOut(duration: IntroScene3D.handoffLead), value: game.intro3D == nil)
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: game.countdownText)
     }
 
