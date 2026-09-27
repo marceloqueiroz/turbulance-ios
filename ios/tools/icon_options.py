@@ -272,6 +272,116 @@ def zigzag():
     return img
 
 
+
+# ---------------------------------------------------------------- Variations on 10 (bumpy route)
+def plane_sprite(size, angle, stripe=CORAL, body=CREAM):
+    """The top-down plane, nose up, scaled to `size` px and rotated (degrees, clockwise)."""
+    plane = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    p = ImageDraw.Draw(plane)
+    p.rounded_rectangle((924, 540, 1124, 1500), radius=100, fill=body, outline=NAVY, width=LW)
+    p.polygon([(924, 900), (440, 1160), (460, 1260), (924, 1080)], fill=STEEL, outline=NAVY, width=LW)
+    p.polygon([(1124, 900), (1608, 1160), (1588, 1260), (1124, 1080)], fill=STEEL, outline=NAVY, width=LW)
+    p.polygon([(960, 1360), (760, 1500), (780, 1560), (1024, 1470), (1268, 1560), (1288, 1500), (1088, 1360)],
+              fill=STEEL, outline=NAVY, width=LW)
+    p.rectangle((1004, 700, 1044, 1380), fill=stripe)
+    p.rounded_rectangle((980, 600, 1068, 660), radius=20, fill=NAVY)
+    return plane.resize((size, size), Image.BICUBIC).rotate(-angle, resample=Image.BICUBIC)
+
+
+def put(img, sprite, cx, cy):
+    img.paste(sprite, (int(cx - sprite.width / 2), int(cy - sprite.height / 2)), sprite)
+
+
+def bumpy(x0, y0, x1, y1, amp, waves_n, step=6):
+    """A wobbly path from (x0, y0) to (x1, y1)."""
+    n = int(math.hypot(x1 - x0, y1 - y0) / step)
+    dx, dy = (x1 - x0) / n, (y1 - y0) / n
+    L = math.hypot(dx, dy)
+    nx, ny = -dy / L, dx / L
+    return [(x0 + dx * k + nx * amp * math.sin(k / n * waves_n * 2 * math.pi),
+             y0 + dy * k + ny * amp * math.sin(k / n * waves_n * 2 * math.pi)) for k in range(n + 1)]
+
+
+def dashed(d, pts, fill, width, on=10, off=7):
+    for k in range(0, len(pts) - on, on + off):
+        d.line(pts[k:k + on], fill=fill, width=width, joint="curve")
+
+
+def v_sunset():
+    """10a: dusk sky, dashed wobbly trail, big plane."""
+    img, d = canvas((240, 128, 88), (40, 44, 92))
+    d.ellipse((1180, 1180, 1780, 1780), fill=(248, 196, 110))
+    waves(d, [1500, 1720], base=(120, 80, 110), shade=0.18)
+    dashed(d, bumpy(120, 1900, 950, 1100, 70, 2.5), WHITE, 44)
+    put(img, plane_sprite(1700, 45), 1250, 800)
+    return img
+
+
+def v_lightning():
+    """10b: the trail is a lightning bolt."""
+    img, d = canvas((28, 40, 74), (8, 12, 28))
+    waves(d, [420, 1500], base=(28, 40, 74), shade=0.08)
+    bolt = [(180, 1860), (620, 1340), (500, 1330), (900, 900), (780, 890), (1080, 620),
+            (860, 1060), (990, 1070), (700, 1420), (830, 1430)]
+    glow = Image.new("RGB", (S, S), (0, 0, 0))
+    ImageDraw.Draw(glow).polygon(bolt, fill=YELLOW)
+    img.paste(Image.blend(img, glow.filter(ImageFilter.GaussianBlur(50)), 0.3))
+    d = ImageDraw.Draw(img)
+    d.polygon(bolt, fill=YELLOW, outline=NAVY, width=LW)
+    put(img, plane_sprite(1500, 45), 1340, 400)
+    return img
+
+
+def v_pulse():
+    """10c: cream card, the route drawn as a heartbeat line in coral."""
+    img, d = canvas((246, 241, 232), (226, 219, 206))
+    pts = [(120, 1050), (500, 1050), (620, 700), (760, 1400), (900, 870), (1020, 1050), (1220, 1050)]
+    d.line(pts, fill=CORAL, width=70, joint="curve")
+    for x, y in (pts[0],):
+        d.ellipse((x - 35, y - 35, x + 35, y + 35), fill=CORAL)
+    put(img, plane_sprite(1400, 90, stripe=TEAL), 1560, 1050)
+    return img
+
+
+def v_clouds():
+    """10d: bright day, plane dead centre bouncing over puffy clouds, curly trail."""
+    img, d = canvas((96, 176, 232), (46, 110, 190))
+    for cx, cy, r in ((380, 1640, 260), (700, 1720, 300), (1100, 1690, 280), (1480, 1740, 320), (1800, 1660, 260),
+                      (260, 420, 160), (1760, 380, 180)):
+        outline(d, "ellipse", (cx - r, cy - r * 0.62, cx + r, cy + r * 0.62), WHITE, w=26)
+    trail = bumpy(80, 1260, 790, 1115, 90, 3)
+    d.line(trail, fill=WHITE, width=50, joint="curve")
+    put(img, plane_sprite(1700, 60), 1150, 900)
+    return img
+
+
+def v_route_map():
+    """10e: the route map: navy sea, cream land, a coral bumpy arc between city pins."""
+    img, d = canvas((30, 48, 86), (18, 30, 58))
+    d.ellipse((-300, 1100, 900, 2300), fill=(226, 218, 200))
+    d.ellipse((1300, -300, 2400, 900), fill=(226, 218, 200))
+    route = bumpy(420, 1520, 1500, 520, 60, 3.5)
+    dashed(d, route, CORAL, 48, on=9, off=6)
+    for x, y in ((420, 1520),):
+        outline(d, "ellipse", (x - 90, y - 90, x + 90, y + 90), TEAL, w=26)
+        d.ellipse((x - 30, y - 30, x + 30, y + 30), fill=CREAM)
+    pin = [(1640, 700), (1520, 470), (1540, 380), (1640, 320), (1740, 380), (1760, 470)]
+    outline(d, "ellipse", (1540, 300, 1740, 500), CORAL, w=26)
+    d.polygon([(1560, 460), (1640, 640), (1720, 460)], fill=CORAL, outline=NAVY, width=26)
+    d.ellipse((1600, 360, 1680, 440), fill=CREAM)
+    put(img, plane_sprite(1300, 45), 1000, 1010)
+    return img
+
+
+VARIATIONS = [
+    ("10a-sunset-trail", "10a. Sunset trail", v_sunset),
+    ("10b-lightning", "10b. Lightning trail", v_lightning),
+    ("10c-heartbeat", "10c. Heartbeat route", v_pulse),
+    ("10d-cloud-hop", "10d. Cloud hop", v_clouds),
+    ("10e-route-map", "10e. Route map", v_route_map),
+]
+
+
 CONCEPTS = [
     ("01-attendant", "The attendant", attendant),
     ("02-coffee", "Coffee under pressure", coffee),
@@ -292,23 +402,33 @@ def rounded_mask(size, r):
     return m
 
 
-if __name__ == "__main__":
-    os.makedirs(OUT, exist_ok=True)
+def make_sheet(concepts, name, numbered=True):
     thumbs = []
-    for slug, title, fn in CONCEPTS:
+    for slug, title, fn in concepts:
         icon = fn().resize((1024, 1024), Image.LANCZOS)
         icon.save(os.path.join(OUT, slug + ".png"))
         thumbs.append((title, icon.resize((300, 300), Image.LANCZOS)))
     cols, pad, cell_h = 5, 40, 380
-    sheet = Image.new("RGB", (cols * (300 + pad) + pad, 2 * cell_h + pad), (244, 239, 230))
+    rows = (len(thumbs) + cols - 1) // cols
+    sheet = Image.new("RGB", (cols * (300 + pad) + pad, rows * cell_h + pad), (244, 239, 230))
     sd = ImageDraw.Draw(sheet)
     f = font(22)
     for k, (title, t) in enumerate(thumbs):
         x = pad + (k % cols) * (300 + pad)
         y = pad + (k // cols) * cell_h
         sheet.paste(t, (x, y), rounded_mask(300, 66))
-        label = f"{k + 1}. {title}"
+        label = f"{k + 1}. {title}" if numbered else title
         w = sd.textlength(label, font=f)
         sd.text((x + (300 - w) / 2, y + 312), label, fill=NAVY, font=f)
-    sheet.save(os.path.join(OUT, "sheet.png"))
-    print("wrote", len(thumbs), "icons +", os.path.abspath(os.path.join(OUT, "sheet.png")))
+    path = os.path.join(OUT, name)
+    sheet.save(path)
+    print("wrote", len(thumbs), "icons +", os.path.abspath(path))
+
+
+if __name__ == "__main__":
+    import sys
+    os.makedirs(OUT, exist_ok=True)
+    if "--variations" in sys.argv:
+        make_sheet(VARIATIONS, "sheet-10-variations.png", numbered=False)
+    else:
+        make_sheet(CONCEPTS, "sheet.png")
