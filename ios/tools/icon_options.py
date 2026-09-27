@@ -373,6 +373,74 @@ def v_route_map():
     return img
 
 
+def cart_sprite(size, angle):
+    """The drinks trolley (front view) with bottles on top, scaled and tilted (degrees, clockwise)."""
+    c = Image.new("RGBA", (S, S), (0, 0, 0, 0))
+    r = ImageDraw.Draw(c)
+    r.rounded_rectangle((560, 700, 1488, 1560), radius=60, fill=STEEL, outline=NAVY, width=LW)
+    r.rounded_rectangle((620, 780, 1428, 1060), radius=30, fill=(140, 148, 160), outline=NAVY, width=24)
+    r.rounded_rectangle((620, 1120, 1428, 1480), radius=30, fill=(140, 148, 160), outline=NAVY, width=24)
+    r.rectangle((560, 1060, 1488, 1110), fill=CORAL)
+    for k, (x, col) in enumerate(((700, (95, 168, 217)), (900, (242, 155, 48)), (1100, (122, 59, 34)), (1300, (95, 174, 91)))):
+        r.rounded_rectangle((x - 50, 420 + (k % 2) * 60, x + 50, 700), radius=30, fill=col, outline=NAVY, width=22)
+    for x in (680, 1368):
+        r.ellipse((x - 70, 1540, x + 70, 1680), fill=NAVY)
+    return c.resize((size, size), Image.BICUBIC).rotate(-angle, resample=Image.BICUBIC)
+
+
+def speed_lines(d, x, y, n=3, length=180, gap=90, col=WHITE, width=34):
+    for k in range(n):
+        d.line([(x, y + k * gap), (x + length - k * 40, y + k * gap)], fill=col, width=width)
+
+
+def mix_chase():
+    """8+10 A: a huge plane climbs the bumpy route; the drinks cart chases along the trail below."""
+    img, d = canvas((31, 138, 140), (14, 70, 80))
+    waves(d, [420, 1560], base=(31, 138, 140), shade=0.08)
+    trail = [(560, 1430), (660, 1230), (780, 1350), (894, 1146)]
+    d.line(trail, fill=(230, 245, 240), width=50, joint="curve")
+    for x, y in trail[:-1]:
+        d.ellipse((x - 25, y - 25, x + 25, y + 25), fill=(230, 245, 240))
+    put(img, plane_sprite(2300, 45), 1300, 740)
+    put(img, cart_sprite(1050, 14), 480, 1500)
+    return img
+
+
+def mix_spill():
+    """8+10 B: the cart fills the foreground, bottles flying off as the big plane bumps overhead."""
+    img, d = canvas((31, 138, 140), (14, 70, 80))
+    waves(d, [700, 1000], amp=50, base=(31, 138, 140), shade=0.14, width=44)
+    route = [(1064, 816), (900, 900), (820, 700), (620, 820)]
+    put(img, plane_sprite(1900, 45), 1400, 480)
+    put(img, cart_sprite(1500, -10), 900, 1380)
+    d = ImageDraw.Draw(img)
+    for x, y, a, col in ((420, 700, -35, (95, 174, 91)), (680, 480, -70, (242, 155, 48))):   # bottles in the air
+        b = Image.new("RGBA", (400, 400), (0, 0, 0, 0))
+        ImageDraw.Draw(b).rounded_rectangle((150, 60, 250, 340), radius=40, fill=col, outline=NAVY, width=22)
+        put(img, b.rotate(-a, resample=Image.BICUBIC), x, y)
+    d = ImageDraw.Draw(img)
+    for x, y in ((520, 860), (760, 640)):
+        d.arc((x - 80, y - 80, x + 80, y + 80), 200, 320, fill=WHITE, width=30)
+    return img
+
+
+def mix_rollercoaster():
+    """8+10 C: the cart rides the bumpy route like a rollercoaster up to a big plane."""
+    img, d = canvas((31, 138, 140), (14, 70, 80))
+    route = [(-40, 1480), (300, 1700), (760, 1540), (980, 1200), (1066, 1061)]
+    d.line(route, fill=CORAL, width=90, joint="curve")
+    d.line(route, fill=(230, 245, 240), width=30, joint="curve")
+    put(img, plane_sprite(2200, 40), 1420, 640)
+    put(img, cart_sprite(1000, -19), 438, 1354)
+    return img
+
+
+MIXES = [
+    ("mix-a-cart-chase", "A. Cart chases the plane", mix_chase),
+    ("mix-b-cart-spill", "B. Bottles flying", mix_spill),
+    ("mix-c-cart-coaster", "C. Cart coaster", mix_rollercoaster),
+]
+
 VARIATIONS = [
     ("10a-sunset-trail", "10a. Sunset trail", v_sunset),
     ("10b-lightning", "10b. Lightning trail", v_lightning),
@@ -428,7 +496,9 @@ def make_sheet(concepts, name, numbered=True):
 if __name__ == "__main__":
     import sys
     os.makedirs(OUT, exist_ok=True)
-    if "--variations" in sys.argv:
+    if "--mix" in sys.argv:
+        make_sheet(MIXES, "sheet-8-10-mix.png", numbered=False)
+    elif "--variations" in sys.argv:
         make_sheet(VARIATIONS, "sheet-10-variations.png", numbered=False)
     else:
         make_sheet(CONCEPTS, "sheet.png")
