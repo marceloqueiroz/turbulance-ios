@@ -9,6 +9,8 @@ final class IntroScene3D {
     let scene = SCNScene()
     let cameraNode = SCNNode()
     private let layout: CabinLayout
+    /// Stations new on this flight stay out of the cutscene: they pop in at Go.
+    private let hidden: Set<Int>
     private let passengers: [Passenger]
     /// The live view size and cabin insets (read every frame, so the last shot always matches the 2D view).
     private let frame: () -> (size: CGSize, insets: UIEdgeInsets)
@@ -42,6 +44,7 @@ final class IntroScene3D {
          frame: @escaping () -> (size: CGSize, insets: UIEdgeInsets)) {
         self.crewLook = crewLook
         layout = sim.layout
+        hidden = Set(sim.freshStations)
         passengers = sim.passengers
         self.frame = frame
         scene.background.contents = Art.sky(CGSize(width: 900, height: 420))   // the same night sky as the 2D view
@@ -154,11 +157,11 @@ final class IntroScene3D {
             let color = b.kind == .counter ? UIColor(hex: 0xC8CDD4) : UIColor(hex: 0xDADDE2)
             box(CGFloat(b.w), CGFloat(h), CGFloat(b.h), at: v(b.x + b.w / 2, h / 2, b.y + b.h / 2), color, chamfer: 3)
         }
-        for s in L.bins {
+        for (i, s) in L.bins.enumerated() where !hidden.contains(i) {
             let color: UIColor
             switch s.kind {
             case .trash: color = UIColor(hex: 0x5B6475)
-            case .machine: color = UIColor(hex: 0x3D4452)
+            case .drinks, .oven: color = UIColor(hex: 0x3D4452)
             case .bin: color = .white
             }
             box(28, 14, 28, at: v(s.x, 53, s.y - 4), color, chamfer: 3)
@@ -281,7 +284,7 @@ final class IntroScene3D {
             n.position = v(x, y, z)
             flat.addChildNode(n)
         }
-        lay(Art.cabin(layout), w: layout.width, h: layout.height, x: layout.width / 2, z: layout.height / 2, y: 0.5)
+        lay(Art.cabin(layout, hiding: hidden), w: layout.width, h: layout.height, x: layout.width / 2, z: layout.height / 2, y: 0.5)
         for p in passengers {
             lay(Art.passenger(p, sick: false), w: Double(Art.passengerSize.width), h: Double(Art.passengerSize.height), x: p.x, z: p.y, y: 1)
         }

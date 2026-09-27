@@ -32,6 +32,15 @@ struct GameView: View {
                         .transition(.scale(scale: 1.8).combined(with: .opacity))
                         .allowsHitTesting(false)
                 }
+                if let p = game.picker {
+                    GeometryReader { full in
+                        MachinePickerView(options: p.options) { game.pick($0) }
+                            .position(x: min(max(p.point.x, 120), full.size.width - 120),
+                                      y: min(p.point.y + 62, full.size.height - 40))
+                    }
+                    .ignoresSafeArea()
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+                }
                 overlay.ignoresSafeArea()
                 if game.screen == .intro { IntroLetterbox(game: game).transition(.opacity) }
             }
@@ -44,6 +53,7 @@ struct GameView: View {
         .animation(.easeInOut(duration: 0.4), value: game.screen)
         .animation(.easeInOut(duration: IntroScene3D.handoffLead), value: game.intro3D == nil)
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: game.countdownText)
+        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: game.picker)
     }
 
     /// Keeps the cabin clear of the HUD and of the camera cutout — only on the side the cutout is on, and only
@@ -410,5 +420,32 @@ struct Stat: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(red: 1, green: 0.97, blue: 0.93), in: RoundedRectangle(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.navy, lineWidth: 2))
+    }
+}
+
+/// The drinks machine / oven menu: tap one to walk over and start it (GDD §6a).
+struct MachinePickerView: View {
+    let options: [Item]
+    let pick: (Item) -> Void
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(options, id: \.self) { item in
+                Button { pick(item) } label: {
+                    VStack(spacing: 1) {
+                        Image(uiImage: Art.itemImage(item, size: 34))
+                        Text(item.displayName).font(rounded(9, .heavy)).foregroundStyle(Color.navy).lineLimit(1)
+                    }
+                    .frame(width: 52, height: 54)
+                    .background(Color.white, in: RoundedRectangle(cornerRadius: 12))
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.navy, lineWidth: 2))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(item.displayName)
+            }
+        }
+        .padding(6)
+        .background(Color.cream, in: RoundedRectangle(cornerRadius: 16))
+        .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color.coral, lineWidth: 3))
+        .shadow(color: .black.opacity(0.35), radius: 8, y: 4)
     }
 }

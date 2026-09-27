@@ -88,6 +88,17 @@ enum Art {
             fill(c, poly([(-7, -2), (7, -2), (6, 11), (-6, 11)]), item == .water ? UIColor(hex: 0x5FA8D9) : UIColor(hex: 0xF29B30))
             if item == .juice { dot(c, 4, -6, 3, UIColor(hex: 0xF5B942)); c.addEllipse(in: CGRect(x: 1, y: -9, width: 6, height: 6)); c.strokePath() }
             c.addPath(cup); c.strokePath()
+        case .soda:
+            // a tall glass of cola with ice and a straw
+            let glass = poly([(-7, -10), (7, -10), (6, 11), (-6, 11)])
+            fill(c, glass, .white)
+            fill(c, poly([(-6.6, -4), (6.6, -4), (6, 11), (-6, 11)]), UIColor(hex: 0x7A3B22))
+            c.setFillColor(UIColor.white.withAlphaComponent(0.8).cgColor)
+            c.fill(CGRect(x: -4, y: -2, width: 4, height: 4)); c.fill(CGRect(x: 1, y: 1, width: 4, height: 4))
+            c.setStrokeColor(Palette.coral.cgColor); c.setLineWidth(2.2)
+            c.move(to: P(2, 2)); c.addLine(to: P(5, -14)); c.strokePath()
+            c.setStrokeColor(Palette.navy.cgColor); c.setLineWidth(2)
+            c.addPath(glass); c.strokePath()
         case .snack:
             // a pretzel bag
             fillStroke(poly([(-8, -11), (8, -11), (9, 11), (-9, 11)]), UIColor(hex: 0xE8543E))
@@ -101,12 +112,24 @@ enum Art {
             c.addEllipse(in: CGRect(x: 5, y: -1, width: 6, height: 7)); c.strokePath()
             c.setStrokeColor(Palette.navy.withAlphaComponent(0.6).cgColor); c.setLineWidth(1.5)
             c.move(to: P(-3, -8)); c.addQuadCurve(to: P(-3, -13), control: P(-6, -10)); c.move(to: P(2, -8)); c.addQuadCurve(to: P(2, -13), control: P(-1, -10)); c.strokePath()
-        case .meal:
-            // a covered hot meal on a tray
-            fillStroke(CGPath(roundedRect: CGRect(x: -11, y: 4, width: 22, height: 6), cornerWidth: 2, cornerHeight: 2, transform: nil), UIColor(hex: 0xC9CDD3))
-            let dome = CGMutablePath(); dome.move(to: P(-9, 4)); dome.addQuadCurve(to: P(9, 4), control: P(0, -14)); dome.closeSubpath()
-            fillStroke(dome, UIColor(hex: 0xE3E6EA))
-            dot(c, 0, -5, 2, Palette.navy)
+        case .chicken, .coldChicken:
+            // a plate with a drumstick and greens (pale and frosted once cold)
+            let cold = item == .coldChicken
+            fillStroke(CGPath(ellipseIn: CGRect(x: -12, y: -9, width: 24, height: 19), transform: nil), cold ? UIColor(hex: 0xDCE6EF) : .white)
+            dot(c, -6, 4, 3.2, cold ? UIColor(hex: 0x9FB3A2) : UIColor(hex: 0x5DAE5B))
+            let leg = CGPath(ellipseIn: CGRect(x: -5, y: -6, width: 13, height: 10), transform: nil)
+            fillStroke(leg, cold ? UIColor(hex: 0xB9A791) : UIColor(hex: 0xC8733A))
+            c.setFillColor(UIColor(hex: 0xF4EBDD).cgColor); c.fill(CGRect(x: -8, y: -3, width: 5, height: 3))
+            if cold { frost(c, 9, -9) }
+        case .pasta, .coldPasta:
+            // a plate of spaghetti with tomato sauce
+            let cold = item == .coldPasta
+            fillStroke(CGPath(ellipseIn: CGRect(x: -12, y: -9, width: 24, height: 19), transform: nil), cold ? UIColor(hex: 0xDCE6EF) : .white)
+            fillStroke(CGPath(ellipseIn: CGRect(x: -8, y: -6, width: 16, height: 12), transform: nil), cold ? UIColor(hex: 0xD9CFA6) : UIColor(hex: 0xF2C84B))
+            c.setStrokeColor((cold ? UIColor(hex: 0xB9AD86) : UIColor(hex: 0xD9A626)).cgColor); c.setLineWidth(1.2)
+            c.move(to: P(-6, -2)); c.addQuadCurve(to: P(6, -1), control: P(0, -6)); c.move(to: P(-6, 2)); c.addQuadCurve(to: P(6, 3), control: P(0, -2)); c.strokePath()
+            dot(c, 1, 0, 3, cold ? UIColor(hex: 0xB98C84) : UIColor(hex: 0xD6452B))
+            if cold { frost(c, 9, -9) }
         case .toy:
             // a teddy bear
             let bear = UIColor(hex: 0xC98A55)
@@ -133,11 +156,6 @@ enum Art {
             c.setFillColor(UIColor(hex: 0x8A9BB0).cgColor); c.fill(CGRect(x: -6.5, y: -3.5, width: 11, height: 3))
             c.addEllipse(in: CGRect(x: 5, y: -1, width: 6, height: 7)); c.strokePath()
             frost(c, 7, -9)
-        case .coldMeal:
-            fillStroke(CGPath(roundedRect: CGRect(x: -11, y: 4, width: 22, height: 6), cornerWidth: 2, cornerHeight: 2, transform: nil), UIColor(hex: 0xB9C2CC))
-            let dome = CGMutablePath(); dome.move(to: P(-9, 4)); dome.addQuadCurve(to: P(9, 4), control: P(0, -14)); dome.closeSubpath()
-            fillStroke(dome, UIColor(hex: 0xC9D7E6))
-            frost(c, 8, -10)
         case .usedBag:
             // a crumpled, tied-off sick bag
             fillStroke(poly([(-8, -4), (8, -4), (9, 11), (-9, 11)]), UIColor(hex: 0xC9D6A0))
@@ -165,7 +183,8 @@ enum Art {
 
     // MARK: - Static cabin (hull, floor, seats, galleys, lavs), drawn from a CabinLayout
 
-    static func cabin(_ L: CabinLayout) -> UIImage {
+    /// `hiding`: station indexes left out of the art (new stations that pop in at Go).
+    static func cabin(_ L: CabinLayout, hiding: Set<Int> = []) -> UIImage {
         let W = CGFloat(L.width), H = CGFloat(L.height)
         let aisles = L.aisles.map { CGFloat($0) }
         let top = aisles.first!, bottom = aisles.last!
@@ -321,27 +340,8 @@ enum Art {
             }
 
             // galley stations: bins, machines (coffee, oven) and trash (GDD §6a)
-            for b in L.bins {
-                let bx = CGFloat(b.x), by = CGFloat(b.y)
-                let box = rr(bx - 17, by - 22, 34, 36, 7)
-                switch b.kind {
-                case .bin(let item):
-                    c.saveGState(); shadow(c, navy(0.35), blur: 4, dy: 2); fill(c, box, .white); c.restoreGState()
-                    stroke(c, box, Palette.navy, 2)
-                    drawItem(c, item, bx, by - 4, 0.95)
-                case .machine(let item, _):
-                    c.saveGState(); shadow(c, navy(0.35), blur: 4, dy: 2); fill(c, box, UIColor(hex: 0x3D4452)); c.restoreGState()
-                    stroke(c, box, Palette.navy, 2)
-                    fill(c, rr(bx - 12, by - 18, 24, 7, 2), UIColor(hex: 0x5B6475))
-                    dot(c, bx + 8, by - 14.5, 1.6, UIColor(hex: 0x6FD08C))
-                    fill(c, rr(bx - 11, by - 8, 22, 18, 3), UIColor(hex: 0xE3E6EA))
-                    drawItem(c, item, bx, by + 1, 0.7)
-                case .trash:
-                    c.saveGState(); shadow(c, navy(0.35), blur: 4, dy: 2); fill(c, box, UIColor(hex: 0x9AA2AE)); c.restoreGState()
-                    stroke(c, box, Palette.navy, 2)
-                    drawTrash(c, bx, by - 4, 0.9)
-                }
-                text(b.label.uppercased(), bx, by + 22, size: 6.5, color: Palette.navy)
+            for (bi, b) in L.bins.enumerated() where !hiding.contains(bi) {
+                drawStation(c, b, CGFloat(b.x), CGFloat(b.y))
             }
 
             // jump seats: fold-down crew seats at the edge of the aisle (GDD §5b)
@@ -428,6 +428,47 @@ enum Art {
             // a coat half-fallen out
             fill(c, rr(30, 30, 10, 12, 3), UIColor(hex: 0x6F8AA6))
         }
+    }
+
+    /// One galley station with its label (GDD §6a).
+    static func drawStation(_ c: CGContext, _ b: SupplyBin, _ bx: CGFloat, _ by: CGFloat) {
+        let box = rr(bx - 17, by - 22, 34, 36, 7)
+        switch b.kind {
+        case .bin(let item):
+            c.saveGState(); shadow(c, navy(0.35), blur: 4, dy: 2); fill(c, box, .white); c.restoreGState()
+            stroke(c, box, Palette.navy, 2)
+            drawItem(c, item, bx, by - 4, 0.95)
+        case .drinks:
+            // a drinks machine: four taps over a drip tray
+            let wide = rr(bx - 26, by - 22, 52, 36, 7)
+            c.saveGState(); shadow(c, navy(0.35), blur: 4, dy: 2); fill(c, wide, UIColor(hex: 0x3D4452)); c.restoreGState()
+            stroke(c, wide, Palette.navy, 2)
+            let taps: [UIColor] = [UIColor(hex: 0x5FA8D9), UIColor(hex: 0xF29B30), UIColor(hex: 0x7A3B22), UIColor(hex: 0x6B3E26)]
+            for (k, col) in taps.enumerated() {
+                let tx = bx - 18 + CGFloat(k) * 12
+                fill(c, rr(tx - 4, by - 18, 8, 7, 2), col)
+                fill(c, rr(tx - 1, by - 11, 2, 4, 1), UIColor(hex: 0xC9CDD3))
+            }
+            fill(c, rr(bx - 22, by + 2, 44, 6, 2), UIColor(hex: 0x5B6475))
+            drawItem(c, .water, bx - 6, by - 1, 0.45); drawItem(c, .coffee, bx + 7, by - 1, 0.45)
+        case .oven:
+            c.saveGState(); shadow(c, navy(0.35), blur: 4, dy: 2); fill(c, box, UIColor(hex: 0x3D4452)); c.restoreGState()
+            stroke(c, box, Palette.navy, 2)
+            fill(c, rr(bx - 12, by - 18, 24, 7, 2), UIColor(hex: 0x5B6475))
+            dot(c, bx + 8, by - 14.5, 1.6, UIColor(hex: 0xE8783E))
+            fill(c, rr(bx - 11, by - 8, 22, 18, 3), UIColor(hex: 0x2A2F3A))
+            fill(c, rr(bx - 9, by - 6, 18, 14, 2), UIColor(hex: 0xE8783E).withAlphaComponent(0.35))
+        case .trash:
+            c.saveGState(); shadow(c, navy(0.35), blur: 4, dy: 2); fill(c, box, UIColor(hex: 0x9AA2AE)); c.restoreGState()
+            stroke(c, box, Palette.navy, 2)
+            drawTrash(c, bx, by - 4, 0.9)
+        }
+        text(b.label.uppercased(), bx, by + 22, size: 6.5, color: Palette.navy)
+    }
+
+    /// A station on its own, for the pop-in when it's new on a flight (anchor = the station centre).
+    static func stationImage(_ b: SupplyBin) -> UIImage {
+        image(64, 64) { c in drawStation(c, b, 32, 32) }
     }
 
     static func drawTrash(_ c: CGContext, _ x: CGFloat, _ y: CGFloat, _ s: CGFloat) {

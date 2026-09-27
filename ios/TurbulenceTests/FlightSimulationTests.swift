@@ -56,12 +56,24 @@ final class FlightSimulationTests: XCTestCase {
         func fetch(_ it: Item) {
             guard crew.hasFreeHand else { return trash() }
             if let i = nearest({ $0 == .bin(it) }) { return tapStation(i) }
-            if let i = nearest({ if case .machine(it, _) = $0 { return true }; return false }) {
-                if case .working? = sim.machines[i] { return }
-                tapStation(i)
+            // a machine already making or holding it: wait for it / take it
+            let mine = sim.layout.bins.indices.filter { i in
+                switch sim.machines[i] {
+                case .working(it, _)?, .ready(it, _)?: return true
+                default: return false
+                }
+            }.first
+            if let i = mine {
+                if case .ready? = sim.machines[i] { tapStation(i) }
+                return
+            }
+            if let i = sim.layout.bins.indices.filter({ sim.choices(atStation: $0)?.contains(it) == true })
+                .min(by: { abs(sim.layout.bins[$0].x - crew.x) < abs(sim.layout.bins[$1].x - crew.x) }) {
+                let b = sim.layout.bins[i]
+                sim.tap(x: b.x, y: b.y, choice: it)
             }
         }
-        if crew.tray.contains(where: { $0 == .coldCoffee || $0 == .coldMeal }) { return trash() }
+        if crew.tray.contains(where: \.isCold) { return trash() }
         let live = sim.occurrences.filter { !$0.dead }
             .sorted { ($0.failed ? -1 : $0.age / $0.fuse) > ($1.failed ? -1 : $1.age / $1.fuse) }
         for o in live {
@@ -84,7 +96,7 @@ final class FlightSimulationTests: XCTestCase {
         sim.crew.aisle = b.aisle
         sim.crew.y = sim.layout.aisles[b.aisle]
         sim.tap(x: b.x, y: b.y)
-        step(sim, seconds: 3)
+        step(sim, seconds: 4)
     }
 
     // MARK: Escalation
@@ -101,11 +113,12 @@ final class FlightSimulationTests: XCTestCase {
         let sim = runningSim()
         let pi = 0
         sim.addSick(passenger: pi)
-        step(sim, seconds: 30 * 0.5)
+        let f = Tuning.sickFuse
+        step(sim, seconds: f * 0.5)
         XCTAssertEqual(sim.occurrences.first?.state, .urgent)
-        step(sim, seconds: 30 * 0.3)
+        step(sim, seconds: f * 0.3)
         XCTAssertEqual(sim.occurrences.first?.state, .critical)
-        step(sim, seconds: 30 * 0.25)
+        step(sim, seconds: f * 0.25)
         XCTAssertTrue(sim.occurrences.filter { $0.kind == .sick && $0.passenger == pi }.isEmpty)
         XCTAssertTrue(sim.passengers[pi].grumpy)
         XCTAssertGreaterThanOrEqual(sim.stats.failed, 1)
@@ -113,7 +126,7 @@ final class FlightSimulationTests: XCTestCase {
 
     func testFailedSpillStays() {
         let sim = runningSim()
-        let id = sim.addSpill(row: 10, age: 22 - 0.01)
+        let id = sim.addSpill(row: 10, age: Tuning.spillFuse - 0.01)
         step(sim, seconds: 0.1)
         let o = sim.occurrences.first { $0.id == id }!
         XCTAssertTrue(o.failed)
@@ -194,24 +207,24 @@ final class FlightSimulationTests: XCTestCase {
     // MARK: Tray, machines, orders (GDD §6a)
 
     func testTrayCarriesTwoItemsAndBinsTakeThemBack() {
-        let sim = runningSim()
-        use(sim, station(sim, .bin(.water)))
-        use(sim, station(sim, .bin(.juice)))
-        XCTAssertEqual(sim.crew.tray, [.water, .juice])
-        _ = sim.drainEvents()
+        let sim = runningSim(plan: flight("TB106"))
+        use(sim, station(sim, .bin(.towel)))
         use(sim, station(sim, .bin(.snack)))
+        XCTAssertEqual(sim.crew.tray, [.towel, .snack])
+        _ = sim.drainEvents()
+        use(sim, station(sim, .bin(.toy)))
         XCTAssertEqual(sim.crew.tray.count, 2, "tray full")
         XCTAssertTrue(sim.drainEvents().contains(.nope))
-        use(sim, station(sim, .bin(.water)))
-        XCTAssertEqual(sim.crew.tray, [.juice], "tapping the same bin puts it back")
+        use(sim, station(sim, .bin(.towel)))
+        XCTAssertEqual(sim.crew.tray, [.snack], "tapping the same bin puts it back")
     }
 
     func testCoffeeBrewsThenHandsOver() {
         let sim = runningSim()
-        let machine = station(sim, .machine(.coffee, prep: 3))
+        let machine = station(sim, .drinks)
         let i = sim.layout.bins.firstIndex(of: machine)!
         sim.crew.aisle = 0; sim.crew.x = machine.x
-        sim.tap(x: machine.x, y: machine.y)
+        sim.tap(x: machine.x, y: machine.y, choice: .coffee)
         step(sim, seconds: 0.5)
         if case .working = sim.machines[i] {} else { XCTFail("machine should be brewing") }
         XCTAssertTrue(sim.crew.tray.isEmpty)
@@ -225,10 +238,10 @@ final class FlightSimulationTests: XCTestCase {
 
     func testCoffeeCoolsInTheMachineAndKeepsItsClockOnTheTray() {
         let sim = runningSim()
-        let machine = station(sim, .machine(.coffee, prep: 3))
+        let machine = station(sim, .drinks)
         let i = sim.layout.bins.firstIndex(of: machine)!
         sim.crew.aisle = 0; sim.crew.x = machine.x
-        sim.tap(x: machine.x, y: machine.y)
+        sim.tap(x: machine.x, y: machine.y, choice: .coffee)
         step(sim, seconds: 3.5)                                  // brewed
         step(sim, seconds: 9)                                    // then waited about half its 18 s
         let w = sim.warmth(ofMachine: i) ?? 0
@@ -243,15 +256,15 @@ final class FlightSimulationTests: XCTestCase {
 
     func testForgottenCoffeeGoesColdInTheMachineAndATapStartsAFreshOne() {
         let sim = runningSim()
-        let machine = station(sim, .machine(.coffee, prep: 3))
+        let machine = station(sim, .drinks)
         let i = sim.layout.bins.firstIndex(of: machine)!
         sim.crew.aisle = 0; sim.crew.x = machine.x
-        sim.tap(x: machine.x, y: machine.y)
+        sim.tap(x: machine.x, y: machine.y, choice: .coffee)
         _ = sim.drainEvents()
         step(sim, seconds: 3.5 + Item.coffee.keepsHotFor! + 0.5)
-        XCTAssertEqual(sim.machines[i], .cold)
+        XCTAssertEqual(sim.machines[i], .cold(.coffee))
         XCTAssertTrue(sim.drainEvents().contains { if case .machineCold = $0 { return true }; return false })
-        sim.tap(x: machine.x, y: machine.y)
+        sim.tap(x: machine.x, y: machine.y, choice: .coffee)
         step(sim, seconds: 0.5)
         XCTAssertTrue(sim.crew.tray.isEmpty, "the cold one is tipped out, not handed over")
         if case .working = sim.machines[i] {} else { XCTFail("a fresh pot is brewing") }
@@ -318,7 +331,7 @@ final class FlightSimulationTests: XCTestCase {
     // MARK: Twists and stories (GDD §6a)
 
     func testRedEyeStartsMostlyAsleep() {
-        let sim = FlightSimulation(plan: flight("TB104"), seed: 3)
+        let sim = FlightSimulation(plan: flight("TB105"), seed: 3)
         let asleep = sim.passengers.filter(\.asleep).count
         XCTAssertGreaterThan(Double(asleep) / Double(sim.passengers.count), 0.5)
     }
@@ -359,7 +372,7 @@ final class FlightSimulationTests: XCTestCase {
     func testGoalsAreTracked() {
         let sim = runningSim()
         XCTAssertTrue(sim.goalMet, "no misses yet")
-        sim.addSpill(row: 3, age: 21.99)
+        sim.addSpill(row: 3, age: Tuning.spillFuse - 0.01)
         step(sim, seconds: 0.1)
         XCTAssertFalse(sim.goalMet)
     }
@@ -405,7 +418,7 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertEqual(sim.streak, 2)
         let before = sim.satisfaction
         _ = sim.drainEvents()
-        sim.addSpill(row: 10, age: 22 - 0.01)
+        sim.addSpill(row: 10, age: Tuning.spillFuse - 0.01)
         step(sim, seconds: 0.1)
         XCTAssertEqual(sim.streak, 1)
         XCTAssertEqual(sim.satisfaction, before, "a miss costs the streak, not points")
@@ -613,10 +626,10 @@ final class FlightSimulationTests: XCTestCase {
         let sleeper = sim.passengers.indices.first { $0 != loud && sim.passengers[$0].row == sim.passengers[loud].row }!
         for i in sim.passengers.indices { sim.setAsleep(i, false) }
         sim.setAsleep(sleeper, true)
-        sim.addSick(passenger: loud, age: 30 * 0.3)
+        sim.addSick(passenger: loud, age: Tuning.sickFuse * 0.3)
         sim.update(dt: 0.01)
         XCTAssertTrue(sim.passengers[sleeper].asleep)
-        step(sim, seconds: 30 * 0.2)
+        step(sim, seconds: Tuning.sickFuse * 0.2)
         XCTAssertFalse(sim.passengers[sleeper].asleep)
         XCTAssertGreaterThanOrEqual(sim.stats.woken, 1)
     }
@@ -630,11 +643,11 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertEqual(L.aisles, [180])
         XCTAssertEqual(L.rows[0].seats.map(\.y), [64, 108, 252, 296])
         let kinds = L.bins.map(\.kind)
-        for k: StationKind in [.bin(.water), .bin(.juice), .machine(.coffee, prep: 3), .machine(.meal, prep: 5),
-                               .bin(.towel), .bin(.snack), .bin(.toy), .trash, .bin(.plunger)] {
+        for k: StationKind in [.drinks, .oven, .bin(.towel), .bin(.snack), .bin(.toy), .trash, .bin(.plunger)] {
             XCTAssertTrue(kinds.contains(k), "\(k)")
         }
         XCTAssertFalse(L.bins.contains { $0.item == .usedBag })
+        XCTAssertEqual(L.bins.filter { $0.kind == .oven }.count, 2, "two ovens")
     }
 
     func testEveryAircraftFitsItsSeatsAndAisles() {
@@ -722,7 +735,7 @@ final class FlightSimulationTests: XCTestCase {
         sim.crew.x = 150
         XCTAssertFalse(sim.isBehindCurtain(o))
         sim.crew.x = sim.layout.rows.last!.x
-        step(sim, seconds: 30 * 0.5)
+        step(sim, seconds: Tuning.sickFuse * 0.5)
         XCTAssertFalse(sim.isBehindCurtain(o))
     }
 
@@ -866,5 +879,128 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertNil(s.create(in: 4, name: "Five", avatar: 0))
         let back = try JSONDecoder().decode(ProfileSlots.self, from: JSONEncoder().encode(s))
         XCTAssertEqual(back, s)
+    }
+
+    // MARK: Galley, lavatories, hurry, pace (GDD §6a, §5a)
+
+    func testDrinksMachineNeedsAPickThenPoursThatDrink() {
+        let sim = runningSim()
+        let m = station(sim, .drinks)
+        let i = sim.layout.bins.firstIndex(of: m)!
+        XCTAssertEqual(sim.choices(atStation: i), [.water, .juice, .soda, .coffee])
+        sim.crew.aisle = 0; sim.crew.x = m.x
+        _ = sim.drainEvents()
+        sim.tap(x: m.x, y: m.y)                                  // no pick: nothing starts
+        step(sim, seconds: 0.5)
+        XCTAssertEqual(sim.machines[i] ?? .idle, .idle)
+        XCTAssertTrue(sim.drainEvents().contains(.nope))
+        sim.tap(x: m.x, y: m.y, choice: .soda)
+        step(sim, seconds: 0.4)
+        if case .working(.soda, _)? = sim.machines[i] {} else { XCTFail("pouring the soda") }
+        XCTAssertNil(sim.choices(atStation: i), "busy: no menu")
+        step(sim, seconds: Item.soda.prepTime)
+        XCTAssertEqual(sim.machines[i], .ready(.soda, left: .infinity), "cold drinks wait without going cold")
+        sim.tap(x: m.x, y: m.y)
+        step(sim, seconds: 0.5)
+        XCTAssertEqual(sim.crew.tray, [.soda])
+    }
+
+    func testOvenHeatsTheDishYouPickAndTheWrongOneIsRefused() {
+        let sim = runningSim()
+        let oven = station(sim, .oven)
+        let pi = sim.passengers.firstIndex { $0.reach == 0 && $0.row == 4 }!
+        let id = sim.addAtSeat(.drink, passenger: pi, steps: [.item(.pasta)], fuse: 60)
+        sim.crew.aisle = 0; sim.crew.x = oven.x
+        sim.tap(x: oven.x, y: oven.y, choice: .chicken)
+        step(sim, seconds: 0.5 + Item.chicken.prepTime)
+        sim.tap(x: oven.x, y: oven.y)
+        step(sim, seconds: 0.5)
+        XCTAssertEqual(sim.crew.tray, [.chicken])
+        _ = sim.drainEvents()
+        serve(sim, passenger: pi)
+        XCTAssertTrue(sim.occurrences.contains { $0.id == id }, "they asked for pasta")
+        XCTAssertEqual(sim.crew.tray, [.chicken])
+    }
+
+    func testDirtyLavatoryIsWipedWithATowel() {
+        let sim = runningSim(plan: flight("TB102"))
+        let id = sim.makeDirty(lavatory: 0)
+        let o = sim.occurrences.first { $0.id == id }!
+        XCTAssertEqual(o.need, .item(.towel))
+        XCTAssertFalse(sim.isClogged(0), "dirty still works")
+        sim.crew.tray = [.towel]
+        sim.crew.aisle = o.aisle; sim.crew.x = o.x - 40
+        sim.tap(x: o.x, y: o.y)
+        step(sim, seconds: 2.5)
+        XCTAssertFalse(sim.occurrences.contains { $0.id == id })
+    }
+
+    func testIgnoredDirtyLavatoryClogsOnlyOnceClogsAreIn() {
+        let early = runningSim(plan: flight("TB102"))
+        early.makeDirty(lavatory: 0)
+        step(early, seconds: Tuning.dirtyLavFuse + 0.2)
+        XCTAssertFalse(early.isClogged(0), "no plunger on TB102: it just stays dirty")
+        let late = runningSim(plan: flight("TB105"))
+        late.makeDirty(lavatory: 0)
+        step(late, seconds: Tuning.dirtyLavFuse + 0.2)
+        XCTAssertTrue(late.isClogged(0), "left dirty too long, it clogs")
+    }
+
+    func testQuickTapsMakeTheCrewHurryUpToACap() {
+        let sim = runningSim()
+        sim.crew.x = 120
+        let far = sim.layout.maxX
+        for _ in 0..<6 {
+            sim.tap(x: far, y: sim.layout.aisles[0])
+            step(sim, seconds: 0.2)
+        }
+        XCTAssertEqual(sim.crew.hurry, Tuning.maxHurry, accuracy: 0.001)
+        step(sim, seconds: Tuning.hurryHold + 1)
+        XCTAssertLessThan(sim.crew.hurry, 1.2, "it wears off")
+    }
+
+    func testHurryingIntoASpillKnocksTheCrewDown() {
+        let sim = runningSim()
+        let id = sim.addSpill(row: 8)
+        let spill = sim.occurrences.first { $0.id == id }!
+        sim.crew.x = spill.x - 90
+        sim.crew.tray = [.water]
+        _ = sim.drainEvents()
+        for _ in 0..<3 {
+            sim.tap(x: spill.x + 150, y: sim.layout.aisles[0])
+            step(sim, seconds: 0.1)
+        }
+        step(sim, seconds: 0.5)
+        XCTAssertTrue(sim.drainEvents().contains { if case .fell = $0 { return true }; return false })
+        XCTAssertEqual(sim.crew.busy?.task, .knockedDown)
+        XCTAssertTrue(sim.crew.tray.isEmpty, "the water splashed out")
+        step(sim, seconds: Tuning.fallDuration + 0.2)
+        XCTAssertNotEqual(sim.crew.busy?.task, .knockedDown, "back up")
+    }
+
+    func testStationsAFlightDoesNotUseAreHiddenAndNewOnesPopIn() {
+        let first = FlightSimulation(plan: flight("TB101"), seed: 1)
+        let kinds = first.layout.bins.map(\.kind)
+        XCTAssertTrue(kinds.contains(.drinks))
+        XCTAssertFalse(kinds.contains(.oven), "no meals yet")
+        XCTAssertFalse(kinds.contains(.bin(.toy)))
+        XCTAssertFalse(kinds.contains(.bin(.plunger)))
+        XCTAssertTrue(first.freshStations.isEmpty, "the first flight has nothing to compare with")
+        let third = FlightSimulation(plan: flight("TB103"), seed: 1)
+        let fresh = third.freshStations.map { third.layout.bins[$0].kind }
+        XCTAssertEqual(fresh.filter { $0 == .oven }.count, 2, "the ovens pop in on TB103")
+        XCTAssertTrue(fresh.contains(.bin(.toy)))
+        third.start()
+        XCTAssertTrue(third.drainEvents().contains { if case .newStations = $0 { return true }; return false })
+    }
+
+    func testMidFlightRushGoesOverTheCap() {
+        let sim = FlightSimulation(plan: flight("TB101"), seed: 4)
+        sim.turbulenceSchedule = []; sim.strollsEnabled = false; sim.sleepEnabled = false
+        sim.start()
+        step(sim, seconds: sim.plan.duration * Tuning.rushAt - 0.5, dt: 0.1)
+        _ = sim.drainEvents()
+        step(sim, seconds: 6, dt: 0.1)
+        XCTAssertTrue(sim.drainEvents().contains(.rush))
     }
 }

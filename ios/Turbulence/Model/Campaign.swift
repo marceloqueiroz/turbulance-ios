@@ -163,6 +163,28 @@ struct FlightPlan: Identifiable, Equatable {
 
     var landingAt: Double { duration - Tuning.landingLead }
 
+    /// Whether this flight fits a galley station; the rest stay hidden (GDD §6a "Only what this flight uses").
+    func uses(_ kind: StationKind) -> Bool {
+        switch kind {
+        case .drinks, .trash: return true
+        case .oven: return menu.contains { Item.meals.contains($0) }
+        case .bin(let item):
+            switch item {
+            case .snack: return menu.contains(.snack)
+            case .toy: return kinds.contains(.baby)
+            case .plunger: return kinds.contains(.toilet)
+            case .tool: return cart == .breaks
+            default: return true
+            }
+        }
+    }
+
+    /// A station this flight fits that the flight before it didn't: it pops in at Go.
+    func introduces(_ kind: StationKind) -> Bool {
+        guard uses(kind), let before = Campaign.flight(before: self) else { return false }
+        return !before.uses(kind)
+    }
+
     /// Satisfaction needed for 1, 2 and 3 stars. Busier, longer flights pay out more (GDD §2 Scoring).
     var targets: [Int] {
         if let t = Campaign.starTargets[id] { return t }
@@ -182,7 +204,7 @@ struct FlightPlan: Identifiable, Equatable {
     /// The all-mechanics Comet flight used by tests and `-demo`.
     static let prototype = FlightPlan(
         id: "TB100", name: "Prototype", aircraft: .comet, duration: 150,
-        kinds: [.sick, .spill, .call, .drink], script: [.sick, .spill], maxCap: 3, menu: [.water, .juice, .snack, .coffee],
+        kinds: [.sick, .spill, .call, .drink], script: [.sick, .spill], maxCap: 3, menu: Item.drinks + [.snack] + Item.meals,
         strolls: true, dozing: true, turbulence: Tuning.turbulenceSchedule, whatsNew: "")
 }
 
@@ -201,16 +223,16 @@ enum Campaign {
     /// Satisfaction for 1/2/3 stars, set from a greedy bot's median run over 7 seeds (0.4× · 0.85× · 1.3×):
     /// a plain run earns one or two stars, three needs clean streaks and full trays (GDD §2 Scoring).
     static let starTargets: [String: [Int]] = [
-        "TB101": [110, 235, 360], "TB102": [205, 430, 660], "TB103": [200, 425, 650],
-        "TB104": [150, 320, 495], "TB105": [130, 270, 415], "TB106": [110, 235, 360],
-        "TB201": [180, 385, 590], "TB202": [120, 250, 385], "TB203": [95, 205, 310],
-        "TB204": [75, 155, 235], "TB205": [50, 100, 155], "TB206": [50, 105, 160],
-        "TB207": [85, 180, 280], "TB208": [135, 290, 440], "TB209": [155, 330, 505],
-        "TB210": [45, 100, 150], "TB211": [60, 130, 195], "TB212": [40, 85, 130],
-        "TB301": [115, 250, 380], "TB302": [210, 445, 680], "TB303": [140, 290, 445],
-        "TB304": [95, 200, 310], "TB305": [75, 160, 245], "TB306": [70, 145, 220],
-        "TB307": [200, 430, 660], "TB308": [85, 180, 280], "TB309": [220, 470, 720],
-        "TB310": [115, 250, 380], "TB311": [60, 130, 195], "TB312": [50, 110, 165]
+        "TB101": [80, 175, 265], "TB102": [95, 205, 315], "TB103": [180, 380, 585],
+        "TB104": [60, 125, 190], "TB105": [60, 125, 190], "TB106": [65, 140, 215],
+        "TB201": [60, 125, 195], "TB202": [60, 135, 205], "TB203": [55, 120, 185],
+        "TB204": [30, 65, 95], "TB205": [25, 50, 80], "TB206": [20, 35, 55],
+        "TB207": [30, 65, 100], "TB208": [90, 185, 285], "TB209": [45, 95, 140],
+        "TB210": [35, 75, 110], "TB211": [25, 50, 80], "TB212": [25, 50, 75],
+        "TB301": [30, 65, 105], "TB302": [115, 240, 365], "TB303": [40, 85, 135],
+        "TB304": [40, 85, 135], "TB305": [40, 85, 125], "TB306": [40, 85, 130],
+        "TB307": [115, 250, 380], "TB308": [140, 295, 450], "TB309": [175, 370, 565],
+        "TB310": [95, 200, 305], "TB311": [50, 105, 160], "TB312": [40, 85, 130]
     ]
 
     private static func bump(_ start: Double, _ duration: Double = 7, _ intensity: Double = 0.375) -> [TurbulenceBump] {
@@ -219,10 +241,12 @@ enum Campaign {
     private static let service: [OccurrenceKind] = [.call, .drink, .sick]
     private static let cabin: [OccurrenceKind] = [.call, .drink, .sick, .spill]
     private static let family: [OccurrenceKind] = [.call, .drink, .sick, .spill, .baby]
-    private static let full: [OccurrenceKind] = [.call, .drink, .sick, .spill, .baby, .toilet]
-    private static let simple: [Item] = [.water, .juice, .snack]
-    private static let cafe: [Item] = [.water, .juice, .snack, .coffee]
-    private static let dining: [Item] = [.water, .juice, .snack, .coffee, .meal]
+    private static let full: [OccurrenceKind] = [.call, .drink, .sick, .spill, .baby, .dirtyLav, .toilet]
+    // Menus (GDD §6a): drinks come from the drinks machine, chicken and pasta from the ovens.
+    private static let basic: [Item] = [.water, .juice, .soda]
+    private static let simple: [Item] = [.water, .juice, .soda, .snack]
+    private static let cafe: [Item] = [.water, .juice, .soda, .snack, .coffee]
+    private static let dining: [Item] = [.water, .juice, .soda, .snack, .coffee, .chicken, .pasta]
 
     // MARK: Route 1 – Regional Hops (RJ-100 Comet, 12 rows)
 
@@ -231,30 +255,33 @@ enum Campaign {
         cities: ["Port Wren", "Halden", "Marisol Bay", "Kestrel Falls", "Ashby Cross", "Lumen Harbour", "Vale City"],
         flights: [
             FlightPlan(id: "TB101", name: "First Service", aircraft: .comet, duration: 90,
-                       kinds: service, script: [.call, .drink, .sick], maxCap: 2, menu: [.water, .juice],
+                       kinds: [.call, .drink, .spill], script: [.drink, .call, .spill], maxCap: 3, menu: basic,
                        story: .commuters, goal: .serveAllOrders,
-                       whatsNew: "Call buttons, drink orders and a sick passenger. Your tray carries two things, so plan each trip."),
+                       whatsNew: "The drinks machine pours one drink at a time: tap it, pick the drink, come back for it. Call buttons and spills too."),
             FlightPlan(id: "TB102", name: "Mind the Aisle", aircraft: .comet, duration: 105,
-                       kinds: cabin, script: [.spill, .drink], maxCap: 2, menu: simple,
+                       kinds: [.call, .drink, .spill, .dirtyLav], script: [.drink, .spill], maxCap: 3,
+                       menu: [.water, .juice, .soda, .coffee], strolls: true,
                        twist: .boardingRush, story: .weekend, goal: .noMisses,
-                       whatsNew: "Spills slow you down until mopped. Bags block the aisle while everyone boards."),
+                       whatsNew: "Coffee goes cold if it waits. Lavatories get dirty: wipe them with a towel. Bags block the aisle while everyone boards."),
             FlightPlan(id: "TB103", name: "Little Ones", aircraft: .comet, duration: 120,
-                       kinds: family, script: [.baby, .drink], maxCap: 3, menu: simple, strolls: true,
+                       kinds: [.call, .drink, .spill, .baby, .dirtyLav], script: [.baby, .drink], maxCap: 3,
+                       menu: [.water, .juice, .soda, .coffee, .chicken, .pasta], strolls: true,
                        story: .family, goal: .serveAllOrders,
-                       whatsNew: "A crying baby needs a toy, fast, before the noise spreads. Passengers start walking the aisle."),
-            FlightPlan(id: "TB104", name: "Coffee Run", aircraft: .comet, duration: 120,
-                       kinds: cabin, script: [.drink, .call], maxCap: 3, menu: cafe, strolls: true, dozing: true,
-                       twist: .redEye, story: .commuters, goal: .noneWoken,
-                       whatsNew: "Coffee brews for 3 s: start it, do something else, come back. A dim red-eye cabin full of sleepers."),
-            FlightPlan(id: "TB105", name: "Bumpy Ride", aircraft: .comet, duration: 135,
-                       kinds: full, script: [.sick], maxCap: 3, menu: cafe, strolls: true, dozing: true,
-                       turbulence: [TurbulenceBump(start: 60, duration: 7, intensity: 0.375, warning: 8)],
+                       whatsNew: "Two ovens: the passenger picks chicken or pasta and you heat the same dish. A crying baby needs a toy, fast."),
+            FlightPlan(id: "TB104", name: "Bumpy Ride", aircraft: .comet, duration: 120,
+                       kinds: [.call, .drink, .sick, .spill, .baby, .dirtyLav], script: [.sick, .drink], maxCap: 3,
+                       menu: [.water, .juice, .soda, .coffee, .chicken, .pasta], strolls: true,
+                       turbulence: [TurbulenceBump(start: 55, duration: 7, intensity: 0.375, warning: 8)],
                        story: .skiTrip, goal: .seatedEveryBump,
-                       whatsNew: "Turbulence! When the seatbelt sign comes on, get to a jump seat before it hits. Busy lavatories clog too."),
+                       whatsNew: "Turbulence! When the seatbelt sign comes on, get to a jump seat before it hits. Sick passengers need a towel, the bin, then water."),
+            FlightPlan(id: "TB105", name: "Night Flight", aircraft: .comet, duration: 135,
+                       kinds: full, script: [.drink, .call], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
+                       twist: .redEye, story: .commuters, goal: .noneWoken,
+                       whatsNew: "A dim red-eye: don't wake the sleepers. Snacks and two-item combo orders. A dirty loo left too long clogs and needs the plunger."),
             FlightPlan(id: "TB106", name: "Full Service", aircraft: .comet, duration: 150,
-                       kinds: full, script: [.drink, .sick], maxCap: 3, menu: dining, combos: true, strolls: true, dozing: true,
+                       kinds: full, script: [.drink, .sick], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
                        turbulence: bump(100), twist: .mealService, story: .celebrity, goal: .vipHappy,
-                       whatsNew: "Meal service: hot meals take 5 s in the oven, and orders come in pairs. A celebrity is on board.")
+                       whatsNew: "Everything at once, with a meal-service rush and a celebrity on board.")
         ],
         unlockStars: 0)
 
@@ -380,6 +407,12 @@ enum Campaign {
     static let routes = [route1, route2, route3]
 
     static func route(containing id: String) -> Route? { routes.first { $0.flights.contains { $0.id == id } } }
+
+    static func flight(before plan: FlightPlan) -> FlightPlan? {
+        let all = routes.flatMap(\.flights)
+        guard let i = all.firstIndex(of: plan), i > 0 else { return nil }
+        return all[i - 1]
+    }
 
     static func flight(after plan: FlightPlan) -> FlightPlan? {
         guard let r = route(containing: plan.id), let i = r.flights.firstIndex(of: plan) else { return nil }

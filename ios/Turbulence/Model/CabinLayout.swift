@@ -59,10 +59,11 @@ struct CabinBlock: Equatable {
     var label = ""
 }
 
-/// A galley station: a bin you take an item from, a machine that prepares one, or a trash bin.
+/// A galley station: a bin you take an item from, a machine you pick something on and come back for, or a trash bin.
 enum StationKind: Equatable {
     case bin(Item)
-    case machine(Item, prep: Double)     // coffee brews, meals heat: start it, come back when ready
+    case drinks                          // pours one drink at a time: tap, pick, come back (GDD §6a)
+    case oven                            // heats chicken or pasta
     case trash
 }
 
@@ -77,17 +78,23 @@ struct SupplyBin: Equatable {
     }
     init(item: Item, x: Double, y: Double, aisle: Int) { self.init(.bin(item), x: x, y: y, aisle: aisle) }
 
-    /// The item this station hands out (nil for trash).
-    var item: Item? {
+    /// The item a plain bin hands out (nil for machines and trash).
+    var item: Item? { if case .bin(let i) = kind { return i }; return nil }
+    var isMachine: Bool { kind == .drinks || kind == .oven }
+    /// Everything this station can produce.
+    var offers: [Item] {
         switch kind {
-        case .bin(let i), .machine(let i, _): return i
-        case .trash: return nil
+        case .bin(let i): return [i]
+        case .drinks: return Item.drinks
+        case .oven: return Item.meals
+        case .trash: return []
         }
     }
     var label: String {
         switch kind {
         case .bin(let i): return i.displayName
-        case .machine(let i, _): return i == .coffee ? "Coffee" : "Oven"
+        case .drinks: return "Drinks"
+        case .oven: return "Oven"
         case .trash: return "Trash"
         }
     }
@@ -101,7 +108,7 @@ struct CabinLayout: Equatable {
     let height: Double
     let aisles: [Double]
     let rows: [CabinRow]
-    let bins: [SupplyBin]
+    var bins: [SupplyBin]
     let lavatories: [Lavatory]
     let blocks: [CabinBlock]
     /// x positions where the floor joins every aisle, so the crew can change aisle (galleys).
@@ -111,6 +118,13 @@ struct CabinLayout: Equatable {
     let curtainX: Double?
     let aftX: Double
     let jumpSeats: [JumpSeat]
+
+    /// Only the stations this flight can use are fitted; the rest stay hidden (GDD §6a "Only what this flight uses").
+    func equipped(for plan: FlightPlan) -> CabinLayout {
+        var copy = self
+        copy.bins = bins.filter { plan.uses($0.kind) }
+        return copy
+    }
 
     var minX: Double { 70 }
     var maxX: Double { aftX + 96 }
@@ -185,9 +199,8 @@ struct CabinLayout: Equatable {
         blocks.append(CabinBlock(kind: .counter, x: 60, y: 30, w: 150, h: topAisle - 86, label: "FWD GALLEY"))
         blocks.append(CabinBlock(kind: .counter, x: 60, y: bottomAisle + 56, w: 150, h: height - 50 - (bottomAisle + 56)))
         let topY = topAisle - 102, bottomY = bottomAisle + 102
-        bins += [SupplyBin(item: .water, x: 78, y: topY, aisle: 0), SupplyBin(item: .juice, x: 114, y: topY, aisle: 0),
-                 SupplyBin(.machine(.coffee, prep: 3), x: 150, y: topY, aisle: 0),
-                 SupplyBin(.machine(.meal, prep: 5), x: 186, y: topY, aisle: 0)]
+        bins += [SupplyBin(.drinks, x: 96, y: topY, aisle: 0),
+                 SupplyBin(.oven, x: 150, y: topY, aisle: 0), SupplyBin(.oven, x: 186, y: topY, aisle: 0)]
         bins += [SupplyBin(item: .towel, x: 78, y: bottomY, aisle: last), SupplyBin(item: .snack, x: 114, y: bottomY, aisle: last),
                  SupplyBin(item: .toy, x: 150, y: bottomY, aisle: last), SupplyBin(.trash, x: 186, y: bottomY, aisle: last)]
         for a in 0..<last {
@@ -223,9 +236,9 @@ struct CabinLayout: Equatable {
                     blocks.append(CabinBlock(kind: .counter, x: gx + 10, y: 30, w: 76, h: topAisle - 86, label: "MID GALLEY"))
                     blocks.append(CabinBlock(kind: .counter, x: gx + 10, y: bottomAisle + 56, w: 76, h: height - 50 - (bottomAisle + 56)))
                     bins += [SupplyBin(item: .towel, x: gx + 30, y: topAisle - 102, aisle: 0),
-                             SupplyBin(item: .water, x: gx + 66, y: topAisle - 102, aisle: 0),
+                             SupplyBin(.drinks, x: gx + 66, y: topAisle - 102, aisle: 0),
                              SupplyBin(item: .snack, x: gx + 30, y: bottomAisle + 102, aisle: last),
-                             SupplyBin(item: .juice, x: gx + 66, y: bottomAisle + 102, aisle: last)]
+                             SupplyBin(item: .toy, x: gx + 66, y: bottomAisle + 102, aisle: last)]
                     for a in 0..<last {
                         let top = aisles[a] + 56, bottom = aisles[a + 1] - 56
                         blocks.append(CabinBlock(kind: .counter, x: gx + 10, y: top, w: 76, h: bottom - top))

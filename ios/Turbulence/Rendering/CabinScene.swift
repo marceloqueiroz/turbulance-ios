@@ -72,7 +72,10 @@ final class CabinScene: SKScene {
 
     private var worldW = 1000.0
     private var worldH = 380.0
-    private var builtFor: Aircraft?
+    private var builtFor: String?
+    private var freshNodes: [Int: SKSpriteNode] = [:]      // stations new on this flight, popped in at Go
+    private var dustTimer = 0.0
+    private var badgeTextures: [Item: SKTexture] = [:]
     private var staticNodes: [SKNode] = []
     private var jamNodes: [Int: SKSpriteNode] = [:]
     private let cartNode = SKSpriteNode(texture: Tex.cart)
@@ -166,17 +169,21 @@ final class CabinScene: SKScene {
     }
 
     /// Cabin art, wings and bin highlights for one aircraft; rebuilt when the flight's aircraft changes.
-    private func buildStatic(_ layout: CabinLayout) {
+    private func staticKey(_ layout: CabinLayout, _ hiding: Set<Int>) -> String {
+        "\(layout.aircraft)|\(layout.bins.map(\.label).joined(separator: ","))|\(hiding.sorted())"
+    }
+
+    private func buildStatic(_ layout: CabinLayout, hiding: Set<Int> = []) {
         staticNodes.forEach { $0.removeFromParent() }
         staticNodes.removeAll()
         binHighlights.forEach { $0.removeFromParent() }
         binHighlights.removeAll()
         worldW = layout.width
         worldH = layout.height
-        builtFor = layout.aircraft
+        builtFor = staticKey(layout, hiding)
 
         buildWings()
-        let cabin = SKSpriteNode(texture: SKTexture(image: Art.cabin(layout)))
+        let cabin = SKSpriteNode(texture: SKTexture(image: Art.cabin(layout, hiding: hiding)))
         cabin.size = CGSize(width: worldW, height: worldH)
         cabin.anchorPoint = .zero
         cabin.zPosition = 0
@@ -186,23 +193,33 @@ final class CabinScene: SKScene {
         machineRings.removeAll()
         machineCold.values.forEach { $0.removeFromParent() }
         machineCold.removeAll()
+        freshNodes.values.forEach { $0.removeFromParent() }
+        freshNodes.removeAll()
+        for i in hiding where layout.bins.indices.contains(i) {
+            let b = layout.bins[i]
+            let n = SKSpriteNode(texture: SKTexture(image: Art.stationImage(b)))
+            n.size = CGSize(width: 64, height: 64)
+            n.position = pt(b.x, b.y)
+            n.zPosition = 0.5; n.alpha = 0; n.setScale(0.2)
+            world.addChild(n); freshNodes[i] = n
+        }
         for (i, b) in layout.bins.enumerated() {
-            let h = SKShapeNode(rect: CGRect(x: -19, y: -20, width: 38, height: 40), cornerRadius: 8)
+            let hw: CGFloat = b.kind == .drinks ? 27 : 19
+            let h = SKShapeNode(rect: CGRect(x: -hw, y: -20, width: hw * 2, height: 40), cornerRadius: 8)
             h.strokeColor = Palette.teal; h.lineWidth = 3; h.glowWidth = 2; h.fillColor = .clear
             h.position = pt(b.x, b.y - 4)
             h.zPosition = 1; h.isHidden = true
             world.addChild(h); binHighlights.append(h)
-            if case .machine = b.kind {
+            if b.isMachine {
                 let ring = SKShapeNode()
                 ring.lineWidth = 3; ring.lineCap = .round; ring.zPosition = 1.5
                 ring.position = pt(b.x, b.y - 4)
                 world.addChild(ring); machineRings[i] = ring
-                if case .machine(let item, _) = b.kind, let cold = item.cold {
-                    let badge = SKSpriteNode(texture: SKTexture(image: Art.itemImage(cold, size: 22)))
-                    badge.position = pt(b.x + 16, b.y - 22)
-                    badge.zPosition = 2; badge.isHidden = true
-                    world.addChild(badge); machineCold[i] = badge
-                }
+                // what's in the machine: the pick while it's being made, then ready, then cold (frosted)
+                let badge = SKSpriteNode(color: .clear, size: CGSize(width: 22, height: 22))
+                badge.position = pt(b.x + (b.kind == .drinks ? 24 : 16), b.y - 22)
+                badge.zPosition = 2; badge.isHidden = true
+                world.addChild(badge); machineCold[i] = badge
             }
         }
         dimNode.size = CGSize(width: worldW, height: worldH)
@@ -268,7 +285,9 @@ final class CabinScene: SKScene {
         paxLayer.removeAllChildren(); spillLayer.removeAllChildren(); iconLayer.removeAllChildren(); fxLayer.removeAllChildren()
         iconNodes.removeAll(); spillNodes.removeAll(); jamNodes.removeAll(); noiseTimers.removeAll()
         guard let sim = game?.sim else { paxNodes = []; return }
-        if builtFor != sim.layout.aircraft { buildStatic(sim.layout) }
+        let hiding = Set(sim.freshStations)
+        if builtFor != staticKey(sim.layout, hiding) { buildStatic(sim.layout, hiding: hiding) }
+        for n in freshNodes.values { n.removeAllActions(); n.alpha = 0; n.setScale(0.2) }
         cartNode.isHidden = true
         flightNodes.forEach { $0.removeFromParent() }
         flightNodes.removeAll()
@@ -336,7 +355,7 @@ final class CabinScene: SKScene {
             }
             let icon = iconNodes[o.id] ?? {
                 let n = IconNode(o)
-                n.position = pt(o.x, o.kind.atSeat ? o.y : o.y - (o.kind.isCart ? 22 : o.kind == .toilet ? 30 : 2))
+                n.position = pt(o.x, o.kind.atSeat ? o.y : o.y - (o.kind.isCart ? 22 : o.kind.atLavatory ? 30 : 2))
                 iconLayer.addChild(n); iconNodes[o.id] = n; return n
             }()
             icon.sync(o, clock: clock)
@@ -373,26 +392,41 @@ final class CabinScene: SKScene {
             switch sim.machines[i] ?? .idle {
             case .idle:
                 ring.isHidden = true
-            case .working(let left):
-                let prep: Double
-                if case .machine(_, let p) = sim.layout.bins[i].kind { prep = p } else { prep = 1 }
+            case .working(let item, let left):
+                let prep = max(0.1, item.prepTime)
+                let r: CGFloat = sim.layout.bins[i].kind == .drinks ? 30 : 22
                 let path = CGMutablePath()
-                path.addArc(center: .zero, radius: 22, startAngle: .pi / 2, endAngle: .pi / 2 - (1 - left / prep) * 2 * .pi, clockwise: true)
+                path.addArc(center: .zero, radius: r, startAngle: .pi / 2, endAngle: .pi / 2 - (1 - left / prep) * 2 * .pi, clockwise: true)
                 ring.path = path; ring.strokeColor = Palette.calm; ring.glowWidth = 0; ring.isHidden = false
             case .ready:
                 // ready: the ring shrinks as it cools, green → red near the end
                 let w = sim.warmth(ofMachine: i) ?? 1
+                let r: CGFloat = sim.layout.bins[i].kind == .drinks ? 30 : 22
                 let path = CGMutablePath()
-                path.addArc(center: .zero, radius: 22, startAngle: .pi / 2, endAngle: .pi / 2 - w * 2 * .pi, clockwise: true)
+                path.addArc(center: .zero, radius: r, startAngle: .pi / 2, endAngle: .pi / 2 - w * 2 * .pi, clockwise: true)
                 ring.path = path
                 ring.strokeColor = w < 0.3 ? Palette.critical : UIColor(hex: 0x6FD08C)
                 ring.glowWidth = 3 + CGFloat(sin(clock * (w < 0.3 ? 12 : 6))) * 1.5; ring.isHidden = false
             case .cold:
-                ring.path = CGPath(ellipseIn: CGRect(x: -22, y: -22, width: 44, height: 44), transform: nil)
+                let r: CGFloat = sim.layout.bins[i].kind == .drinks ? 30 : 22
+                ring.path = CGPath(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2), transform: nil)
                 ring.strokeColor = UIColor(hex: 0x9CC8E8); ring.glowWidth = 0; ring.isHidden = false
             }
             if let badge = machineCold[i] {
-                if case .cold? = sim.machines[i] { badge.isHidden = false } else { badge.isHidden = true }
+                let shown: Item?
+                switch sim.machines[i] ?? .idle {
+                case .idle: shown = nil
+                case .working(let item, _), .ready(let item, _): shown = item
+                case .cold(let item): shown = item.cold ?? item
+                }
+                if let shown {
+                    let tex = badgeTextures[shown] ?? SKTexture(image: Art.itemImage(shown, size: 22))
+                    badgeTextures[shown] = tex
+                    if badge.texture !== tex { badge.texture = tex }
+                    badge.isHidden = false
+                } else {
+                    badge.isHidden = true
+                }
             }
         }
         // jump seats light up while the seatbelt sign is on; the nearest one pulses until you're seated
@@ -423,6 +457,14 @@ final class CabinScene: SKScene {
 
         let crew = sim.crew
         crewNode.trayWarmth = crew.tray.indices.map { sim.warmth(ofTraySlot: $0) }
+        // hurrying: little puffs of dust behind the crew
+        if crew.hurry > 1.1, crew.target != nil {
+            dustTimer -= dt
+            if dustTimer <= 0 {
+                burst(.puff, x: crew.x - crew.face * 10, y: crew.y + 8, count: 2, colors: [UIColor(hex: 0xC8BCAA, alpha: 0.7)])
+                dustTimer = 0.09
+            }
+        }
         crewNode.sync(crew, clock: clock)
         crewNode.position = pt(crew.x, crew.y)
         if let t = crew.target {
@@ -464,6 +506,12 @@ final class CabinScene: SKScene {
             c.node.removeAction(forKey: "cloudFade")
             if visible { c.node.run(.fadeAlpha(to: target, duration: 2.5), withKey: "cloudFade") } else { c.node.alpha = 0 }
         }
+    }
+
+    /// Where a world point is on screen, in view coordinates (for SwiftUI overlays such as the machine menu).
+    func viewPoint(x: Double, y: Double) -> CGPoint? {
+        guard view != nil else { return nil }
+        return convertPoint(toView: world.convert(pt(x, y), to: self))
     }
 
     // MARK: - Input
@@ -520,6 +568,24 @@ final class CabinScene: SKScene {
         case let .wokeUp(x, y):
             burst(.spark, x: x, y: y - 6, count: 4, colors: [Palette.urgent])
             floatText("!", x: x, y: y - 18, color: Palette.urgent)
+        case let .fell(x, y):
+            shake = max(shake, 0.35)
+            burst(.puff, x: x, y: y, count: 12, colors: [UIColor(hex: 0x8A4B22, alpha: 0.85), UIColor(hex: 0xC8BCAA, alpha: 0.9)])
+            floatText("Oof!", x: x, y: y - 28, color: Palette.critical)
+        case .rush:
+            if let c = game?.sim.crew { floatText("Rush!", x: c.x, y: c.y - 56, color: Palette.coral) }
+        case .newStations(let list):
+            for (k, i) in list.enumerated() {
+                guard let n = freshNodes[i], let b = game?.sim.layout.bins[i] else { continue }
+                let delay = 0.35 + Double(k) * 0.3
+                n.run(.sequence([.wait(forDuration: delay),
+                                 .group([.fadeIn(withDuration: 0.15), .scale(to: 1.25, duration: 0.18)]),
+                                 .scale(to: 1, duration: 0.15)]))
+                run(.sequence([.wait(forDuration: delay + 0.1), .run { [weak self] in
+                    self?.burst(.spark, x: b.x, y: b.y, count: 14, colors: [Palette.calm, Palette.teal, .white])
+                    self?.floatText("NEW", x: b.x, y: b.y - 38, color: Palette.coral)
+                }]))
+            }
         case let .streakLost(x, y):
             floatText("Streak lost", x: x, y: y - 44, color: Palette.critical)
         case .streakUp(let n):

@@ -9,7 +9,7 @@ enum Tuning {
     static let boardingEnds = 6.0
     static let landingLead = 18.0      // final approach: no new spawns
 
-    static let crewSpeed = 260.0
+    static let crewSpeed = 220.0
     static let crossSpeed = 200.0      // changing aisle at a galley
     static let trayCapacity = 2        // GDD §6a: a tray carries two things
     static let wadingFactor = 0.3
@@ -34,9 +34,28 @@ enum Tuning {
     static let callDuration = 0.4
     static let pickDuration = 0.25
     static let occupancy = 0.86
-    static let spawnInterval = 4.0...7.0
+    static let spawnInterval = 3.0...5.0
 
-    static let lavUsesBeforeClog = 3
+    // Time before each problem fails (GDD §6a Pace).
+    static let callFuse = 11.0
+    static let drinkFuse = 20.0
+    static let sickFuse = 24.0
+    static let spillFuse = 18.0
+    static let babyFuse = 22.0
+    static let bagFuse = 20.0
+    static let dirtyLavFuse = 22.0
+    static let clogFuse = 26.0
+    static let lavUsesBeforeDirty = 2
+    static let rushAt = 0.6                     // share of the flight when the mid-flight rush hits
+    static let rushSize = 2
+
+    // Hurry (GDD §6a): quick repeated taps speed the crew up; hurrying into a spill knocks them down.
+    static let hurryStep = 0.25
+    static let maxHurry = 1.5
+    static let hurryTapWindow = 0.6
+    static let hurryHold = 1.2
+    static let fallDuration = 1.2
+
 
     // Turbulence (GDD §5a): seatbelt chime + warning, then the cabin shakes.
     static let turbulenceSchedule = [TurbulenceBump(start: 60, duration: 7, intensity: 0.375)]
@@ -91,27 +110,52 @@ struct SplitMix64: RandomNumberGenerator {
 }
 
 enum Item: String, CaseIterable {
-    case towel, water, juice, snack, coffee, meal, toy, plunger, tool, usedBag, coldCoffee, coldMeal
+    case towel, water, juice, soda, snack, coffee, chicken, pasta, toy, plunger, tool, usedBag, coldCoffee, coldChicken, coldPasta
 
+    /// What the drinks machine pours and the ovens heat (GDD §6a).
+    static let drinks: [Item] = [.water, .juice, .soda, .coffee]
+    static let meals: [Item] = [.chicken, .pasta]
+    static let hot: [Item] = [.coffee, .chicken, .pasta]
     /// Drinks that splash out when the crew slips or stumbles.
-    static let liquids: Set<Item> = [.water, .juice, .coffee, .coldCoffee]
-    /// Hot items go cold after this long on the tray (GDD §6a).
-    var keepsHotFor: Double? { self == .coffee ? 18 : self == .meal ? 22 : nil }
-    var cold: Item? { self == .coffee ? .coldCoffee : self == .meal ? .coldMeal : nil }
+    static let liquids: Set<Item> = [.water, .juice, .soda, .coffee, .coldCoffee]
+    /// Seconds a machine takes to make it.
+    var prepTime: Double {
+        switch self {
+        case .water: return 1
+        case .juice, .soda: return 1.5
+        case .coffee: return 3
+        case .chicken, .pasta: return 5
+        default: return 0
+        }
+    }
+    /// Hot items go cold after this long, in the machine and then on the tray (GDD §6a).
+    var keepsHotFor: Double? { self == .coffee ? 18 : Item.meals.contains(self) ? 22 : nil }
+    var cold: Item? {
+        switch self {
+        case .coffee: return .coldCoffee
+        case .chicken: return .coldChicken
+        case .pasta: return .coldPasta
+        default: return nil
+        }
+    }
+    var isCold: Bool { self == .coldCoffee || self == .coldChicken || self == .coldPasta }
     var displayName: String {
         switch self {
         case .towel: return "Towel"
         case .water: return "Water"
         case .juice: return "Juice"
+        case .soda: return "Soda"
         case .snack: return "Snack"
         case .coffee: return "Coffee"
-        case .meal: return "Hot meal"
+        case .chicken: return "Chicken"
+        case .pasta: return "Pasta"
         case .toy: return "Toy"
         case .plunger: return "Plunger"
         case .tool: return "Toolkit"
         case .usedBag: return "Used sick bag"
         case .coldCoffee: return "Cold coffee"
-        case .coldMeal: return "Cold meal"
+        case .coldChicken: return "Cold chicken"
+        case .coldPasta: return "Cold pasta"
         }
     }
 }
@@ -183,7 +227,7 @@ struct Passenger: Identifiable {
 }
 
 enum OccurrenceKind: Equatable, CaseIterable {
-    case sick, call, drink, baby, spill, binJam, carryOn, toilet, stuckCart, brokenCart
+    case sick, call, drink, baby, spill, binJam, carryOn, toilet, dirtyLav, stuckCart, brokenCart
     /// Happens at a seat to a passenger.
     var atSeat: Bool { self == .sick || self == .call || self == .drink || self == .baby }
     /// Sits in the aisle and slows the crew down until cleared.
@@ -191,6 +235,8 @@ enum OccurrenceKind: Equatable, CaseIterable {
     var isCart: Bool { self == .stuckCart || self == .brokenCart }
     /// Stays put after failing, until someone clears it.
     var lingers: Bool { !atSeat }
+    /// Happens at a lavatory door.
+    var atLavatory: Bool { self == .toilet || self == .dirtyLav }
 
     /// What fixing it pays before the speed bonus and streak (GDD §2 Scoring).
     var basePay: Double { self == .call ? 3 : 6 }
@@ -249,7 +295,7 @@ struct ServiceCart: Equatable {
 }
 
 /// A finished coffee or meal keeps its warmth clock in the machine, and carries it onto the tray (GDD §6a).
-enum MachineState: Equatable { case idle, working(left: Double), ready(left: Double), cold }
+enum MachineState: Equatable { case idle, working(Item, left: Double), ready(Item, left: Double), cold(Item) }
 
 /// Twist: a trainee who answers call buttons on their own, slowly (GDD §6a).
 struct Helper: Equatable {
@@ -306,6 +352,11 @@ struct Crew {
     /// Seconds left before each hot item on the tray goes cold (one entry per hot item, any order).
     var warmth: [(item: Item, left: Double)] = []
     var stumbleTimer = 0.0
+    /// Walking-speed multiplier from quick repeated taps (1…Tuning.maxHurry).
+    var hurry = 1.0
+    var lastTap = -10.0
+    /// What the player picked on a machine's menu for the trip that's under way.
+    var choice: Item?
     var face = -1.0
     var walk = 0.0
     var wading = false
@@ -344,6 +395,9 @@ enum SimEvent: Equatable {
     case trashed
     case machineReady(station: Int)
     case machineCold(station: Int)
+    case fell(x: Double, y: Double)
+    case rush
+    case newStations([Int])
     case nope
     case phase(Phase)
     case toast(String)
@@ -393,12 +447,17 @@ final class FlightSimulation {
     private var bagQueue: [Int] = []           // sick occurrences whose used bag is on the tray
     private var deferredSpawns = 0             // problems held back while the cabin is strapped in
     private var carryOnsLeft = 0               // boarding rush: bags still to be dropped in the aisle
+    private var rushDone = false
+    /// Stations new on this flight: kept out of the cabin art and popped in at Go (GDD §6a).
+    let freshStations: [Int]
     private var rng: SplitMix64
     private var events: [SimEvent] = []
 
     init(plan: FlightPlan = .prototype, seed: UInt64 = UInt64.random(in: 0...UInt64.max)) {
         self.plan = plan
-        layout = plan.aircraft.layout
+        let fitted = plan.aircraft.layout.equipped(for: plan)
+        layout = fitted
+        freshStations = fitted.bins.indices.filter { plan.introduces(fitted.bins[$0].kind) }
         script = plan.script
         turbulenceSchedule = plan.turbulence
         strollsEnabled = plan.strolls
@@ -463,6 +522,7 @@ final class FlightSimulation {
 
     func start() {
         running = true
+        if !freshStations.isEmpty { events.append(.newStations(freshStations)) }
         emitToast("Boarding. Tap the aisle to walk. Your tray carries two things at once.")
         if plan.twist == .boardingRush {
             spawn(.carryOn)                          // the rest follow one at a time while boarding
@@ -539,6 +599,12 @@ final class FlightSimulation {
             spawnTimer = random(in: Tuning.spawnInterval)
             return
         }
+        if !rushDone, t >= plan.duration * Tuning.rushAt {
+            rushDone = true                            // mid-flight rush: extra problems at once, over the cap (GDD §6a Pace)
+            var n = 0
+            for _ in 0..<Tuning.rushSize * 3 where n < Tuning.rushSize { if spawn(rollKind()) { n += 1 } }
+            if n > 0 { events.append(.rush); say("Here we go!") }
+        }
         let cap = plan.cap(at: t) + (mealServiceOn ? 1 : 0)
         if activeCount < cap {
             let kind = script.isEmpty ? rollKind() : script.removeFirst()
@@ -611,10 +677,10 @@ final class FlightSimulation {
             let pi = candidates[pickWeighted(candidates.map { passengers[$0].archetype == .business ? 2.5 : 1 })]
             let p = passengers[pi]
             if kind == .call {
-                addAtSeat(.call, passenger: pi, steps: [.hands], fuse: 16)
+                addAtSeat(.call, passenger: pi, steps: [.hands], fuse: Tuning.callFuse)
                 hint("call", "Call button at \(p.label). Walk over and tap them. It just needs a free hand.")
             } else {
-                addAtSeat(.drink, passenger: pi, steps: [.order, orderStep()], fuse: 26)
+                addAtSeat(.drink, passenger: pi, steps: [.order, orderStep()], fuse: Tuning.drinkFuse)
                 hint("drink", "Someone wants to order. Walk over and take their order, then the icon shows what to bring.")
             }
             events.append(.spawned(kind, x: p.x, y: p.y))
@@ -623,7 +689,7 @@ final class FlightSimulation {
             let candidates = freePassengers { $0.hasKid }
             guard !candidates.isEmpty else { return false }
             let pi = candidates[randomInt(candidates.count)]
-            addAtSeat(.baby, passenger: pi, steps: [.item(.toy)], fuse: 26)
+            addAtSeat(.baby, passenger: pi, steps: [.item(.toy)], fuse: Tuning.babyFuse)
             events.append(.spawned(.baby, x: passengers[pi].x, y: passengers[pi].y))
             hint("baby", "A baby is crying and keeping the rows around them awake. Check the icon for what will calm them.")
         case .spill, .binJam, .carryOn:
@@ -640,10 +706,10 @@ final class FlightSimulation {
                 addBinJam(row: row, aisle: aisle)
                 hint("binJam", "An overhead bin popped open at row \(n). Tap it with a free hand to shut it.")
             default:
-                addAisle(.carryOn, row: row, aisle: aisle, steps: [.hands], fuse: 25)
+                addAisle(.carryOn, row: row, aisle: aisle, steps: [.hands], fuse: Tuning.bagFuse)
             }
             events.append(.spawned(kind, x: layout.rows[row].x, y: layout.aisles[aisle]))
-        case .toilet:
+        case .toilet, .dirtyLav:
             return false          // triggered by lavatory use, not rolled
         case .stuckCart, .brokenCart:
             guard var c = cart, c.active, !c.stuck else { return false }
@@ -667,7 +733,7 @@ final class FlightSimulation {
     /// What a drink/meal order asks for: one item from the flight's menu, or a combo on later flights.
     private func orderStep() -> Step {
         var menu = plan.menu.filter { item in
-            layout.bins.enumerated().contains { i, b in b.item == item && stationOpen(i) }
+            layout.bins.enumerated().contains { i, b in b.offers.contains(item) && stationOpen(i) }
         }
         if menu.isEmpty { menu = [.water] }
         let first = menu[randomInt(menu.count)]
@@ -710,7 +776,7 @@ final class FlightSimulation {
         passengers[pi].asleep = false
         let p = passengers[pi]
         var o = Occurrence(id: nextID, kind: .sick, passenger: pi, row: p.row, x: p.x, y: p.y, aisle: p.aisle,
-                           steps: [.item(.towel), .trash, .item(.water)], fuse: fuse(30, passenger: pi), seed: random() * 6)
+                           steps: [.item(.towel), .trash, .item(.water)], fuse: fuse(Tuning.sickFuse, passenger: pi), seed: random() * 6)
         o.step = step; o.age = age; o.life = age
         o.state = Escalation.forFraction(age / o.fuse)
         add(o)
@@ -731,7 +797,7 @@ final class FlightSimulation {
 
     @discardableResult
     func addSpill(row: Int, aisle: Int = 0, age: Double = 0) -> Int {
-        addAisle(.spill, row: row, aisle: aisle, steps: [.item(.towel)], fuse: 22, age: age)
+        addAisle(.spill, row: row, aisle: aisle, steps: [.item(.towel)], fuse: Tuning.spillFuse, age: age)
     }
 
     @discardableResult
@@ -749,12 +815,26 @@ final class FlightSimulation {
         return o.id
     }
 
-    /// A lavatory clogs after a few visits (GDD §5a); walkers can't use it until it's plunged.
+    /// A lavatory gets dirty every couple of visits (GDD §5a): wipe it with a towel before it clogs.
+    @discardableResult
+    func makeDirty(lavatory li: Int) -> Int {
+        let lav = layout.lavatories[li]
+        var o = Occurrence(id: nextID, kind: .dirtyLav, passenger: nil, row: layout.nearestRow(toX: lav.doorX), x: lav.doorX,
+                           y: layout.aisles[lav.aisle], aisle: lav.aisle, steps: [.item(.towel)], fuse: Tuning.dirtyLavFuse, seed: random() * 6)
+        o.lavatory = li
+        add(o)
+        lavUsesSinceClog[li] = 0
+        events.append(.spawned(.dirtyLav, x: lav.doorX, y: layout.aisles[lav.aisle]))
+        hint("dirtyLav", "A lavatory is dirty. Wipe it with a towel before it gets worse.")
+        return o.id
+    }
+
+    /// A neglected dirty lavatory clogs (GDD §5a); walkers can't use it until it's plunged.
     @discardableResult
     func clog(lavatory li: Int) -> Int {
         let lav = layout.lavatories[li]
         var o = Occurrence(id: nextID, kind: .toilet, passenger: nil, row: layout.nearestRow(toX: lav.doorX), x: lav.doorX,
-                           y: layout.aisles[lav.aisle], aisle: lav.aisle, steps: [.item(.plunger)], fuse: 30, seed: random() * 6)
+                           y: layout.aisles[lav.aisle], aisle: lav.aisle, steps: [.item(.plunger)], fuse: Tuning.clogFuse, seed: random() * 6)
         o.lavatory = li
         add(o)
         lavUsesSinceClog[li] = 0
@@ -764,6 +844,7 @@ final class FlightSimulation {
     }
 
     func isClogged(_ li: Int) -> Bool { occurrences.contains { $0.kind == .toilet && !$0.dead && $0.lavatory == li } }
+    private func needsCleaning(_ li: Int) -> Bool { occurrences.contains { $0.kind.atLavatory && !$0.dead && $0.lavatory == li } }
 
     private func fail(_ i: Int) {
         stats.failed += 1
@@ -772,7 +853,10 @@ final class FlightSimulation {
         if o.vip { stats.vipFailed = true }
         events.append(.failed(x: o.x, y: o.y))
         breakStreak(x: o.x, y: o.y)
-        if o.kind.lingers {
+        if o.kind == .dirtyLav, let li = o.lavatory, plan.kinds.contains(.toilet) {
+            occurrences[i].dead = true                  // left too long: it clogs
+            clog(lavatory: li)
+        } else if o.kind.lingers {
             // Obstacles and clogs stay put (and keep causing trouble) until someone clears them.
             occurrences[i].failed = true
             occurrences[i].state = .failed
@@ -892,7 +976,7 @@ final class FlightSimulation {
     /// Hot items on the tray count down and turn cold (GDD §6a). Tokens are matched to the tray every frame,
     /// so any way an item leaves the tray (served, binned, dropped) also drops its timer.
     private func coolTray(dt: Double) {
-        for item in [Item.coffee, .meal] {
+        for item in Item.hot {
             let onTray = crew.tray.filter { $0 == item }.count
             var tokens = crew.warmth.filter { $0.item == item }.sorted { $0.left > $1.left }
             while tokens.count > onTray { tokens.removeLast() }                  // left the tray: drop the coldest
@@ -945,20 +1029,21 @@ final class FlightSimulation {
     private func updateMachines(dt: Double) {
         for (i, m) in machines {
             switch m {
-            case .working(let left):
+            case .working(let item, let left):
                 if left - dt <= 0 {
-                    machines[i] = .ready(left: machineItem(i)?.keepsHotFor ?? 20)
+                    machines[i] = .ready(item, left: item.keepsHotFor ?? .infinity)   // cold drinks wait forever
                     events.append(.machineReady(station: i))
                 } else {
-                    machines[i] = .working(left: left - dt)
+                    machines[i] = .working(item, left: left - dt)
                 }
-            case .ready(let left):
+            case .ready(let item, let left):
+                guard left.isFinite else { break }
                 if left - dt <= 0 {
-                    machines[i] = .cold
+                    machines[i] = .cold(item)
                     events.append(.machineCold(station: i))
-                    hint("machineCold", "It went cold in the machine. Tap the machine to tip it out and start a fresh one.")
+                    hint("machineCold", "It went cold in the machine. Tap the machine to tip it out and make a fresh one.")
                 } else {
-                    machines[i] = .ready(left: left - dt)
+                    machines[i] = .ready(item, left: left - dt)
                 }
             case .idle, .cold:
                 break
@@ -966,15 +1051,29 @@ final class FlightSimulation {
         }
     }
 
-    private func machineItem(_ i: Int) -> Item? {
-        if case .machine(let item, _) = layout.bins[i].kind { return item }
-        return nil
+    /// How hot a finished item still is in its machine, 0…1 (nil unless a hot item is waiting there).
+    func warmth(ofMachine i: Int) -> Double? {
+        guard case .ready(let item, let left)? = machines[i], let full = item.keepsHotFor else { return nil }
+        return max(0, left / full)
     }
 
-    /// How hot a finished item still is in its machine, 0…1 (nil unless it's waiting there).
-    func warmth(ofMachine i: Int) -> Double? {
-        guard case .ready(let left)? = machines[i], let full = machineItem(i)?.keepsHotFor else { return nil }
-        return max(0, left / full)
+    /// What the player can pick when tapping machine `i` (nil when it isn't waiting for a pick:
+    /// it's working, or holding something ready to take). Water is always on, for sick passengers.
+    func choices(atStation i: Int) -> [Item]? {
+        guard layout.bins.indices.contains(i), layout.bins[i].isMachine, stationOpen(i) else { return nil }
+        switch machines[i] ?? .idle {
+        case .idle, .cold:
+            let menu = Set(plan.menu + [.water])
+            return layout.bins[i].offers.filter { menu.contains($0) }
+        case .working, .ready:
+            return nil
+        }
+    }
+
+    /// The station a tap at (x, y) would walk to, if any.
+    func station(forTapAt x: Double, _ y: Double) -> Int? {
+        if case .bin(let i) = target(forTapAt: x, y).action { return i }
+        return nil
     }
 
     // MARK: - Drink service cart
@@ -1031,7 +1130,7 @@ final class FlightSimulation {
         guard plan.twist == .mealService else { return }
         let on = phase == .cruise && Tuning.mealServiceWindow.contains(t / plan.duration)
         if on && !mealServiceOn {
-            emitToast("Meal service! Expect a rush of drink and meal orders. Use the coffee machine and oven early.")
+            emitToast("Meal service! Expect a rush of drink and meal orders. Start the drinks machine and ovens early.")
         }
         mealServiceOn = on
     }
@@ -1200,9 +1299,9 @@ final class FlightSimulation {
                             } else {
                                 s.dwell = random(in: Tuning.lavDwell); s.inLavatory = true; lavatoryUses += 1
                                 lavUsesSinceClog[li, default: 0] += 1
-                                if plan.kinds.contains(.toilet), lavUsesSinceClog[li, default: 0] >= Tuning.lavUsesBeforeClog,
-                                   activeCount < plan.cap(at: t) + 1 {
-                                    clog(lavatory: li)
+                                if plan.kinds.contains(.dirtyLav), lavUsesSinceClog[li, default: 0] >= Tuning.lavUsesBeforeDirty,
+                                   !needsCleaning(li), activeCount < plan.cap(at: t) + 1 {
+                                    makeDirty(lavatory: li)
                                 }
                             }
                         case .chat(let partner):
@@ -1296,9 +1395,17 @@ final class FlightSimulation {
     // MARK: - Input
 
     /// World coordinates (y down).
-    func tap(x: Double, y: Double) {
+    /// A tap in the cabin. `choice` is what the player picked on a machine's menu, if they tapped one.
+    /// Quick repeated taps while walking make the crew hurry (GDD §6a).
+    func tap(x: Double, y: Double, choice: Item? = nil) {
         guard running else { return }
         let target = target(forTapAt: x, y)
+        crew.choice = choice
+        if crew.target != nil, crew.busy == nil, crew.seated == nil, t - crew.lastTap < Tuning.hurryTapWindow {
+            crew.hurry = min(Tuning.maxHurry, crew.hurry + Tuning.hurryStep)
+            if crew.hurry >= Tuning.maxHurry { hint("hurry", "Hurrying! Faster, but running into a spill will knock you down.") }
+        }
+        crew.lastTap = t
         if crew.seated != nil {
             if seatbeltOn { say("Stay seated!"); events.append(.nope); return }
             crew.busy = BusyAction(duration: Tuning.unbuckleDuration, task: .unbuckle)
@@ -1328,7 +1435,7 @@ final class FlightSimulation {
         for o in occurrences where !o.kind.atSeat && !o.dead
             && abs(x - o.x) < (o.kind.isCart ? 26 : 22) && abs(y - o.y) < 44 {
             let side = (crew.aisle == o.aisle ? crew.x : x) < o.x ? -1.0 : 1.0
-            let stand = o.kind == .toilet ? o.x : o.x + side * reach(o)
+            let stand = o.kind.atLavatory ? o.x : o.x + side * reach(o)
             return CrewTarget(x: stand, aisle: o.aisle, action: .clear(occurrence: o.id))
         }
         for (ri, row) in layout.rows.enumerated() where abs(x - row.x) <= (row.premium ? 22 : 17) {
@@ -1347,6 +1454,26 @@ final class FlightSimulation {
 
     /// How far along the aisle an obstacle reaches: bigger spills cover more floor.
     func reach(_ o: Occurrence) -> Double { Tuning.stopDistance * (1 + 0.5 * Double(o.size - 1)) }
+
+    /// Hurried into a spill: down they go, drinks splash out, and it takes a moment to get up (GDD §6a Hurry).
+    private func fall() {
+        if let i = occurrences.indices.first(where: {
+            occurrences[$0].kind == .spill && !occurrences[$0].dead && occurrences[$0].aisle == crew.aisle
+                && abs(occurrences[$0].x - crew.x) < reach(occurrences[$0])
+        }), crew.tray.contains(where: { Item.liquids.contains($0) }) {
+            crew.tray.removeAll { Item.liquids.contains($0) }
+            occurrences[i].size = min(3, occurrences[i].size + 1)
+        }
+        breakStreak(x: crew.x, y: crew.y)
+        crew.hurry = 1
+        crew.wading = true
+        crew.queued = crew.target
+        crew.target = nil
+        crew.busy = BusyAction(duration: Tuning.fallDuration, task: .knockedDown)
+        say("Oof!")
+        events.append(.fell(x: crew.x, y: crew.y))
+        hint("fall", "You ran into a spill and fell over. Hurrying is fast, but slow down near spills.")
+    }
 
     /// Walked into a spill with drinks on the tray: they splash out and the puddle grows (GDD §5a).
     private func slip() {
@@ -1377,6 +1504,7 @@ final class FlightSimulation {
     }
 
     private func moveCrew(dt: Double) {
+        if t - crew.lastTap > Tuning.hurryHold { crew.hurry = max(1, crew.hurry - dt * 1.5) }   // hurry wears off
         if crew.bubble != nil {
             crew.bubbleTime -= dt
             if crew.bubbleTime <= 0 { crew.bubble = nil }
@@ -1419,7 +1547,10 @@ final class FlightSimulation {
         // Obstacles never hard-block (that could trap the crew away from every towel); they slow instead.
         let (factor, cause) = obstacleFactor(at: crew.x, aisle: crew.aisle)
         let wading = cause == .spill
-        if wading && !crew.wading && crew.tray.contains(where: { Item.liquids.contains($0) }) {
+        if wading && !crew.wading && crew.hurry > 1.05 {
+            fall()
+            return
+        } else if wading && !crew.wading && crew.tray.contains(where: { Item.liquids.contains($0) }) {
             slip()
         } else if wading && !crew.wading {
             say("Slippery!")
@@ -1434,7 +1565,7 @@ final class FlightSimulation {
         let squeezing = isSqueezing(at: crew.x, aisle: crew.aisle)
         if squeezing && !crew.squeezing && cause == nil { say("Excuse me!") }
         crew.squeezing = squeezing
-        var speed = factor * turbulent
+        var speed = factor * turbulent * crew.hurry
         if squeezing { speed *= Tuning.squeezeFactor }
         if walk(toward: target.x, dt: dt, factor: speed) {
             crew.target = nil
@@ -1469,6 +1600,7 @@ final class FlightSimulation {
             case .binJam, .carryOn: d = 0.8
             case .stuckCart: d = 1.2
             case .brokenCart, .toilet: d = 1.5
+            case .dirtyLav: d = 1.2
             default: d = 0.9 * Double(o.size)                 // bigger spills take longer to mop
             }
             use(on: id, duration: d)
@@ -1525,26 +1657,31 @@ final class FlightSimulation {
                 events.append(.nope); return
             }
             events.append(.picked)
-        case .machine(let item, let prep):
+        case .drinks, .oven:
+            let station = layout.bins[i]
             switch machines[i] ?? .idle {
-            case .idle:
-                machines[i] = .working(left: prep)
-                say(item == .coffee ? "Brewing…" : "Heating…")
-                hint("machine", "Machines take a few seconds. Start one, go do something else, and come back when it's ready.")
-                events.append(.picked)
+            case .idle, .cold:
+                let wasCold: Bool
+                if case .cold? = machines[i] { wasCold = true } else { wasCold = false }
+                guard let pick = crew.choice, station.offers.contains(pick) else {
+                    say(station.kind == .oven ? "Chicken or pasta?" : "Which drink?")
+                    events.append(.nope); return
+                }
+                crew.choice = nil
+                machines[i] = .working(pick, left: pick.prepTime)
+                say(wasCold ? "Tipped out. Fresh one…" : station.kind == .oven ? "Heating \(pick.displayName.lowercased())…"
+                    : pick == .coffee ? "Brewing…" : "Pouring…")
+                hint("machine", "Machines take a moment. Start one, do something else, and come back when it's ready.")
+                events.append(wasCold ? .trashed : .picked)
             case .working:
                 say("Not ready yet")
                 events.append(.nope)
-            case .ready(let left):
+            case .ready(let item, let left):
                 guard crew.hasFreeHand else { say("Tray full!"); events.append(.nope); return }
                 crew.tray.append(item)
-                crew.warmth.append((item, left))          // the clock carries on from the machine
+                if left.isFinite { crew.warmth.append((item, left)) }     // the clock carries on from the machine
                 machines[i] = .idle
                 events.append(.picked)
-            case .cold:
-                machines[i] = .working(left: prep)       // tip out the cold one and start fresh
-                say(item == .coffee ? "Fresh pot…" : "Heating a fresh one…")
-                events.append(.trashed)
             }
         case .trash:
             guard !crew.tray.isEmpty else { say("Nothing to throw"); events.append(.nope); return }
@@ -1648,8 +1785,13 @@ final class FlightSimulation {
         crew.x = 300
         crew.face = 1
         crew.tray = [.coffee, .usedBag]
-        for i in layout.bins.indices {                         // one pot cooling in its machine, one meal gone cold
-            if case .machine(let item, _) = layout.bins[i].kind { machines[i] = item == .coffee ? .ready(left: 5) : .cold }
+        var ovens = 0                                          // coffee cooling in the drinks machine, one meal cold, one heating
+        for i in layout.bins.indices {
+            switch layout.bins[i].kind {
+            case .drinks: machines[i] = .ready(.coffee, left: 5)
+            case .oven: machines[i] = ovens == 0 ? .cold(.chicken) : .working(.pasta, left: 3); ovens += 1
+            default: break
+            }
         }
         crew.target = CrewTarget(x: layout.rows[5].x - Tuning.stopDistance, action: .none)
     }

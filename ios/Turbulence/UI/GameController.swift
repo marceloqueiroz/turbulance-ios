@@ -32,6 +32,13 @@ final class GameController {
     var muted = false
     var result: FlightResult?
     var seatbelt = false
+    /// The menu over a drinks machine or oven, in view coordinates (GDD §6a).
+    var picker: MachinePicker?
+    struct MachinePicker: Equatable {
+        let station: Int
+        let options: [Item]
+        let point: CGPoint
+    }
     /// "Take your seat" while the sign is on and the crew is standing; "buckled" once seated.
     var seatPrompt: SeatPrompt = .none
     enum SeatPrompt: Equatable { case none, takeSeat, buckled }
@@ -71,6 +78,13 @@ final class GameController {
             sim = FlightSimulation()
             sim.stageDemo()
             screen = .playing
+            if args.contains("-picker"), let i = sim.layout.bins.firstIndex(where: { $0.kind == .oven }) {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in   // show a machine menu (screenshots)
+                    guard let self, let options = self.sim.choices(atStation: i) ?? Optional(Item.meals),
+                          let point = self.scene.viewPoint(x: self.sim.layout.bins[i].x, y: self.sim.layout.bins[i].y) else { return }
+                    self.picker = MachinePicker(station: i, options: options, point: point)
+                }
+            }
         } else if let i = args.firstIndex(of: "-flight"), i + 1 < args.count,
                   let p = Campaign.routes.flatMap(\.flights).first(where: { $0.id == args[i + 1] }) {
             plan = p                                 // jump straight into one flight, e.g. -flight TB307
@@ -192,9 +206,26 @@ final class GameController {
         synth.muted = muted
     }
 
+    /// A cabin tap. Tapping a drinks machine or oven that's waiting for a pick opens its menu first
+    /// (the "two-tap" machines, GDD §6a); any other tap closes an open menu.
     func tap(x: Double, y: Double) {
         guard screen == .playing else { return }
+        picker = nil
+        if let i = sim.station(forTapAt: x, y), let options = sim.choices(atStation: i), !options.isEmpty,
+           let point = scene.viewPoint(x: sim.layout.bins[i].x, y: sim.layout.bins[i].y) {
+            picker = MachinePicker(station: i, options: options, point: point)
+            synth.play(.pick)
+            return
+        }
         sim.tap(x: x, y: y)
+    }
+
+    /// The player picked something on a machine's menu: walk there and start it.
+    func pick(_ item: Item) {
+        guard let p = picker, screen == .playing else { picker = nil; return }
+        picker = nil
+        let b = sim.layout.bins[p.station]
+        sim.tap(x: b.x, y: b.y, choice: item)
     }
 
     /// Called by the scene once per frame.
@@ -245,6 +276,13 @@ final class GameController {
             synth.play(.streakUp)
             if haptics { bump.impactOccurred(intensity: 0.5) }
         case .streakLost: synth.play(.streakLost)
+        case .fell:
+            synth.play(.fail)
+            if haptics { jolt.impactOccurred(intensity: 1) }
+        case .rush:
+            synth.play(.chime)
+            if haptics { bump.impactOccurred(intensity: 0.7) }
+        case .newStations: synth.play(.streakUp)
         case .cart(let out): if out { synth.play(.chime) }
         case .toast(let text):
             toast = text
