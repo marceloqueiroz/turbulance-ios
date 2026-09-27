@@ -77,6 +77,7 @@ final class CabinScene: SKScene {
     private var jamNodes: [Int: SKSpriteNode] = [:]
     private let cartNode = SKSpriteNode(texture: Tex.cart)
     private var machineRings: [Int: SKShapeNode] = [:]
+    private var machineCold: [Int: SKSpriteNode] = [:]      // the cold cup/plate waiting in a machine
     private var flightNodes: [SKNode] = []          // per-flight overlays (closed galley)
     private let dimNode = SKSpriteNode(color: UIColor(hex: 0x0B1330), size: .zero)
     private let helperNode = CrewNode()
@@ -183,6 +184,8 @@ final class CabinScene: SKScene {
 
         machineRings.values.forEach { $0.removeFromParent() }
         machineRings.removeAll()
+        machineCold.values.forEach { $0.removeFromParent() }
+        machineCold.removeAll()
         for (i, b) in layout.bins.enumerated() {
             let h = SKShapeNode(rect: CGRect(x: -19, y: -20, width: 38, height: 40), cornerRadius: 8)
             h.strokeColor = Palette.teal; h.lineWidth = 3; h.glowWidth = 2; h.fillColor = .clear
@@ -194,6 +197,12 @@ final class CabinScene: SKScene {
                 ring.lineWidth = 3; ring.lineCap = .round; ring.zPosition = 1.5
                 ring.position = pt(b.x, b.y - 4)
                 world.addChild(ring); machineRings[i] = ring
+                if case .machine(let item, _) = b.kind, let cold = item.cold {
+                    let badge = SKSpriteNode(texture: SKTexture(image: Art.itemImage(cold, size: 22)))
+                    badge.position = pt(b.x + 16, b.y - 22)
+                    badge.zPosition = 2; badge.isHidden = true
+                    world.addChild(badge); machineCold[i] = badge
+                }
             }
         }
         dimNode.size = CGSize(width: worldW, height: worldH)
@@ -371,8 +380,19 @@ final class CabinScene: SKScene {
                 path.addArc(center: .zero, radius: 22, startAngle: .pi / 2, endAngle: .pi / 2 - (1 - left / prep) * 2 * .pi, clockwise: true)
                 ring.path = path; ring.strokeColor = Palette.calm; ring.glowWidth = 0; ring.isHidden = false
             case .ready:
+                // ready: the ring shrinks as it cools, green → red near the end
+                let w = sim.warmth(ofMachine: i) ?? 1
+                let path = CGMutablePath()
+                path.addArc(center: .zero, radius: 22, startAngle: .pi / 2, endAngle: .pi / 2 - w * 2 * .pi, clockwise: true)
+                ring.path = path
+                ring.strokeColor = w < 0.3 ? Palette.critical : UIColor(hex: 0x6FD08C)
+                ring.glowWidth = 3 + CGFloat(sin(clock * (w < 0.3 ? 12 : 6))) * 1.5; ring.isHidden = false
+            case .cold:
                 ring.path = CGPath(ellipseIn: CGRect(x: -22, y: -22, width: 44, height: 44), transform: nil)
-                ring.strokeColor = UIColor(hex: 0x6FD08C); ring.glowWidth = 3 + CGFloat(sin(clock * 6)) * 1.5; ring.isHidden = false
+                ring.strokeColor = UIColor(hex: 0x9CC8E8); ring.glowWidth = 0; ring.isHidden = false
+            }
+            if let badge = machineCold[i] {
+                if case .cold? = sim.machines[i] { badge.isHidden = false } else { badge.isHidden = true }
             }
         }
         // jump seats light up while the seatbelt sign is on; the nearest one pulses until you're seated

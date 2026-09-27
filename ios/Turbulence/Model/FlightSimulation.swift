@@ -248,7 +248,8 @@ struct ServiceCart: Equatable {
     var active = true
 }
 
-enum MachineState: Equatable { case idle, working(left: Double), ready }
+/// A finished coffee or meal keeps its warmth clock in the machine, and carries it onto the tray (GDD §6a).
+enum MachineState: Equatable { case idle, working(left: Double), ready(left: Double), cold }
 
 /// Twist: a trainee who answers call buttons on their own, slowly (GDD §6a).
 struct Helper: Equatable {
@@ -342,6 +343,7 @@ enum SimEvent: Equatable {
     case picked
     case trashed
     case machineReady(station: Int)
+    case machineCold(station: Int)
     case nope
     case phase(Phase)
     case toast(String)
@@ -942,15 +944,37 @@ final class FlightSimulation {
 
     private func updateMachines(dt: Double) {
         for (i, m) in machines {
-            if case .working(let left) = m {
+            switch m {
+            case .working(let left):
                 if left - dt <= 0 {
-                    machines[i] = .ready
+                    machines[i] = .ready(left: machineItem(i)?.keepsHotFor ?? 20)
                     events.append(.machineReady(station: i))
                 } else {
                     machines[i] = .working(left: left - dt)
                 }
+            case .ready(let left):
+                if left - dt <= 0 {
+                    machines[i] = .cold
+                    events.append(.machineCold(station: i))
+                    hint("machineCold", "It went cold in the machine. Tap the machine to tip it out and start a fresh one.")
+                } else {
+                    machines[i] = .ready(left: left - dt)
+                }
+            case .idle, .cold:
+                break
             }
         }
+    }
+
+    private func machineItem(_ i: Int) -> Item? {
+        if case .machine(let item, _) = layout.bins[i].kind { return item }
+        return nil
+    }
+
+    /// How hot a finished item still is in its machine, 0…1 (nil unless it's waiting there).
+    func warmth(ofMachine i: Int) -> Double? {
+        guard case .ready(let left)? = machines[i], let full = machineItem(i)?.keepsHotFor else { return nil }
+        return max(0, left / full)
     }
 
     // MARK: - Drink service cart
@@ -1511,11 +1535,16 @@ final class FlightSimulation {
             case .working:
                 say("Not ready yet")
                 events.append(.nope)
-            case .ready:
+            case .ready(let left):
                 guard crew.hasFreeHand else { say("Tray full!"); events.append(.nope); return }
                 crew.tray.append(item)
+                crew.warmth.append((item, left))          // the clock carries on from the machine
                 machines[i] = .idle
                 events.append(.picked)
+            case .cold:
+                machines[i] = .working(left: prep)       // tip out the cold one and start fresh
+                say(item == .coffee ? "Fresh pot…" : "Heating a fresh one…")
+                events.append(.trashed)
             }
         case .trash:
             guard !crew.tray.isEmpty else { say("Nothing to throw"); events.append(.nope); return }
@@ -1619,6 +1648,9 @@ final class FlightSimulation {
         crew.x = 300
         crew.face = 1
         crew.tray = [.coffee, .usedBag]
+        for i in layout.bins.indices {                         // one pot cooling in its machine, one meal gone cold
+            if case .machine(let item, _) = layout.bins[i].kind { machines[i] = item == .coffee ? .ready(left: 5) : .cold }
+        }
         crew.target = CrewTarget(x: layout.rows[5].x - Tuning.stopDistance, action: .none)
     }
 }

@@ -216,11 +216,45 @@ final class FlightSimulationTests: XCTestCase {
         if case .working = sim.machines[i] {} else { XCTFail("machine should be brewing") }
         XCTAssertTrue(sim.crew.tray.isEmpty)
         step(sim, seconds: 3)
-        XCTAssertEqual(sim.machines[i], .ready)
+        if case .ready = sim.machines[i] {} else { XCTFail("coffee should be ready") }
         sim.tap(x: machine.x, y: machine.y)
         step(sim, seconds: 0.5)
         XCTAssertEqual(sim.crew.tray, [.coffee])
         XCTAssertEqual(sim.machines[i], .idle)
+    }
+
+    func testCoffeeCoolsInTheMachineAndKeepsItsClockOnTheTray() {
+        let sim = runningSim()
+        let machine = station(sim, .machine(.coffee, prep: 3))
+        let i = sim.layout.bins.firstIndex(of: machine)!
+        sim.crew.aisle = 0; sim.crew.x = machine.x
+        sim.tap(x: machine.x, y: machine.y)
+        step(sim, seconds: 3.5)                                  // brewed
+        step(sim, seconds: 9)                                    // then waited about half its 18 s
+        let w = sim.warmth(ofMachine: i) ?? 0
+        XCTAssertLessThan(w, 0.6, "cooling while it waits in the machine")
+        sim.tap(x: machine.x, y: machine.y)
+        step(sim, seconds: 0.5)
+        XCTAssertEqual(sim.crew.tray, [.coffee])
+        XCTAssertEqual(sim.warmth(ofTraySlot: 0) ?? 1, w, accuracy: 0.08, "the clock carries on from the machine")
+        step(sim, seconds: 9)
+        XCTAssertEqual(sim.crew.tray, [.coldCoffee], "the rest of the time ran out on the tray")
+    }
+
+    func testForgottenCoffeeGoesColdInTheMachineAndATapStartsAFreshOne() {
+        let sim = runningSim()
+        let machine = station(sim, .machine(.coffee, prep: 3))
+        let i = sim.layout.bins.firstIndex(of: machine)!
+        sim.crew.aisle = 0; sim.crew.x = machine.x
+        sim.tap(x: machine.x, y: machine.y)
+        _ = sim.drainEvents()
+        step(sim, seconds: 3.5 + Item.coffee.keepsHotFor! + 0.5)
+        XCTAssertEqual(sim.machines[i], .cold)
+        XCTAssertTrue(sim.drainEvents().contains { if case .machineCold = $0 { return true }; return false })
+        sim.tap(x: machine.x, y: machine.y)
+        step(sim, seconds: 0.5)
+        XCTAssertTrue(sim.crew.tray.isEmpty, "the cold one is tipped out, not handed over")
+        if case .working = sim.machines[i] {} else { XCTFail("a fresh pot is brewing") }
     }
 
     func testComboOrderNeedsBothItemsAtOnce() {

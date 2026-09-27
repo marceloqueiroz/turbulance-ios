@@ -221,6 +221,7 @@ final class GameController {
         case .picked: synth.play(.pick)
         case .trashed: synth.play(.step)
         case .machineReady: synth.play(.ok)
+        case .machineCold: synth.play(.nope)
         case .nope: synth.play(.nope)
         case .seatbelt(let on):
             seatbelt = on
