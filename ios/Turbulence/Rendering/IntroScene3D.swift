@@ -284,7 +284,10 @@ final class IntroScene3D {
             n.position = v(x, y, z)
             flat.addChildNode(n)
         }
-        lay(Art.cabin(layout, hiding: hidden), w: layout.width, h: layout.height, x: layout.width / 2, z: layout.height / 2, y: 0.5)
+        // the cabin wall around the final shot, so the hand-over lands on the same surround as the game
+        lay(Art.wall(CGSize(width: 64, height: 64)), w: layout.width * 8, h: layout.height * 8,
+            x: layout.width / 2, z: layout.height / 2, y: 0.2)
+        lay(Art.cabin(layout, hiding: hidden), w: layout.width + 2 * Double(Art.cabinPad), h: layout.height, x: layout.width / 2, z: layout.height / 2, y: 0.5)
         for p in passengers {
             lay(Art.passenger(p, sick: false), w: Double(Art.passengerSize.width), h: Double(Art.passengerSize.height), x: p.x, z: p.y, y: 1)
         }

@@ -112,7 +112,7 @@ final class CabinScene: SKScene {
     override init(size: CGSize) {
         super.init(size: size)
         scaleMode = .resizeFill
-        backgroundColor = Palette.sky
+        backgroundColor = Art.wallMid
         anchorPoint = .zero
 
         skyNode.anchorPoint = .zero; skyNode.zPosition = -100
@@ -130,6 +130,7 @@ final class CabinScene: SKScene {
             n.alpha = layer == 1 ? 0.09 : 0.05
             n.position = pt(Double.random(in: -400...1400), Double.random(in: -420...760))
             n.zPosition = -60
+            n.isHidden = true                    // the camera stays inside the cabin (GDD §8a)
             world.addChild(n)
             clouds.append((n, layer == 1 ? .random(in: 90...140) : .random(in: 35...60)))
         }
@@ -167,24 +168,19 @@ final class CabinScene: SKScene {
         layoutWorld()
     }
 
-    /// How much of the hull wall (top and bottom) may run off screen: the camera frames the inside of the
-    /// cabin (seats, galleys, lavatories), not the fuselage and wings, so it fills the screen (GDD §8a).
-    static let hullMargin = 26.0
+    /// The hull wall around the cabin's interior (in the art, the inside starts 22 pt in): the camera frames the
+    /// inside (seats, galleys, lavatories), not the fuselage, and the wall colour fills the rest (GDD §8a).
+    static let hullMargin = 22.0
 
     /// The camera scale that fits a cabin's interior into the clear area; shared with the intro's final shot.
     static func fitScale(availW: Double, availH: Double, width: Double, height: Double) -> Double {
-        min(availW / width, availH / (height - 2 * hullMargin))
+        min(availW / (width - 2 * hullMargin), availH / (height - 2 * hullMargin))
     }
 
-    /// Where the world's bottom edge sits (scene y, up): centred in the clear area when the cabin fits; when it's
-    /// taller, the hull's top edge tucks under the HUD and the rest of the hull wall runs off the bottom.
+    /// Where the world's bottom edge sits (scene y, up): the interior centred in the clear area.
     static func worldBaseY(viewH: Double, insetTop: Double, insetBottom: Double, worldH: Double, scale s: Double) -> Double {
         let availH = viewH - insetTop - insetBottom
-        let overflow = worldH * s - availH
-        if overflow <= 0 { return insetBottom + (availH - worldH * s) / 2 }
-        // the bottom may lose at most the hull wall; the top loses at least the hull's outer edge (12 in the art)
-        let topCut = max(12 * s, overflow - hullMargin * s)
-        return viewH - insetTop + topCut - worldH * s
+        return insetBottom + (availH - worldH * s) / 2                // the interior, centred in the clear area
     }
 
     /// Fits the cabin's interior on screen (GDD §4: fixed camera, every icon visible).
@@ -201,7 +197,7 @@ final class CabinScene: SKScene {
         world.position = worldBase
         if renderedSize != size {
             renderedSize = size
-            skyNode.texture = SKTexture(image: Art.sky(size)); skyNode.size = size
+            skyNode.texture = SKTexture(image: Art.wall(size)); skyNode.size = size   // inside only: no sky
             vignetteNode.texture = SKTexture(image: Art.vignette(size)); vignetteNode.size = size
         }
         skyNode.position = CGPoint(x: -size.width / 2, y: -size.height / 2)
@@ -223,10 +219,11 @@ final class CabinScene: SKScene {
         worldH = layout.height
         builtFor = staticKey(layout, hiding)
 
-        buildWings()
+        // no wings: the camera frames the inside of the cabin only (GDD §8a)
         let cabin = SKSpriteNode(texture: SKTexture(image: Art.cabin(layout, hiding: hiding, jumpSeats: false)))
-        cabin.size = CGSize(width: worldW, height: worldH)
+        cabin.size = CGSize(width: worldW + 2 * Double(Art.cabinPad), height: worldH)
         cabin.anchorPoint = .zero
+        cabin.position = CGPoint(x: -Art.cabinPad, y: 0)
         cabin.zPosition = 0
         world.addChild(cabin); staticNodes.append(cabin)
 
@@ -272,7 +269,8 @@ final class CabinScene: SKScene {
                 world.addChild(badge); machineCold[i] = badge
             }
         }
-        dimNode.size = CGSize(width: worldW, height: worldH)
+        dimNode.size = CGSize(width: worldW + 6000, height: worldH + 6000)   // the whole screen, whatever the fit
+        dimNode.position = CGPoint(x: -3000, y: -3000)
         jumpGlows.forEach { $0.removeFromParent() }
         jumpGlows = layout.jumpSeats.map { j in
             let g = SKShapeNode(rect: CGRect(x: -14, y: -9, width: 28, height: 18), cornerRadius: 5)

@@ -181,29 +181,45 @@ enum Art {
 
     /// `hiding`: station indexes left out of the art (new stations that pop in at Go).
     /// `jumpSeats: false` leaves them out (the scene draws them as sprites that can fold away).
+    /// How far the cabin art runs past the nose and tail ends, so the camera only ever sees cabin (GDD §8a).
+    static let cabinPad: CGFloat = 520
+
+    /// The image is `cabinPad` wider on each side than the layout: straight walls and floor carry on past
+    /// both ends instead of a rounded fuselage on a background.
     static func cabin(_ L: CabinLayout, hiding: Set<Int> = [], jumpSeats: Bool = true) -> UIImage {
         let W = CGFloat(L.width), H = CGFloat(L.height)
         let aisles = L.aisles.map { CGFloat($0) }
         let top = aisles.first!, bottom = aisles.last!
         let aftX = CGFloat(L.aftX)
-        return image(W, H, scale: 2.5) { c in
-            // hull: cylinder shading + drop shadow
-            let hull = rr(12, 12, W - 19, H - 24, [80, 32, 32, 80])
-            c.saveGState()
-            shadow(c, UIColor(white: 0, alpha: 0.5), blur: 24, dy: 10)
-            fill(c, hull, UIColor(hex: 0xD3D8DE))
-            c.restoreGState()
+        let pad = cabinPad
+        return image(W + 2 * pad, H, scale: 2.5) { c in
+            c.translateBy(x: pad, y: 0)
+            // walls: straight, running past both ends (inside view, no fuselage outline)
+            c.setFillColor(wallTop.cgColor); c.fill(CGRect(x: -pad, y: 0, width: W + 2 * pad, height: H))
+            let hull = CGPath(rect: CGRect(x: -pad, y: 12, width: W + 2 * pad, height: H - 24), transform: nil)
             linear(c, hull, [UIColor(hex: 0x8F98A6), UIColor(hex: 0xD3D8DE), UIColor(hex: 0xEEF0F2), UIColor(hex: 0xD3D8DE), UIColor(hex: 0x8F98A6)],
                    [0, 0.07, 0.5, 0.93, 1], from: P(0, 12), to: P(0, H - 12))
-            c.setFillColor(Palette.coral.cgColor); c.fill(CGRect(x: 150, y: 13, width: W - 168, height: 5)); c.fill(CGRect(x: 150, y: H - 18, width: W - 168, height: 5))
-            c.setFillColor(Palette.navy.cgColor); c.fill(CGRect(x: 150, y: 18, width: W - 168, height: 1.5)); c.fill(CGRect(x: 150, y: H - 19.5, width: W - 168, height: 1.5))
+            c.setFillColor(Palette.coral.cgColor); c.fill(CGRect(x: -pad, y: 13, width: W + 2 * pad, height: 5)); c.fill(CGRect(x: -pad, y: H - 18, width: W + 2 * pad, height: 5))
+            c.setFillColor(Palette.navy.cgColor); c.fill(CGRect(x: -pad, y: 18, width: W + 2 * pad, height: 1.5)); c.fill(CGRect(x: -pad, y: H - 19.5, width: W + 2 * pad, height: 1.5))
 
             c.saveGState()
-            c.addPath(rr(22, 22, W - 39, H - 44, [70, 24, 24, 70])); c.clip()
+            c.addPath(CGPath(rect: CGRect(x: -pad, y: 22, width: W + 2 * pad, height: H - 44), transform: nil)); c.clip()
 
-            // floor
-            linear(c, CGPath(rect: CGRect(x: 0, y: 0, width: W, height: H), transform: nil),
+            // floor, then galley tiles past both ends of the cabin
+            linear(c, CGPath(rect: CGRect(x: -pad, y: 0, width: W + 2 * pad, height: H), transform: nil),
                    [UIColor(hex: 0xD6CEC1), Palette.cream, Palette.cream, UIColor(hex: 0xD6CEC1)], [0, 0.1, 0.9, 1], from: P(0, 22), to: P(0, H - 22))
+            for (x0, x1) in [(-pad, CGFloat(56)), (W - 22, W + pad)] {
+                var i = 0, tx = x0
+                while tx < x1 {
+                    var j = 0, ty: CGFloat = 22
+                    while ty < H - 22 {
+                        c.setFillColor(((i + j) % 2 == 1 ? navy(0.07) : white(0.25)).cgColor)
+                        c.fill(CGRect(x: tx, y: ty, width: min(11, x1 - tx), height: min(11, H - 22 - ty)))
+                        ty += 11; j += 1
+                    }
+                    tx += 11; i += 1
+                }
+            }
 
             // aisle carpet with woven diamonds, one per aisle
             for a in aisles {
@@ -731,6 +747,15 @@ enum Art {
             for (x, y, r) in [(70.0, 74.0, 48.0), (120, 60, 58), (176, 76, 46), (128, 88, 50), (90, 90, 36), (200, 90, 30)] as [(CGFloat, CGFloat, CGFloat)] {
                 radial(c, x, y, 0, r, white(0.9), white(0))
             }
+        }
+    }
+
+    /// The cabin's inner wall: what surrounds the cabin during play (GDD §8a: the camera shows the inside only).
+    static let wallTop = UIColor(hex: 0x8F98A6), wallMid = UIColor(hex: 0x8F98A6)
+
+    static func wall(_ size: CGSize) -> UIImage {
+        image(max(size.width, 1), max(size.height, 1), scale: 1) { c in
+            c.setFillColor(wallTop.cgColor); c.fill(CGRect(origin: .zero, size: size))
         }
     }
 

@@ -104,7 +104,7 @@ struct SupplyBin: Equatable {
 /// The Comet is short (12 rows) so early flights are about choices, not walking (GDD §4a).
 struct CabinLayout: Equatable {
     let aircraft: Aircraft
-    let width: Double
+    var width: Double
     let height: Double
     let aisles: [Double]
     let rows: [CabinRow]
@@ -117,7 +117,7 @@ struct CabinLayout: Equatable {
     let galleyFloors: [ClosedRange<Double>]
     let curtainX: Double?
     let aftX: Double
-    let jumpSeats: [JumpSeat]
+    var jumpSeats: [JumpSeat]
 
     /// Only the stations this flight can use are fitted; the rest stay hidden (GDD §6a "Only what this flight uses").
     func equipped(for plan: FlightPlan) -> CabinLayout {
@@ -126,12 +126,18 @@ struct CabinLayout: Equatable {
         if !plan.usesLavatories {                   // nobody walks yet: the lavatories are plain closets
             copy.lavatories = []
             copy.blocks = blocks.map { $0.kind == .lavatory ? CabinBlock(kind: .closet, x: $0.x, y: $0.y, w: $0.w, h: $0.h) : $0 }
+            if !copy.bins.contains(where: { $0.x >= aftX }) {
+                // nothing to do at the back: the cabin ends just after the last row, no empty closets
+                copy.blocks.removeAll { $0.x >= aftX }
+                copy.jumpSeats.removeAll { $0.x >= aftX }
+                copy.width = aftX + 40
+            }
         }
         return copy
     }
 
     var minX: Double { 70 }
-    var maxX: Double { aftX + 96 }
+    var maxX: Double { min(aftX + 96, width - 30) }
     var firstRowX: Double { rows.first?.x ?? 235 }
     var lastRowX: Double { rows.last?.x ?? 631 }
     var seatCount: Int { rows.reduce(0) { $0 + $1.seats.count } }
