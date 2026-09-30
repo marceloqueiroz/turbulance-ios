@@ -44,10 +44,10 @@
         {
           "glass": true,
           "image-name": "trail.png",
-          "name": "trail"
+          "name": "contrails"
         }
       ],
-      "name": "Trail",
+      "name": "Contrails",
       "shadow": {
         "kind": "none",
         "opacity": 0.5
@@ -55,25 +55,6 @@
       "translucency": {
         "enabled": true,
         "value": 0.35
-      }
-    },
-    {
-      "layers": [
-        {
-          "glass": true,
-          "image-name": "clouds.png",
-          "name": "clouds",
-          "opacity": 0.9
-        }
-      ],
-      "name": "Clouds",
-      "shadow": {
-        "kind": "none",
-        "opacity": 0.5
-      },
-      "translucency": {
-        "enabled": true,
-        "value": 0.5
       }
     }
   ],

@@ -20,31 +20,45 @@
   ],
   "groups": [
     {
-      "name": "Plane",
       "layers": [
-        { "name": "plane", "image-name": "plane.png", "glass": true }
+        {
+          "glass": true,
+          "image-name": "plane.png",
+          "name": "plane"
+        }
       ],
       "lighting": "individual",
+      "name": "Plane",
+      "shadow": {
+        "kind": "neutral",
+        "opacity": 0.55
+      },
       "specular": true,
-      "shadow": { "kind": "neutral", "opacity": 0.55 },
-      "translucency": { "enabled": false, "value": 0.5 }
+      "translucency": {
+        "enabled": false,
+        "value": 0.5
+      }
     },
     {
-      "name": "Trail",
       "layers": [
-        { "name": "trail", "image-name": "trail.png", "glass": true }
+        {
+          "glass": true,
+          "image-name": "trail.png",
+          "name": "contrails"
+        }
       ],
-      "shadow": { "kind": "none", "opacity": 0.5 },
-      "translucency": { "enabled": true, "value": 0.35 }
-    },
-    {
-      "name": "Clouds",
-      "layers": [
-        { "name": "clouds", "image-name": "clouds.png", "glass": true, "opacity": 0.9 }
-      ],
-      "shadow": { "kind": "none", "opacity": 0.5 },
-      "translucency": { "enabled": true, "value": 0.5 }
+      "name": "Contrails",
+      "shadow": {
+        "kind": "none",
+        "opacity": 0.5
+      },
+      "translucency": {
+        "enabled": true,
+        "value": 0.35
+      }
     }
   ],
-  "supported-platforms": { "squares": "shared" }
+  "supported-platforms": {
+    "squares": "shared"
+  }
 }
