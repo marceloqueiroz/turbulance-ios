@@ -31,6 +31,8 @@ enum Tuning {
     static let pickDuration = 0.25
     static let occupancy = 0.86
     static let spawnInterval = 3.0...5.0
+    static let bubbleOffset = 22.0              // request bubbles float this far off the seat
+    static let bubbleTapRadius = 28.0           // …and a tap this close to one serves that seat
 
     // Time before each problem fails (GDD §6a Pace).
     static let callFuse = 11.0
@@ -1431,9 +1433,26 @@ final class FlightSimulation {
         }
     }
 
+    /// Where a passenger's request bubble floats: just off the seat, toward the wall for window seats and
+    /// toward the aisle otherwise, so it never covers a neighbour (GDD §8a).
+    func bubbleCenter(_ o: Occurrence) -> (x: Double, y: Double) {
+        guard o.kind.atSeat, let pi = o.passenger else { return (o.x, o.y) }
+        let p = passengers[pi]
+        let towardAisle: Double = layout.aisles[p.aisle] > p.y ? 1 : -1
+        return (p.x, p.y + (p.isWindow ? -towardAisle : towardAisle) * Tuning.bubbleOffset)
+    }
+
     func target(forTapAt x: Double, _ y: Double) -> CrewTarget {
         for (i, j) in layout.jumpSeats.enumerated() where abs(x - j.x) < 22 && abs(y - jumpSeatY(j)) < 18 {
             return CrewTarget(x: j.x, aisle: j.aisle, action: .jumpSeat(i))
+        }
+        // a request bubble counts as its passenger's seat (the nearest one, if bubbles overlap)
+        let bubbles = occurrences.filter { $0.kind.atSeat && !$0.dead && $0.passenger != nil && !isBehindCurtain($0) }
+            .map { (o: $0, d: hypot(bubbleCenter($0).x - x, bubbleCenter($0).y - y)) }
+            .filter { $0.d < Tuning.bubbleTapRadius }
+        if let hit = bubbles.min(by: { $0.d < $1.d }), let pi = hit.o.passenger {
+            let p = passengers[pi]
+            return CrewTarget(x: layout.rows[p.row].x, aisle: p.aisle, action: .seat(row: p.row, seat: p.seat))
         }
         for (i, b) in layout.bins.enumerated() where abs(x - b.x) < 18 && abs(y - b.y) < 40 {
             return CrewTarget(x: b.x, aisle: b.aisle, action: .bin(i))

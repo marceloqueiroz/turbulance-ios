@@ -80,7 +80,6 @@ final class CabinScene: SKScene {
     /// A coloured frame around each seat that's asking for something, under the passenger.
     private var seatFrames: [Int: SKShapeNode] = [:]
     private let seatLayer = SKNode()
-    static let iconOffset = 22.0
     /// Three streaks behind the crew while running.
     private lazy var speedLines: SKNode = {
         let n = SKNode()
@@ -374,15 +373,11 @@ final class CabinScene: SKScene {
             }
             let icon = iconNodes[o.id] ?? {
                 let n = IconNode(o)
-                if o.kind.atSeat, let pi = o.passenger {
-                    // off the seat, into free space (toward the wall for window seats, the aisle otherwise),
-                    // with a tail pointing back at the seat
-                    let p = sim.passengers[pi]
-                    let aisleY = sim.layout.aisles[p.aisle]
-                    let towardAisle: Double = aisleY > p.y ? 1 : -1
-                    let dir = p.isWindow ? -towardAisle : towardAisle
-                    n.position = pt(o.x, o.y + dir * Self.iconOffset)
-                    n.pointTail(dir > 0 ? -1 : 1)
+                if o.kind.atSeat, o.passenger != nil {
+                    // off the seat, into free space, with a tail pointing back at the seat (tappable: GDD §8a)
+                    let c = sim.bubbleCenter(o)
+                    n.position = pt(c.x, c.y)
+                    n.pointTail(c.y > o.y ? -1 : 1)
                 } else {
                     n.position = pt(o.x, o.y - (o.kind.isCart ? 22 : o.kind.atLavatory ? 30 : 2))
                 }

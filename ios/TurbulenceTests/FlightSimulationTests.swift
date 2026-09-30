@@ -1036,4 +1036,33 @@ final class FlightSimulationTests: XCTestCase {
         step(sim, seconds: 6, dt: 0.1)
         XCTAssertTrue(sim.drainEvents().contains(.rush))
     }
+
+    // MARK: Request bubbles (GDD §8a)
+
+    func testTappingARequestBubbleServesThatSeat() {
+        let sim = runningSim()
+        guard let pi = sim.passengers.firstIndex(where: { $0.reach == 0 && !$0.isWindow && $0.row == 5 }) else { return XCTFail() }
+        let p = sim.passengers[pi]
+        let id = sim.addAtSeat(.call, passenger: pi, steps: [.hands], fuse: 60)
+        let o = sim.occurrences.first { $0.id == id }!
+        let c = sim.bubbleCenter(o)
+        XCTAssertEqual(abs(c.y - p.y), Tuning.bubbleOffset, accuracy: 0.01)
+        XCTAssertLessThan(abs(c.y - sim.layout.aisles[p.aisle]), abs(p.y - sim.layout.aisles[p.aisle]), "aisle seat: bubble over the aisle")
+        let t = sim.target(forTapAt: c.x + 8, c.y + 10)
+        XCTAssertEqual(t.action, .seat(row: p.row, seat: p.seat), "the bubble is part of the seat's tap target")
+        sim.crew.x = p.x
+        sim.tap(x: c.x, y: c.y)
+        step(sim, seconds: 0.3)
+        XCTAssertFalse(sim.occurrences.contains { $0.id == id }, "served from a bubble tap")
+    }
+
+    func testWindowSeatBubbleFloatsTowardTheWall() {
+        let sim = runningSim()
+        guard let pi = sim.passengers.firstIndex(where: { $0.isWindow }) else { return XCTFail() }
+        let p = sim.passengers[pi]
+        let id = sim.addAtSeat(.call, passenger: pi, steps: [.hands], fuse: 60)
+        let c = sim.bubbleCenter(sim.occurrences.first { $0.id == id }!)
+        XCTAssertGreaterThan(abs(c.y - sim.layout.aisles[p.aisle]), abs(p.y - sim.layout.aisles[p.aisle]))
+        XCTAssertEqual(sim.target(forTapAt: c.x, c.y).action, .seat(row: p.row, seat: p.seat))
+    }
 }
