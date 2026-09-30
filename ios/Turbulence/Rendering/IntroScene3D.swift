@@ -161,7 +161,7 @@ final class IntroScene3D {
             let color: UIColor
             switch s.kind {
             case .trash: color = UIColor(hex: 0x5B6475)
-            case .drinks, .oven: color = UIColor(hex: 0x3D4452)
+            case .drinks, .coffee, .oven: color = UIColor(hex: 0x3D4452)
             case .bin: color = .white
             }
             box(28, 14, 28, at: v(s.x, 53, s.y - 4), color, chamfer: 3)

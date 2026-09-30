@@ -264,7 +264,7 @@ final class CabinScene: SKScene {
                 world.addChild(ring); machineRings[i] = ring
                 // what's in the machine: the pick while it's being made, then ready, then cold (frosted)
                 let badge = SKSpriteNode(color: .clear, size: CGSize(width: 22, height: 22))
-                badge.position = pt(b.x + (b.kind == .drinks ? 24 : 16), b.y - 22)
+                badge.position = pt(b.x + 16, b.y - 22)
                 badge.zPosition = 2; badge.isHidden = true
                 world.addChild(badge); machineCold[i] = badge
             }
@@ -470,21 +470,21 @@ final class CabinScene: SKScene {
                 ring.isHidden = true
             case .working(let item, let left):
                 let prep = max(0.1, item.prepTime)
-                let r: CGFloat = sim.layout.bins[i].kind == .drinks ? 30 : 22
+                let r: CGFloat = 22
                 let path = CGMutablePath()
                 path.addArc(center: .zero, radius: r, startAngle: .pi / 2, endAngle: .pi / 2 - (1 - left / prep) * 2 * .pi, clockwise: true)
                 ring.path = path; ring.strokeColor = Palette.calm; ring.glowWidth = 0; ring.isHidden = false
             case .ready:
                 // ready: the ring shrinks as it cools, green → red near the end
                 let w = sim.warmth(ofMachine: i) ?? 1
-                let r: CGFloat = sim.layout.bins[i].kind == .drinks ? 30 : 22
+                let r: CGFloat = 22
                 let path = CGMutablePath()
                 path.addArc(center: .zero, radius: r, startAngle: .pi / 2, endAngle: .pi / 2 - w * 2 * .pi, clockwise: true)
                 ring.path = path
                 ring.strokeColor = w < 0.3 ? Palette.critical : UIColor(hex: 0x6FD08C)
                 ring.glowWidth = 3 + CGFloat(sin(clock * (w < 0.3 ? 12 : 6))) * 1.5; ring.isHidden = false
             case .cold:
-                let r: CGFloat = sim.layout.bins[i].kind == .drinks ? 30 : 22
+                let r: CGFloat = 22
                 ring.path = CGPath(ellipseIn: CGRect(x: -r, y: -r, width: r * 2, height: r * 2), transform: nil)
                 ring.strokeColor = UIColor(hex: 0x9CC8E8); ring.glowWidth = 0; ring.isHidden = false
             }

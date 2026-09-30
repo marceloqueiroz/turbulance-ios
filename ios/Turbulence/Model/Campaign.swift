@@ -171,6 +171,7 @@ struct FlightPlan: Identifiable, Equatable {
     func uses(_ kind: StationKind) -> Bool {
         switch kind {
         case .drinks: return true
+        case .coffee: return menu.contains(.coffee)
         case .trash: return kinds.contains(.sick) || menu.contains { Item.hot.contains($0) }   // bags, or food gone cold
         case .oven: return menu.contains { Item.meals.contains($0) }
         case .bin(let item):
@@ -228,16 +229,16 @@ enum Campaign {
     /// Satisfaction for 1/2/3 stars, set from a greedy bot's median run over 7 seeds (0.4× · 0.85× · 1.3×):
     /// a plain run earns one or two stars, three needs clean streaks and full trays (GDD §2 Scoring).
     static let starTargets: [String: [Int]] = [
-        "TB101": [180, 385, 585], "TB102": [255, 545, 830], "TB103": [270, 570, 870],
-        "TB104": [145, 310, 470], "TB105": [165, 350, 535], "TB106": [165, 355, 540],
-        "TB201": [170, 360, 545], "TB202": [130, 270, 415], "TB203": [75, 165, 250],
-        "TB204": [65, 135, 210], "TB205": [50, 110, 165], "TB206": [35, 70, 110],
-        "TB207": [95, 205, 315], "TB208": [150, 315, 480], "TB209": [120, 260, 395],
-        "TB210": [60, 130, 200], "TB211": [75, 160, 245], "TB212": [45, 90, 140],
-        "TB301": [80, 170, 260], "TB302": [195, 420, 640], "TB303": [110, 235, 360],
-        "TB304": [75, 160, 245], "TB305": [70, 150, 225], "TB306": [60, 125, 190],
-        "TB307": [210, 445, 675], "TB308": [245, 520, 795], "TB309": [260, 550, 845],
-        "TB310": [170, 360, 545], "TB311": [75, 160, 240], "TB312": [65, 135, 205]
+        "TB101": [185, 395, 605], "TB102": [285, 605, 925], "TB103": [295, 625, 955],
+        "TB104": [235, 500, 765], "TB105": [160, 340, 515], "TB106": [135, 285, 435],
+        "TB201": [215, 455, 700], "TB202": [175, 370, 565], "TB203": [145, 305, 470],
+        "TB204": [85, 180, 275], "TB205": [40, 90, 135], "TB206": [40, 85, 130],
+        "TB207": [185, 395, 605], "TB208": [225, 480, 735], "TB209": [180, 380, 580],
+        "TB210": [80, 170, 260], "TB211": [65, 135, 205], "TB212": [55, 110, 170],
+        "TB301": [160, 340, 525], "TB302": [235, 500, 765], "TB303": [165, 350, 540],
+        "TB304": [95, 205, 310], "TB305": [60, 130, 200], "TB306": [60, 135, 205],
+        "TB307": [235, 495, 760], "TB308": [300, 635, 970], "TB309": [320, 680, 1035],
+        "TB310": [180, 380, 585], "TB311": [80, 170, 260], "TB312": [70, 150, 230]
     ]
 
     private static func bump(_ start: Double, _ duration: Double = 7, _ intensity: Double = 0.375) -> [TurbulenceBump] {

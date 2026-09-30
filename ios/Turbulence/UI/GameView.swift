@@ -39,7 +39,7 @@ struct GameView: View {
                                       y: min(p.point.y + 62, full.size.height - 40))
                     }
                     .ignoresSafeArea()
-                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    .transition(.opacity)                    // a plain fade: no bounce
                 }
                 overlay.ignoresSafeArea()
                 if game.screen == .intro { IntroLetterbox(game: game).transition(.opacity) }
@@ -53,7 +53,7 @@ struct GameView: View {
         .animation(.easeInOut(duration: 0.4), value: game.screen)
         .animation(.easeInOut(duration: IntroScene3D.handoffLead), value: game.intro3D == nil)
         .animation(.spring(response: 0.3, dampingFraction: 0.6), value: game.countdownText)
-        .animation(.spring(response: 0.25, dampingFraction: 0.7), value: game.picker)
+        .animation(.easeOut(duration: 0.12), value: game.picker)
     }
 
     /// Keeps the cabin clear of the HUD and of the camera cutout — only on the side the cutout is on, and only

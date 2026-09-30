@@ -62,8 +62,9 @@ struct CabinBlock: Equatable {
 /// A galley station: a bin you take an item from, a machine you pick something on and come back for, or a trash bin.
 enum StationKind: Equatable {
     case bin(Item)
-    case drinks                          // pours one drink at a time: tap, pick, come back (GDD §6a)
-    case oven                            // heats chicken or pasta
+    case drinks                          // cold drinks: tap, pick one, grab it on arrival (GDD §6a)
+    case coffee                          // brews coffee: tap it, come back when it's ready
+    case oven                            // heats chicken or pasta: tap, pick, come back
     case trash
 }
 
@@ -80,12 +81,14 @@ struct SupplyBin: Equatable {
 
     /// The item a plain bin hands out (nil for machines and trash).
     var item: Item? { if case .bin(let i) = kind { return i }; return nil }
-    var isMachine: Bool { kind == .drinks || kind == .oven }
+    /// Makes something over time (and can hold it, or let it go cold).
+    var isMachine: Bool { kind == .coffee || kind == .oven }
     /// Everything this station can produce.
     var offers: [Item] {
         switch kind {
         case .bin(let i): return [i]
-        case .drinks: return Item.drinks
+        case .drinks: return Item.coldDrinks
+        case .coffee: return [.coffee]
         case .oven: return Item.meals
         case .trash: return []
         }
@@ -94,6 +97,7 @@ struct SupplyBin: Equatable {
         switch kind {
         case .bin(let i): return i.displayName
         case .drinks: return "Drinks"
+        case .coffee: return "Coffee"
         case .oven: return "Oven"
         case .trash: return "Trash"
         }
@@ -210,7 +214,8 @@ struct CabinLayout: Equatable {
         blocks.append(CabinBlock(kind: .counter, x: 60, y: bottomAisle + 56, w: 150, h: height - 50 - (bottomAisle + 56)))
         let topY = topAisle - 102, bottomY = bottomAisle + 102
         bins += [SupplyBin(.drinks, x: 96, y: topY, aisle: 0),
-                 SupplyBin(.oven, x: 150, y: topY, aisle: 0), SupplyBin(.oven, x: 186, y: topY, aisle: 0)]
+                 SupplyBin(.coffee, x: 150, y: topY, aisle: 0), SupplyBin(.oven, x: 186, y: topY, aisle: 0),
+                 SupplyBin(.oven, x: 78, y: bottomY, aisle: last)]
         bins += [SupplyBin(item: .snack, x: 114, y: bottomY, aisle: last),
                  SupplyBin(item: .toy, x: 150, y: bottomY, aisle: last), SupplyBin(.trash, x: 186, y: bottomY, aisle: last)]
         for a in 0..<last {

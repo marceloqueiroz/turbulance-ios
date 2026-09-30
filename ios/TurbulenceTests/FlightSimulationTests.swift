@@ -67,6 +67,7 @@ final class FlightSimulationTests: XCTestCase {
                 if case .ready? = sim.machines[i] { tapStation(i) }
                 return
             }
+            if it == .coffee, let i = nearest({ $0 == .coffee }) { return tapStation(i) }
             if let i = sim.layout.bins.indices.filter({ sim.choices(atStation: $0)?.contains(it) == true })
                 .min(by: { abs(sim.layout.bins[$0].x - crew.x) < abs(sim.layout.bins[$1].x - crew.x) }) {
                 let b = sim.layout.bins[i]
@@ -236,7 +237,7 @@ final class FlightSimulationTests: XCTestCase {
 
     func testCoffeeBrewsThenHandsOver() {
         let sim = runningSim()
-        let machine = station(sim, .drinks)
+        let machine = station(sim, .coffee)
         let i = sim.layout.bins.firstIndex(of: machine)!
         sim.crew.aisle = 0; sim.crew.x = machine.x
         sim.tap(x: machine.x, y: machine.y, choice: .coffee)
@@ -253,7 +254,7 @@ final class FlightSimulationTests: XCTestCase {
 
     func testCoffeeCoolsInTheMachineAndKeepsItsClockOnTheTray() {
         let sim = runningSim()
-        let machine = station(sim, .drinks)
+        let machine = station(sim, .coffee)
         let i = sim.layout.bins.firstIndex(of: machine)!
         sim.crew.aisle = 0; sim.crew.x = machine.x
         sim.tap(x: machine.x, y: machine.y, choice: .coffee)
@@ -271,7 +272,7 @@ final class FlightSimulationTests: XCTestCase {
 
     func testForgottenCoffeeGoesColdInTheMachineAndATapStartsAFreshOne() {
         let sim = runningSim()
-        let machine = station(sim, .drinks)
+        let machine = station(sim, .coffee)
         let i = sim.layout.bins.firstIndex(of: machine)!
         sim.crew.aisle = 0; sim.crew.x = machine.x
         sim.tap(x: machine.x, y: machine.y, choice: .coffee)
@@ -658,7 +659,7 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertEqual(L.aisles, [180])
         XCTAssertEqual(L.rows[0].seats.map(\.y), [64, 108, 252, 296])
         let kinds = L.bins.map(\.kind)
-        for k: StationKind in [.drinks, .oven, .bin(.snack), .bin(.toy), .trash, .bin(.plunger)] {
+        for k: StationKind in [.drinks, .coffee, .oven, .bin(.snack), .bin(.toy), .trash, .bin(.plunger)] {
             XCTAssertTrue(kinds.contains(k), "\(k)")
         }
         XCTAssertFalse(L.bins.contains { $0.item == .usedBag })
@@ -900,26 +901,32 @@ final class FlightSimulationTests: XCTestCase {
 
     // MARK: Galley, lavatories, hurry, pace (GDD §6a, §5a)
 
-    func testDrinksMachineNeedsAPickThenPoursThatDrink() {
+    func testDrinksDispenserHandsOverThePickWithNoWait() {
         let sim = runningSim()
         let m = station(sim, .drinks)
         let i = sim.layout.bins.firstIndex(of: m)!
-        XCTAssertEqual(sim.choices(atStation: i), [.water, .juice, .soda, .coffee])
+        XCTAssertEqual(sim.choices(atStation: i), [.water, .juice, .soda], "coffee has its own machine")
         sim.crew.aisle = 0; sim.crew.x = m.x
         _ = sim.drainEvents()
-        sim.tap(x: m.x, y: m.y)                                  // no pick: nothing starts
-        step(sim, seconds: 0.5)
-        XCTAssertEqual(sim.machines[i] ?? .idle, .idle)
+        sim.tap(x: m.x, y: m.y)                                  // no pick: nothing to hand over
+        step(sim, seconds: 0.4)
+        XCTAssertTrue(sim.crew.tray.isEmpty)
         XCTAssertTrue(sim.drainEvents().contains(.nope))
         sim.tap(x: m.x, y: m.y, choice: .soda)
         step(sim, seconds: 0.4)
-        if case .working(.soda, _)? = sim.machines[i] {} else { XCTFail("pouring the soda") }
-        XCTAssertNil(sim.choices(atStation: i), "busy: no menu")
-        step(sim, seconds: Item.soda.prepTime)
-        XCTAssertEqual(sim.machines[i], .ready(.soda, left: .infinity), "cold drinks wait without going cold")
+        XCTAssertEqual(sim.crew.tray, [.soda], "grabbed on arrival")
+        XCTAssertNotNil(sim.choices(atStation: i), "always ready for the next one")
+    }
+
+    func testCoffeeMachineBrewsWithOneTap() {
+        let sim = runningSim()
+        let m = station(sim, .coffee)
+        let i = sim.layout.bins.firstIndex(of: m)!
+        XCTAssertNil(sim.choices(atStation: i), "nothing to pick: tapping it starts a brew")
+        sim.crew.aisle = 0; sim.crew.x = m.x
         sim.tap(x: m.x, y: m.y)
-        step(sim, seconds: 0.5)
-        XCTAssertEqual(sim.crew.tray, [.soda])
+        step(sim, seconds: 0.4)
+        if case .working(.coffee, _)? = sim.machines[i] {} else { XCTFail("brewing") }
     }
 
     func testOvenHeatsTheDishYouPickAndTheWrongOneIsRefused() {

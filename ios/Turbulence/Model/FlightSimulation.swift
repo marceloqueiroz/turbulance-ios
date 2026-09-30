@@ -111,7 +111,8 @@ enum Item: String, CaseIterable {
     case water, juice, soda, snack, coffee, chicken, pasta, toy, plunger, tool, usedBag, coldCoffee, coldChicken, coldPasta
 
     /// What the drinks machine pours and the ovens heat (GDD §6a).
-    static let drinks: [Item] = [.water, .juice, .soda, .coffee]
+    static let coldDrinks: [Item] = [.water, .juice, .soda]      // from the drinks dispenser, no wait
+    static let drinks: [Item] = coldDrinks + [.coffee]
     static let meals: [Item] = [.chicken, .pasta]
     static let hot: [Item] = [.coffee, .chicken, .pasta]
     /// Drinks that splash out when the crew slips or stumbles.
@@ -1070,10 +1071,15 @@ final class FlightSimulation {
     /// What the player can pick when tapping machine `i` (nil when it isn't waiting for a pick:
     /// it's working, or holding something ready to take). Water is always on, for sick passengers.
     func choices(atStation i: Int) -> [Item]? {
-        guard layout.bins.indices.contains(i), layout.bins[i].isMachine, stationOpen(i) else { return nil }
+        guard layout.bins.indices.contains(i), stationOpen(i) else { return nil }
+        let menu = Set(plan.menu + [.water])
+        switch layout.bins[i].kind {
+        case .drinks: return Item.coldDrinks.filter { menu.contains($0) }        // always ready: no wait
+        case .oven: break
+        case .coffee, .bin, .trash: return nil                                   // nothing to choose
+        }
         switch machines[i] ?? .idle {
         case .idle, .cold:
-            let menu = Set(plan.menu + [.water])
             return layout.bins[i].offers.filter { menu.contains($0) }
         case .working, .ready:
             return nil
@@ -1670,26 +1676,36 @@ final class FlightSimulation {
                 events.append(.nope); return
             }
             events.append(.picked)
-        case .drinks, .oven:
-            let station = layout.bins[i]
+        case .drinks:
             if poursAway(atStation: i), crew.choice == nil, let k = crew.tray.lastIndex(where: { Item.liquids.contains($0) }) {
                 crew.tray.remove(at: k)
                 say("Poured away")
                 events.append(.trashed)
                 return
             }
+            // cold drinks are grabbed on arrival: no waiting (GDD §6a)
+            guard let pick = crew.choice, layout.bins[i].offers.contains(pick) else { say("Which drink?"); events.append(.nope); return }
+            crew.choice = nil
+            guard crew.hasFreeHand else {
+                say("Tray full!")
+                hint("tray", "Your tray holds two things. Put one back or throw it away first.")
+                events.append(.nope); return
+            }
+            crew.tray.append(pick)
+            events.append(.picked)
+        case .coffee, .oven:
+            let station = layout.bins[i]
             switch machines[i] ?? .idle {
             case .idle, .cold:
                 let wasCold: Bool
                 if case .cold? = machines[i] { wasCold = true } else { wasCold = false }
-                guard let pick = crew.choice, station.offers.contains(pick) else {
-                    say(station.kind == .oven ? "Chicken or pasta?" : "Which drink?")
+                guard let pick = station.kind == .coffee ? .coffee : crew.choice, station.offers.contains(pick) else {
+                    say("Chicken or pasta?")
                     events.append(.nope); return
                 }
                 crew.choice = nil
                 machines[i] = .working(pick, left: pick.prepTime)
-                say(wasCold ? "Tipped out. Fresh one…" : station.kind == .oven ? "Heating \(pick.displayName.lowercased())…"
-                    : pick == .coffee ? "Brewing…" : "Pouring…")
+                say(wasCold ? "Tipped out. Fresh one…" : station.kind == .oven ? "Heating \(pick.displayName.lowercased())…" : "Brewing…")
                 hint("machine", "Machines take a moment. Start one, do something else, and come back when it's ready.")
                 events.append(wasCold ? .trashed : .picked)
             case .working:
@@ -1807,7 +1823,7 @@ final class FlightSimulation {
         var ovens = 0                                          // coffee cooling in the drinks machine, one meal cold, one heating
         for i in layout.bins.indices {
             switch layout.bins[i].kind {
-            case .drinks: machines[i] = .ready(.coffee, left: 5)
+            case .coffee: machines[i] = .ready(.coffee, left: 5)
             case .oven: machines[i] = ovens == 0 ? .cold(.chicken) : .working(.pasta, left: 3); ovens += 1
             default: break
             }

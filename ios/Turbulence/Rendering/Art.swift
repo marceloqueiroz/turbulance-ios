@@ -445,18 +445,26 @@ enum Art {
             stroke(c, box, Palette.navy, 2)
             drawItem(c, item, bx, by - 4, 0.95)
         case .drinks:
-            // a drinks machine: four taps over a drip tray
+            // the cold-drinks dispenser: water, juice and soda taps over a drip tray
             let wide = rr(bx - 26, by - 22, 52, 36, 7)
             c.saveGState(); shadow(c, navy(0.35), blur: 4, dy: 2); fill(c, wide, UIColor(hex: 0x3D4452)); c.restoreGState()
             stroke(c, wide, Palette.navy, 2)
-            let taps: [UIColor] = [UIColor(hex: 0x5FA8D9), UIColor(hex: 0xF29B30), UIColor(hex: 0x7A3B22), UIColor(hex: 0x6B3E26)]
+            let taps: [UIColor] = [UIColor(hex: 0x5FA8D9), UIColor(hex: 0xF29B30), UIColor(hex: 0x7A3B22)]
             for (k, col) in taps.enumerated() {
-                let tx = bx - 18 + CGFloat(k) * 12
-                fill(c, rr(tx - 4, by - 18, 8, 7, 2), col)
+                let tx = bx - 15 + CGFloat(k) * 15
+                fill(c, rr(tx - 5, by - 18, 10, 7, 2), col)
                 fill(c, rr(tx - 1, by - 11, 2, 4, 1), UIColor(hex: 0xC9CDD3))
             }
             fill(c, rr(bx - 22, by + 2, 44, 6, 2), UIColor(hex: 0x5B6475))
-            drawItem(c, .water, bx - 6, by - 1, 0.45); drawItem(c, .coffee, bx + 7, by - 1, 0.45)
+            drawItem(c, .water, bx - 8, by - 1, 0.45); drawItem(c, .soda, bx + 8, by - 1, 0.45)
+        case .coffee:
+            // the coffee machine: brews one cup at a time
+            c.saveGState(); shadow(c, navy(0.35), blur: 4, dy: 2); fill(c, box, UIColor(hex: 0x3D4452)); c.restoreGState()
+            stroke(c, box, Palette.navy, 2)
+            fill(c, rr(bx - 12, by - 18, 24, 7, 2), UIColor(hex: 0x5B6475))
+            dot(c, bx + 8, by - 14.5, 1.6, UIColor(hex: 0x6FD08C))
+            fill(c, rr(bx - 11, by - 8, 22, 18, 3), UIColor(hex: 0xE3E6EA))
+            drawItem(c, .coffee, bx, by + 1, 0.7)
         case .oven:
             c.saveGState(); shadow(c, navy(0.35), blur: 4, dy: 2); fill(c, box, UIColor(hex: 0x3D4452)); c.restoreGState()
             stroke(c, box, Palette.navy, 2)
