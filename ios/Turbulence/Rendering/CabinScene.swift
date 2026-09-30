@@ -167,16 +167,37 @@ final class CabinScene: SKScene {
         layoutWorld()
     }
 
-    /// Fits the whole cabin on screen (GDD §4: fixed camera, every icon visible).
+    /// How much of the hull wall (top and bottom) may run off screen: the camera frames the inside of the
+    /// cabin (seats, galleys, lavatories), not the fuselage and wings, so it fills the screen (GDD §8a).
+    static let hullMargin = 26.0
+
+    /// The camera scale that fits a cabin's interior into the clear area; shared with the intro's final shot.
+    static func fitScale(availW: Double, availH: Double, width: Double, height: Double) -> Double {
+        min(availW / width, availH / (height - 2 * hullMargin))
+    }
+
+    /// Where the world's bottom edge sits (scene y, up): centred in the clear area when the cabin fits; when it's
+    /// taller, the hull's top edge tucks under the HUD and the rest of the hull wall runs off the bottom.
+    static func worldBaseY(viewH: Double, insetTop: Double, insetBottom: Double, worldH: Double, scale s: Double) -> Double {
+        let availH = viewH - insetTop - insetBottom
+        let overflow = worldH * s - availH
+        if overflow <= 0 { return insetBottom + (availH - worldH * s) / 2 }
+        // the bottom may lose at most the hull wall; the top loses at least the hull's outer edge (12 in the art)
+        let topCut = max(12 * s, overflow - hullMargin * s)
+        return viewH - insetTop + topCut - worldH * s
+    }
+
+    /// Fits the cabin's interior on screen (GDD §4: fixed camera, every icon visible).
     private func layoutWorld() {
         guard size.width > 1, size.height > 1 else { return }
         // fit the cabin into the clear area (no clipping under the cutout), centred in it
         let i = contentInsets
         let availW = size.width - i.left - i.right, availH = size.height - i.top - i.bottom
-        let s = min(availW / worldW, availH / worldH)
+        let s = CGFloat(Self.fitScale(availW: Double(availW), availH: Double(availH), width: worldW, height: worldH))
         world.setScale(s)
         // model y runs down while the scene's y runs up: the top inset lowers the cabin, the bottom inset raises it
-        worldBase = CGPoint(x: i.left + (availW - worldW * s) / 2, y: i.bottom + (availH - worldH * s) / 2)
+        worldBase = CGPoint(x: i.left + (availW - worldW * s) / 2,
+                            y: Self.worldBaseY(viewH: size.height, insetTop: i.top, insetBottom: i.bottom, worldH: worldH, scale: s))
         world.position = worldBase
         if renderedSize != size {
             renderedSize = size

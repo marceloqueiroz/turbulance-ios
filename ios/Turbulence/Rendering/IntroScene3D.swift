@@ -343,12 +343,14 @@ final class IntroScene3D {
         let (viewSize, insets) = frame()
         let availW = Double(viewSize.width - insets.left - insets.right)
         let availH = Double(viewSize.height - insets.top - insets.bottom)
-        let s = min(availW / layout.width, availH / layout.height)
+        let s = CabinScene.fitScale(availW: availW, availH: availH, width: layout.width, height: layout.height)
         let visibleH = Double(viewSize.height) / s
         let d = visibleH / (2 * tan(Double(fov) * .pi / 360))
         // the 2D world is centred in the inset rect; shift the camera to match
         let dx = Double(insets.right - insets.left) / 2 / s
-        let dz = Double(insets.bottom - insets.top) / 2 / s
+        let baseY = CabinScene.worldBaseY(viewH: Double(viewSize.height), insetTop: Double(insets.top),
+                                          insetBottom: Double(insets.bottom), worldH: layout.height, scale: s)
+        let dz = (baseY + layout.height * s / 2 - Double(viewSize.height) / 2) / s
         return Key(t: Self.duration, pos: v(layout.width / 2 + dx, d, layout.height / 2 + dz), pitch: -.pi / 2, yaw: 0, fov: fov)
     }
 
