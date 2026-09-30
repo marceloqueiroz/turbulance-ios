@@ -975,6 +975,23 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertLessThan(sim.crew.hurry, 1.2, "it wears off")
     }
 
+    func testRunningStopsOnArrival() {
+        let sim = runningSim()
+        sim.crew.x = 120
+        let goal = sim.layout.rows[6].x
+        for _ in 0..<4 {
+            sim.tap(x: goal, y: sim.layout.aisles[0])
+            step(sim, seconds: 0.1)
+        }
+        XCTAssertGreaterThan(sim.crew.hurry, 1.2, "running")
+        step(sim, seconds: 1.5)                                  // arrives well within this
+        XCTAssertNil(sim.crew.target)
+        XCTAssertEqual(sim.crew.hurry, 1, "back to walking the moment they get there")
+        sim.tap(x: sim.layout.maxX, y: sim.layout.aisles[0])     // a later single tap walks
+        step(sim, seconds: 0.2)
+        XCTAssertEqual(sim.crew.hurry, 1)
+    }
+
     func testHurryingIntoASpillKnocksTheCrewDown() {
         let sim = runningSim()
         let id = sim.addSpill(row: 8)

@@ -1576,6 +1576,7 @@ final class FlightSimulation {
     }
 
     private func arrive(_ target: CrewTarget) {
+        crew.hurry = 1                                  // got there: stop running (GDD §6a Hurry)
         switch target.action {
         case .none:
             break
