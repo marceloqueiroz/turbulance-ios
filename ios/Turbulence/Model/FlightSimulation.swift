@@ -396,6 +396,7 @@ enum SimEvent: Equatable {
     case fell(x: Double, y: Double)
     case rush
     case newStations([Int])
+    case jumpSeatsAway                     // no turbulence on this flight: the seats fold away after Go
     case nope
     case phase(Phase)
     case toast(String)
@@ -520,6 +521,7 @@ final class FlightSimulation {
     func start() {
         running = true
         if !freshStations.isEmpty { events.append(.newStations(freshStations)) }
+        if !jumpSeatsInPlay { events.append(.jumpSeatsAway) }
         emitToast("Boarding. Tap the aisle to walk. Your tray carries two things at once.")
         if plan.twist == .boardingRush {
             spawn(.carryOn)                          // the rest follow one at a time while boarding
@@ -1424,6 +1426,15 @@ final class FlightSimulation {
     }
 
     /// Where a jump seat is drawn: at the edge of its aisle.
+    /// Only flights with turbulence use the jump seats in play; the rest fold them away after the take-off countdown.
+    var jumpSeatsInPlay: Bool { !turbulenceSchedule.isEmpty }
+
+    /// With no trash bin on the flight yet, tapping the drinks machine while holding a drink pours it away (GDD §6a).
+    func poursAway(atStation i: Int) -> Bool {
+        layout.bins.indices.contains(i) && layout.bins[i].kind == .drinks
+            && !layout.bins.contains { $0.kind == .trash } && crew.tray.contains { Item.liquids.contains($0) }
+    }
+
     func jumpSeatY(_ j: JumpSeat) -> Double { layout.aisles[j.aisle] - 30 }
 
     func nearestJumpSeat() -> Int? {
@@ -1443,7 +1454,7 @@ final class FlightSimulation {
     }
 
     func target(forTapAt x: Double, _ y: Double) -> CrewTarget {
-        for (i, j) in layout.jumpSeats.enumerated() where abs(x - j.x) < 22 && abs(y - jumpSeatY(j)) < 18 {
+        for (i, j) in layout.jumpSeats.enumerated() where jumpSeatsInPlay && abs(x - j.x) < 22 && abs(y - jumpSeatY(j)) < 18 {
             return CrewTarget(x: j.x, aisle: j.aisle, action: .jumpSeat(i))
         }
         // a request bubble counts as its passenger's seat (the nearest one, if bubbles overlap)
@@ -1661,6 +1672,12 @@ final class FlightSimulation {
             events.append(.picked)
         case .drinks, .oven:
             let station = layout.bins[i]
+            if poursAway(atStation: i), crew.choice == nil, let k = crew.tray.lastIndex(where: { Item.liquids.contains($0) }) {
+                crew.tray.remove(at: k)
+                say("Poured away")
+                events.append(.trashed)
+                return
+            }
             switch machines[i] ?? .idle {
             case .idle, .cold:
                 let wasCold: Bool

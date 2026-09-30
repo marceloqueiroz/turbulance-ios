@@ -1065,4 +1065,45 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertGreaterThan(abs(c.y - sim.layout.aisles[p.aisle]), abs(p.y - sim.layout.aisles[p.aisle]))
         XCTAssertEqual(sim.target(forTapAt: c.x, c.y).action, .seat(row: p.row, seat: p.seat))
     }
+
+    // MARK: Route 1 flight checklist (GDD §9a): each flight shows only what it uses
+
+    func testFirstFlightHasNoTrashLavatoriesOrJumpSeatsInPlay() {
+        let sim = FlightSimulation(plan: flight("TB101"), seed: 1)
+        XCTAssertFalse(sim.layout.bins.contains { $0.kind == .trash }, "nothing to bin yet")
+        XCTAssertTrue(sim.layout.lavatories.isEmpty, "nobody walks to the loo yet")
+        XCTAssertFalse(sim.layout.blocks.contains { $0.kind == .lavatory }, "drawn as plain closets")
+        XCTAssertFalse(sim.jumpSeatsInPlay, "no turbulence")
+        sim.start()
+        XCTAssertTrue(sim.drainEvents().contains(.jumpSeatsAway), "the take-off seat folds away after Go")
+        let j = sim.layout.jumpSeats[0]
+        XCTAssertNotEqual(sim.target(forTapAt: j.x, sim.jumpSeatY(j)).action, .jumpSeat(0), "not tappable in play")
+    }
+
+    func testFixturesArriveOnTheFlightsThatUseThem() {
+        let tb102 = FlightSimulation(plan: flight("TB102"), seed: 1)
+        XCTAssertTrue(tb102.layout.bins.contains { $0.kind == .trash }, "cold coffee needs binning")
+        XCTAssertFalse(tb102.layout.lavatories.isEmpty, "dirty lavatories")
+        XCTAssertFalse(tb102.jumpSeatsInPlay)
+        for id in ["TB104", "TB105", "TB106"] {
+            XCTAssertTrue(FlightSimulation(plan: flight(id), seed: 1).jumpSeatsInPlay, "\(id) has a bump")
+        }
+    }
+
+    func testWithoutATrashBinTheDrinksMachinePoursADrinkAway() {
+        let sim = FlightSimulation(plan: flight("TB101"), seed: 1)
+        sim.start()
+        let m = sim.layout.bins.first { $0.kind == .drinks }!
+        let i = sim.layout.bins.firstIndex(of: m)!
+        sim.crew.x = m.x; sim.crew.aisle = 0
+        sim.crew.tray = [.juice]
+        XCTAssertTrue(sim.poursAway(atStation: i))
+        sim.tap(x: m.x, y: m.y)
+        step(sim, seconds: 0.5)
+        XCTAssertTrue(sim.crew.tray.isEmpty, "poured away")
+        XCTAssertFalse(sim.poursAway(atStation: i), "nothing left to pour")
+        let tb102 = FlightSimulation(plan: flight("TB102"), seed: 1)
+        tb102.crew.tray = [.juice]
+        XCTAssertFalse(tb102.poursAway(atStation: tb102.layout.bins.firstIndex { $0.kind == .drinks }!), "once there's a bin, use it")
+    }
 }

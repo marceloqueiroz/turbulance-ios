@@ -180,7 +180,8 @@ enum Art {
     // MARK: - Static cabin (hull, floor, seats, galleys, lavs), drawn from a CabinLayout
 
     /// `hiding`: station indexes left out of the art (new stations that pop in at Go).
-    static func cabin(_ L: CabinLayout, hiding: Set<Int> = []) -> UIImage {
+    /// `jumpSeats: false` leaves them out (the scene draws them as sprites that can fold away).
+    static func cabin(_ L: CabinLayout, hiding: Set<Int> = [], jumpSeats: Bool = true) -> UIImage {
         let W = CGFloat(L.width), H = CGFloat(L.height)
         let aisles = L.aisles.map { CGFloat($0) }
         let top = aisles.first!, bottom = aisles.last!
@@ -341,14 +342,7 @@ enum Art {
             }
 
             // jump seats: fold-down crew seats at the edge of the aisle (GDD §5b)
-            for j in L.jumpSeats {
-                let x = CGFloat(j.x), y = aisles[j.aisle] - 30
-                let seat = rr(x - 11, y - 6, 22, 12, 3)
-                c.saveGState(); shadow(c, ink(0.3), blur: 3, dy: 2); fill(c, seat, UIColor(hex: 0x4E6A7A)); c.restoreGState()
-                stroke(c, seat, Palette.navy, 1.5)
-                c.setFillColor(Palette.coral.cgColor); c.fill(CGRect(x: x - 7, y: y - 1, width: 14, height: 2))
-                c.setFillColor(Palette.navy.cgColor); c.fill(CGRect(x: x - 11, y: y - 9, width: 22, height: 3))
-            }
+            for j in L.jumpSeats where jumpSeats { drawJumpSeat(c, CGFloat(j.x), aisles[j.aisle] - 30) }
 
             // warm light pools from the overhead panels
             for a in aisles {
@@ -466,6 +460,17 @@ enum Art {
     static func stationImage(_ b: SupplyBin) -> UIImage {
         image(64, 64) { c in drawStation(c, b, 32, 32) }
     }
+
+    /// A fold-down crew seat at the edge of the aisle (GDD §5b), centred on (x, y).
+    static func drawJumpSeat(_ c: CGContext, _ x: CGFloat, _ y: CGFloat) {
+        let seat = rr(x - 11, y - 6, 22, 12, 3)
+        c.saveGState(); shadow(c, ink(0.3), blur: 3, dy: 2); fill(c, seat, UIColor(hex: 0x4E6A7A)); c.restoreGState()
+        stroke(c, seat, Palette.navy, 1.5)
+        c.setFillColor(Palette.coral.cgColor); c.fill(CGRect(x: x - 7, y: y - 1, width: 14, height: 2))
+        c.setFillColor(Palette.navy.cgColor); c.fill(CGRect(x: x - 11, y: y - 9, width: 22, height: 3))
+    }
+
+    static func jumpSeatImage() -> UIImage { image(32, 28) { c in drawJumpSeat(c, 16, 14) } }
 
     static func drawTrash(_ c: CGContext, _ x: CGFloat, _ y: CGFloat, _ s: CGFloat) {
         c.saveGState(); c.translateBy(x: x, y: y); c.scaleBy(x: s, y: s)

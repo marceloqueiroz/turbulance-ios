@@ -109,8 +109,8 @@ struct CabinLayout: Equatable {
     let aisles: [Double]
     let rows: [CabinRow]
     var bins: [SupplyBin]
-    let lavatories: [Lavatory]
-    let blocks: [CabinBlock]
+    var lavatories: [Lavatory]
+    var blocks: [CabinBlock]
     /// x positions where the floor joins every aisle, so the crew can change aisle (galleys).
     let crossovers: [Double]
     /// x ranges drawn as galley floor (tiles instead of carpet).
@@ -123,6 +123,10 @@ struct CabinLayout: Equatable {
     func equipped(for plan: FlightPlan) -> CabinLayout {
         var copy = self
         copy.bins = bins.filter { plan.uses($0.kind) }
+        if !plan.usesLavatories {                   // nobody walks yet: the lavatories are plain closets
+            copy.lavatories = []
+            copy.blocks = blocks.map { $0.kind == .lavatory ? CabinBlock(kind: .closet, x: $0.x, y: $0.y, w: $0.w, h: $0.h) : $0 }
+        }
         return copy
     }
 

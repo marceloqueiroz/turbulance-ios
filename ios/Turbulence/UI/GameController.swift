@@ -211,7 +211,7 @@ final class GameController {
     func tap(x: Double, y: Double) {
         guard screen == .playing else { return }
         picker = nil
-        if let i = sim.station(forTapAt: x, y), let options = sim.choices(atStation: i), !options.isEmpty,
+        if let i = sim.station(forTapAt: x, y), !sim.poursAway(atStation: i), let options = sim.choices(atStation: i), !options.isEmpty,
            let point = scene.viewPoint(x: sim.layout.bins[i].x, y: sim.layout.bins[i].y) {
             picker = MachinePicker(station: i, options: options, point: point)
             synth.play(.pick)
@@ -280,6 +280,7 @@ final class GameController {
             synth.play(.chime)
             if haptics { bump.impactOccurred(intensity: 0.7) }
         case .newStations: synth.play(.streakUp)
+        case .jumpSeatsAway: break
         case .cart(let out): if out { synth.play(.chime) }
         case .toast(let text):
             toast = text

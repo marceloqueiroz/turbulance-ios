@@ -77,6 +77,8 @@ final class CabinScene: SKScene {
     private var builtFor: String?
     private var freshNodes: [Int: SKSpriteNode] = [:]      // stations new on this flight, popped in at Go
     private var dustTimer = 0.0
+    /// Jump seats as sprites, so they can fold away after Go on flights without turbulence.
+    private var jumpSeatNodes: [SKSpriteNode] = []
     /// A coloured frame around each seat that's asking for something, under the passenger.
     private var seatFrames: [Int: SKShapeNode] = [:]
     private let seatLayer = SKNode()
@@ -201,7 +203,7 @@ final class CabinScene: SKScene {
         builtFor = staticKey(layout, hiding)
 
         buildWings()
-        let cabin = SKSpriteNode(texture: SKTexture(image: Art.cabin(layout, hiding: hiding)))
+        let cabin = SKSpriteNode(texture: SKTexture(image: Art.cabin(layout, hiding: hiding, jumpSeats: false)))
         cabin.size = CGSize(width: worldW, height: worldH)
         cabin.anchorPoint = .zero
         cabin.zPosition = 0
@@ -213,6 +215,15 @@ final class CabinScene: SKScene {
         machineCold.removeAll()
         freshNodes.values.forEach { $0.removeFromParent() }
         freshNodes.removeAll()
+        jumpSeatNodes.forEach { $0.removeFromParent() }
+        let seatTex = SKTexture(image: Art.jumpSeatImage())
+        jumpSeatNodes = layout.jumpSeats.map { j in
+            let n = SKSpriteNode(texture: seatTex, size: CGSize(width: 32, height: 28))
+            n.position = pt(j.x, layout.aisles[j.aisle] - 30)
+            n.zPosition = 0.4
+            world.addChild(n)
+            return n
+        }
         for i in hiding where layout.bins.indices.contains(i) {
             let b = layout.bins[i]
             let n = SKSpriteNode(texture: SKTexture(image: Art.stationImage(b)))
@@ -306,6 +317,7 @@ final class CabinScene: SKScene {
         let hiding = Set(sim.freshStations)
         if builtFor != staticKey(sim.layout, hiding) { buildStatic(sim.layout, hiding: hiding) }
         for n in freshNodes.values { n.removeAllActions(); n.alpha = 0; n.setScale(0.2) }
+        for n in jumpSeatNodes { n.removeAllActions(); n.alpha = 1; n.setScale(1) }   // back for the take-off countdown
         cartNode.isHidden = true
         flightNodes.forEach { $0.removeFromParent() }
         flightNodes.removeAll()
@@ -626,6 +638,11 @@ final class CabinScene: SKScene {
             floatText("Oof!", x: x, y: y - 28, color: Palette.critical)
         case .rush:
             if let c = game?.sim.crew { floatText("Rush!", x: c.x, y: c.y - 56, color: Palette.coral) }
+        case .jumpSeatsAway:
+            for n in jumpSeatNodes {
+                n.run(.sequence([.wait(forDuration: 1.2),
+                                 .group([.scaleX(to: 1, y: 0.1, duration: 0.35), .fadeOut(withDuration: 0.35)])]))
+            }
         case .newStations(let list):
             for (k, i) in list.enumerated() {
                 guard let n = freshNodes[i], let b = game?.sim.layout.bins[i] else { continue }

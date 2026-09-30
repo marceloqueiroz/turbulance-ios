@@ -164,9 +164,14 @@ struct FlightPlan: Identifiable, Equatable {
     var landingAt: Double { duration - Tuning.landingLead }
 
     /// Whether this flight fits a galley station; the rest stay hidden (GDD §6a "Only what this flight uses").
+    /// Jump seats are for turbulence; lavatories for passengers who walk (GDD §6a, Route 1 flight checklist).
+    var usesJumpSeats: Bool { !turbulence.isEmpty }
+    var usesLavatories: Bool { strolls || kinds.contains(.dirtyLav) || kinds.contains(.toilet) }
+
     func uses(_ kind: StationKind) -> Bool {
         switch kind {
-        case .drinks, .trash: return true
+        case .drinks: return true
+        case .trash: return kinds.contains(.sick) || menu.contains { Item.hot.contains($0) }   // bags, or food gone cold
         case .oven: return menu.contains { Item.meals.contains($0) }
         case .bin(let item):
             switch item {
@@ -276,7 +281,7 @@ enum Campaign {
                        whatsNew: "Turbulence! When the seatbelt sign comes on, get to a jump seat before it hits. Sick passengers: clean them up, bin the bag, then bring water."),
             FlightPlan(id: "TB105", name: "Night Flight", aircraft: .comet, duration: 135,
                        kinds: full, script: [.drink, .call], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
-                       twist: .redEye, story: .commuters, goal: .noneWoken,
+                       turbulence: bump(80), twist: .redEye, story: .commuters, goal: .noneWoken,
                        whatsNew: "A dim red-eye: don't wake the sleepers. Snacks and two-item combo orders. A dirty loo left too long clogs and needs the plunger."),
             FlightPlan(id: "TB106", name: "Full Service", aircraft: .comet, duration: 150,
                        kinds: full, script: [.drink, .sick], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
