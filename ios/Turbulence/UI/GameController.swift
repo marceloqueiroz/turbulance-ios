@@ -267,9 +267,6 @@ final class GameController {
             synth.play(.fail)
             if haptics { jolt.impactOccurred(intensity: 1) }
         case .buckled: synth.play(.pick)
-        case .slipped:
-            synth.play(.spill)
-            if haptics { jolt.impactOccurred(intensity: 0.8) }
         case .wentCold: synth.play(.nope)
         case .wokeUp: break
         case .streakUp:

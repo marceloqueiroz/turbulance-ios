@@ -78,10 +78,6 @@ enum Art {
             c.setFillColor(color.cgColor); c.addPath(p); c.drawPath(using: .fillStroke)
         }
         switch item {
-        case .towel:
-            fillStroke(CGPath(rect: CGRect(x: -10, y: -8, width: 20, height: 16), transform: nil), UIColor(hex: 0x6FB1D8))
-            c.setFillColor(UIColor.white.cgColor); c.fill(CGRect(x: -9, y: 2, width: 18, height: 3))
-            c.move(to: P(-10, -2)); c.addLine(to: P(10, -2)); c.strokePath()
         case .water, .juice:
             let cup = poly([(-8, -10), (8, -10), (6, 11), (-6, 11)])
             fill(c, cup, .white)
@@ -554,6 +550,19 @@ enum Art {
         case .combo(let items): return comboImage(items, size: size)
         case .trash: return trashImage(size: size)
         case .order: return notepad(size: size)
+        case .clean:
+            // a soapy sponge with bubbles: clean up on the spot
+            return image(size, size) { c in
+                c.translateBy(x: size / 2, y: size / 2); c.scaleBy(x: size / 28, y: size / 28)
+                let sponge = rr(-11, -3, 20, 13, 3)
+                fill(c, sponge, UIColor(hex: 0xF5D04A)); stroke(c, sponge, Palette.navy, 2)
+                fill(c, rr(-11, 5, 20, 5, [0, 0, 3, 3]), UIColor(hex: 0x5DAE5B))
+                stroke(c, sponge, Palette.navy, 2)
+                for (bx, by, br) in [(-5.0, -8.0, 3.2), (3.0, -10.0, 4.0), (9.5, -4.0, 2.6)] {
+                    let b = CGPath(ellipseIn: CGRect(x: bx - br, y: by - br, width: br * 2, height: br * 2), transform: nil)
+                    fill(c, b, UIColor(hex: 0xDDF1FB)); stroke(c, b, Palette.navy, 1.4)
+                }
+            }
         case .hands:
             return image(size, size) { c in
                 c.translateBy(x: size / 2, y: size / 2); c.scaleBy(x: size / 28, y: size / 28)

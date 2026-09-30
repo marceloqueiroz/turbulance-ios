@@ -48,6 +48,7 @@ final class CabinScene: SKScene {
         static let cartStuck = SKTexture(image: Art.cart(stuck: true))
         static let binJam = SKTexture(image: Art.binJam())
         static let hands = SKTexture(image: Art.stepImage(.hands))
+        static let clean = SKTexture(image: Art.stepImage(.clean))
         static let bell = SKTexture(image: Art.bell())
         static let trash = SKTexture(image: Art.trashImage())
         static let order = SKTexture(image: Art.notepad())
@@ -58,6 +59,7 @@ final class CabinScene: SKScene {
             switch s {
             case .item(let item): return items[item]!
             case .hands: return hands
+            case .clean: return clean
             case .trash: return trash
             case .order: return order
             case .combo(let list):
@@ -75,6 +77,19 @@ final class CabinScene: SKScene {
     private var builtFor: String?
     private var freshNodes: [Int: SKSpriteNode] = [:]      // stations new on this flight, popped in at Go
     private var dustTimer = 0.0
+    /// Three streaks behind the crew while running.
+    private lazy var speedLines: SKNode = {
+        let n = SKNode()
+        for (k, dy) in [-9.0, 0.0, 9.0].enumerated() {
+            let line = SKShapeNode(rectOf: CGSize(width: k == 1 ? 22 : 15, height: 2.6), cornerRadius: 1.3)
+            line.fillColor = .white; line.strokeColor = .clear
+            line.position = CGPoint(x: -(k == 1 ? 11 : 7.5), y: dy)      // grow backwards from the crew
+            n.addChild(line)
+        }
+        n.zPosition = 5.4; n.isHidden = true
+        world.addChild(n)
+        return n
+    }()
     private var badgeTextures: [Item: SKTexture] = [:]
     private var staticNodes: [SKNode] = []
     private var jamNodes: [Int: SKSpriteNode] = [:]
@@ -457,12 +472,23 @@ final class CabinScene: SKScene {
 
         let crew = sim.crew
         crewNode.trayWarmth = crew.tray.indices.map { sim.warmth(ofTraySlot: $0) }
-        // hurrying: little puffs of dust behind the crew
-        if crew.hurry > 1.1, crew.target != nil {
+        // running (GDD §6a Hurry): smoke puffs kick up at the feet and speed lines trail behind, more the faster
+        let running = crew.hurry > 1.05 && crew.target != nil && crew.busy == nil
+        let strength = CGFloat(min(1, max(0, (crew.hurry - 1) / (Tuning.maxHurry - 1))))
+        if running {
             dustTimer -= dt
             if dustTimer <= 0 {
-                burst(.puff, x: crew.x - crew.face * 10, y: crew.y + 8, count: 2, colors: [UIColor(hex: 0xC8BCAA, alpha: 0.7)])
-                dustTimer = 0.09
+                footSmoke(x: crew.x - crew.face * 12, y: crew.y + 10, strength: strength)
+                dustTimer = 0.11 - 0.06 * Double(strength)
+            }
+        }
+        speedLines.isHidden = !running
+        if running {
+            speedLines.position = pt(crew.x - crew.face * 26, crew.y)
+            speedLines.xScale = crew.face < 0 ? -1 : 1
+            speedLines.alpha = 0.35 + 0.65 * strength
+            speedLines.children.enumerated().forEach { k, n in
+                n.xScale = 0.6 + 0.6 * strength + 0.15 * CGFloat(sin(clock * 30 + Double(k) * 2))
             }
         }
         crewNode.sync(crew, clock: clock)
@@ -557,10 +583,6 @@ final class CabinScene: SKScene {
             shake = max(shake, 0.2)
             burst(.puff, x: x, y: y, count: 6, colors: [UIColor(hex: 0xC8BCAA, alpha: 0.9)])
             floatText("Whoa!", x: x, y: y - 20, color: Palette.urgent)
-        case let .slipped(x, y):
-            shake = max(shake, 0.25)
-            burst(.puff, x: x, y: y, count: 10, colors: [UIColor(hex: 0x8A4B22, alpha: 0.85), UIColor(hex: 0xF29B30, alpha: 0.8)])
-            floatText("Slipped!", x: x, y: y - 26, color: Palette.critical)
         case let .crewStumble(x, y):
             shake = max(shake, 0.4)
             burst(.puff, x: x, y: y, count: 8, colors: [UIColor(hex: 0xC8BCAA, alpha: 0.9)])
@@ -599,6 +621,20 @@ final class CabinScene: SKScene {
     }
 
     enum ParticleKind { case spark, puff, dust }
+
+    /// One puff of smoke at the crew's feet: pops out, drifts back and fades. Bigger when running faster.
+    private func footSmoke(x: Double, y: Double, strength: CGFloat) {
+        let r = 4 + 4 * strength + CGFloat.random(in: 0...2)
+        let puff = SKShapeNode(circleOfRadius: r)
+        puff.fillColor = UIColor(white: 0.97, alpha: 0.85); puff.strokeColor = UIColor(hex: 0xC8BCAA, alpha: 0.9); puff.lineWidth = 1
+        puff.position = pt(x + Double.random(in: -3...3), y + Double.random(in: -4...4))
+        puff.zPosition = 5.3
+        fxLayer.addChild(puff)
+        let drift = CGFloat(game?.sim.crew.face ?? 1) * -(10 + 12 * strength)
+        puff.run(.sequence([.group([.moveBy(x: drift, y: CGFloat.random(in: -4...6), duration: 0.5),
+                                    .scale(to: 2.1, duration: 0.5), .fadeOut(withDuration: 0.5)]),
+                            .removeFromParent()]))
+    }
 
     private func burst(_ kind: ParticleKind, x: Double, y: Double, count: Int, colors: [UIColor]) {
         for _ in 0..<count {

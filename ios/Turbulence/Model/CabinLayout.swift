@@ -194,14 +194,14 @@ struct CabinLayout: Equatable {
         var galleyFloors: [ClosedRange<Double>] = [56...212]
         let last = aisles.count - 1
 
-        // Forward galley (GDD §6a): drinks, machines and food above the top aisle; towels, snacks, toys
+        // Forward galley (GDD §6a): drinks, machines and food above the top aisle; snacks, toys
         // and trash below the bottom aisle; a toolkit counter between aisles on wide-bodies.
         blocks.append(CabinBlock(kind: .counter, x: 60, y: 30, w: 150, h: topAisle - 86, label: "FWD GALLEY"))
         blocks.append(CabinBlock(kind: .counter, x: 60, y: bottomAisle + 56, w: 150, h: height - 50 - (bottomAisle + 56)))
         let topY = topAisle - 102, bottomY = bottomAisle + 102
         bins += [SupplyBin(.drinks, x: 96, y: topY, aisle: 0),
                  SupplyBin(.oven, x: 150, y: topY, aisle: 0), SupplyBin(.oven, x: 186, y: topY, aisle: 0)]
-        bins += [SupplyBin(item: .towel, x: 78, y: bottomY, aisle: last), SupplyBin(item: .snack, x: 114, y: bottomY, aisle: last),
+        bins += [SupplyBin(item: .snack, x: 114, y: bottomY, aisle: last),
                  SupplyBin(item: .toy, x: 150, y: bottomY, aisle: last), SupplyBin(.trash, x: 186, y: bottomY, aisle: last)]
         for a in 0..<last {
             let top = aisles[a] + 56, bottom = aisles[a + 1] - 56
@@ -235,8 +235,7 @@ struct CabinLayout: Equatable {
                 if gap.galley {
                     blocks.append(CabinBlock(kind: .counter, x: gx + 10, y: 30, w: 76, h: topAisle - 86, label: "MID GALLEY"))
                     blocks.append(CabinBlock(kind: .counter, x: gx + 10, y: bottomAisle + 56, w: 76, h: height - 50 - (bottomAisle + 56)))
-                    bins += [SupplyBin(item: .towel, x: gx + 30, y: topAisle - 102, aisle: 0),
-                             SupplyBin(.drinks, x: gx + 66, y: topAisle - 102, aisle: 0),
+                    bins += [SupplyBin(.drinks, x: gx + 48, y: topAisle - 102, aisle: 0),
                              SupplyBin(item: .snack, x: gx + 30, y: bottomAisle + 102, aisle: last),
                              SupplyBin(item: .toy, x: gx + 66, y: bottomAisle + 102, aisle: last)]
                     for a in 0..<last {
@@ -261,7 +260,7 @@ struct CabinLayout: Equatable {
             x += 36
         }
 
-        // Aft: lavatory on top; towels, trash and the plunger in the closet (two-aisle: lavs both sides).
+        // Aft: lavatory on top; trash and the plunger in the closet (two-aisle: lavs both sides).
         let aftX = rows.last!.x + 31
         blocks.append(CabinBlock(kind: .lavatory, x: aftX, y: 30, w: 66, h: topAisle - 72, label: "LAV"))
         lavs.append(Lavatory(doorX: aftX + 18, aisle: 0))
@@ -275,9 +274,8 @@ struct CabinLayout: Equatable {
         }
         blocks.append(CabinBlock(kind: .closet, x: aftX, y: closetTop, w: 110, h: closetBottom - closetTop, label: "AFT"))
         let by = aisles.count > 1 ? (closetTop + closetBottom) / 2 + 10 : bottomAisle + 110
-        bins += [SupplyBin(item: .towel, x: aftX + 20, y: by, aisle: closetAisle),
-                 SupplyBin(.trash, x: aftX + 56, y: by, aisle: closetAisle),
-                 SupplyBin(item: .plunger, x: aftX + 92, y: by, aisle: closetAisle)]
+        bins += [SupplyBin(.trash, x: aftX + 38, y: by, aisle: closetAisle),
+                 SupplyBin(item: .plunger, x: aftX + 78, y: by, aisle: closetAisle)]
 
         jumpXs.append(aftX + 80)                    // aft, past the lavatory
         let jumps = jumpXs.flatMap { x in aisles.indices.map { JumpSeat(x: x, aisle: $0) } }

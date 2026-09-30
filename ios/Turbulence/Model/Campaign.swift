@@ -223,16 +223,16 @@ enum Campaign {
     /// Satisfaction for 1/2/3 stars, set from a greedy bot's median run over 7 seeds (0.4× · 0.85× · 1.3×):
     /// a plain run earns one or two stars, three needs clean streaks and full trays (GDD §2 Scoring).
     static let starTargets: [String: [Int]] = [
-        "TB101": [80, 175, 265], "TB102": [95, 205, 315], "TB103": [180, 380, 585],
-        "TB104": [60, 125, 190], "TB105": [60, 125, 190], "TB106": [65, 140, 215],
-        "TB201": [60, 125, 195], "TB202": [60, 135, 205], "TB203": [55, 120, 185],
-        "TB204": [30, 65, 95], "TB205": [25, 50, 80], "TB206": [20, 35, 55],
-        "TB207": [30, 65, 100], "TB208": [90, 185, 285], "TB209": [45, 95, 140],
-        "TB210": [35, 75, 110], "TB211": [25, 50, 80], "TB212": [25, 50, 75],
-        "TB301": [30, 65, 105], "TB302": [115, 240, 365], "TB303": [40, 85, 135],
-        "TB304": [40, 85, 135], "TB305": [40, 85, 125], "TB306": [40, 85, 130],
-        "TB307": [115, 250, 380], "TB308": [140, 295, 450], "TB309": [175, 370, 565],
-        "TB310": [95, 200, 305], "TB311": [50, 105, 160], "TB312": [40, 85, 130]
+        "TB101": [180, 385, 585], "TB102": [255, 545, 830], "TB103": [270, 570, 870],
+        "TB104": [145, 310, 470], "TB105": [165, 350, 535], "TB106": [165, 355, 540],
+        "TB201": [170, 360, 545], "TB202": [130, 270, 415], "TB203": [75, 165, 250],
+        "TB204": [65, 135, 210], "TB205": [50, 110, 165], "TB206": [35, 70, 110],
+        "TB207": [95, 205, 315], "TB208": [150, 315, 480], "TB209": [120, 260, 395],
+        "TB210": [60, 130, 200], "TB211": [75, 160, 245], "TB212": [45, 90, 140],
+        "TB301": [80, 170, 260], "TB302": [195, 420, 640], "TB303": [110, 235, 360],
+        "TB304": [75, 160, 245], "TB305": [70, 150, 225], "TB306": [60, 125, 190],
+        "TB307": [210, 445, 675], "TB308": [245, 520, 795], "TB309": [260, 550, 845],
+        "TB310": [170, 360, 545], "TB311": [75, 160, 240], "TB312": [65, 135, 205]
     ]
 
     private static func bump(_ start: Double, _ duration: Double = 7, _ intensity: Double = 0.375) -> [TurbulenceBump] {
@@ -262,7 +262,7 @@ enum Campaign {
                        kinds: [.call, .drink, .spill, .dirtyLav], script: [.drink, .spill], maxCap: 3,
                        menu: [.water, .juice, .soda, .coffee], strolls: true,
                        twist: .boardingRush, story: .weekend, goal: .noMisses,
-                       whatsNew: "Coffee goes cold if it waits. Lavatories get dirty: wipe them with a towel. Bags block the aisle while everyone boards."),
+                       whatsNew: "Coffee goes cold if it waits. Lavatories get dirty: tap one to clean it. Bags block the aisle while everyone boards."),
             FlightPlan(id: "TB103", name: "Little Ones", aircraft: .comet, duration: 120,
                        kinds: [.call, .drink, .spill, .baby, .dirtyLav], script: [.baby, .drink], maxCap: 3,
                        menu: [.water, .juice, .soda, .coffee, .chicken, .pasta], strolls: true,
@@ -273,7 +273,7 @@ enum Campaign {
                        menu: [.water, .juice, .soda, .coffee, .chicken, .pasta], strolls: true,
                        turbulence: [TurbulenceBump(start: 55, duration: 7, intensity: 0.375, warning: 8)],
                        story: .skiTrip, goal: .seatedEveryBump,
-                       whatsNew: "Turbulence! When the seatbelt sign comes on, get to a jump seat before it hits. Sick passengers need a towel, the bin, then water."),
+                       whatsNew: "Turbulence! When the seatbelt sign comes on, get to a jump seat before it hits. Sick passengers: clean them up, bin the bag, then bring water."),
             FlightPlan(id: "TB105", name: "Night Flight", aircraft: .comet, duration: 135,
                        kinds: full, script: [.drink, .call], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
                        twist: .redEye, story: .commuters, goal: .noneWoken,

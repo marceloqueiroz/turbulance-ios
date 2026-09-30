@@ -82,6 +82,8 @@ final class FlightSimulationTests: XCTestCase {
                 if crew.tray.contains(.usedBag) { return trash() }
             case .hands, .order:
                 return crew.hasFreeHand ? tapProblem(o) : trash()
+            case .clean:
+                return o.kind == .sick && !crew.hasFreeHand ? trash() : tapProblem(o)
             case .item(let it):
                 return crew.tray.contains(it) ? tapProblem(o) : fetch(it)
             case .combo(let items):
@@ -156,21 +158,20 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertEqual(sim.crew.x, sim.layout.maxX, accuracy: 0.001)
     }
 
-    // MARK: Sick passenger (GDD §5a): towel → bin the used bag → water
+    // MARK: Sick passenger (GDD §5a): clean up → bin the used bag → water
 
-    func testSickFlowTowelThenBinTheBagThenWater() {
+    func testSickFlowCleanUpThenBinTheBagThenWater() {
         let sim = runningSim()
         guard let pi = sim.passengers.firstIndex(where: { $0.row >= 2 && $0.reach == 0 }) else { return XCTFail() }
         let p = sim.passengers[pi]
         let id = sim.addSick(passenger: pi)
         var o: Occurrence? { sim.occurrences.first { $0.id == id } }
-        XCTAssertEqual(o?.need, .item(.towel), "no sick bag to fetch: they already have one")
+        XCTAssertEqual(o?.need, .clean, "no towel or sick bag to fetch")
 
-        sim.crew.tray = [.towel]
         sim.crew.x = p.x
         sim.tap(x: p.x, y: p.y)
-        step(sim, seconds: 1)
-        XCTAssertEqual(o?.need, .trash)
+        sim.update(dt: 1.0 / 60)
+        XCTAssertEqual(o?.need, .trash, "cleaned up the moment the crew arrives")
         XCTAssertEqual(sim.crew.tray, [.usedBag], "the used bag goes on the tray")
 
         // tapping the passenger again doesn't help: the bag has to go in a bin
@@ -190,32 +191,46 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertEqual(sim.stats.resolved, 1)
     }
 
-    func testWindowSeatTakesLonger() {
+    func testCleaningUpASickPassengerNeedsAFreeHandForTheirBag() {
+        let sim = runningSim()
+        guard let pi = sim.passengers.firstIndex(where: { $0.row >= 2 && $0.reach == 0 }) else { return XCTFail() }
+        let p = sim.passengers[pi]
+        let id = sim.addSick(passenger: pi)
+        sim.crew.tray = [.juice, .snack]
+        sim.crew.x = p.x
+        _ = sim.drainEvents()
+        sim.tap(x: p.x, y: p.y)
+        step(sim, seconds: 0.2)
+        XCTAssertEqual(sim.occurrences.first { $0.id == id }?.need, .clean)
+        XCTAssertTrue(sim.drainEvents().contains(.nope))
+    }
+
+    func testHandingOverIsInstantEvenAtTheWindowSeat() {
         let sim = runningSim()
         guard let pi = sim.passengers.firstIndex(where: { $0.isWindow }) else { return XCTFail() }
         let p = sim.passengers[pi]
-        let id = sim.addSick(passenger: pi)
+        let id = sim.addAtSeat(.drink, passenger: pi, steps: [.item(.juice)], fuse: 60)
         sim.crew.x = p.x
-        sim.crew.tray = [.towel]
+        sim.crew.aisle = p.aisle
+        sim.crew.tray = [.juice]
         sim.tap(x: p.x, y: p.y)
-        step(sim, seconds: Tuning.aisleSeatDuration + 0.1)
-        XCTAssertEqual(sim.occurrences.first { $0.id == id }?.step, 0, "window seat should not be done at aisle-seat speed")
-        step(sim, seconds: Tuning.windowSeatDuration - Tuning.aisleSeatDuration)
-        XCTAssertEqual(sim.occurrences.first { $0.id == id }?.step, 1)
+        sim.update(dt: 1.0 / 60)
+        XCTAssertFalse(sim.occurrences.contains { $0.id == id }, "given the moment the crew arrives")
+        XCTAssertTrue(sim.crew.tray.isEmpty)
     }
 
     // MARK: Tray, machines, orders (GDD §6a)
 
     func testTrayCarriesTwoItemsAndBinsTakeThemBack() {
         let sim = runningSim(plan: flight("TB106"))
-        use(sim, station(sim, .bin(.towel)))
-        use(sim, station(sim, .bin(.snack)))
-        XCTAssertEqual(sim.crew.tray, [.towel, .snack])
-        _ = sim.drainEvents()
         use(sim, station(sim, .bin(.toy)))
+        use(sim, station(sim, .bin(.snack)))
+        XCTAssertEqual(sim.crew.tray, [.toy, .snack])
+        _ = sim.drainEvents()
+        use(sim, station(sim, .bin(.plunger)))
         XCTAssertEqual(sim.crew.tray.count, 2, "tray full")
         XCTAssertTrue(sim.drainEvents().contains(.nope))
-        use(sim, station(sim, .bin(.towel)))
+        use(sim, station(sim, .bin(.toy)))
         XCTAssertEqual(sim.crew.tray, [.snack], "tapping the same bin puts it back")
     }
 
@@ -350,7 +365,7 @@ final class FlightSimulationTests: XCTestCase {
         let fwd = sim.layout.bins.indices.filter { sim.layout.bins[$0].x < 215 }
         XCTAssertFalse(fwd.isEmpty)
         XCTAssertTrue(fwd.allSatisfy { !sim.stationOpen($0) })
-        XCTAssertTrue(sim.layout.bins.indices.contains { sim.stationOpen($0) && sim.layout.bins[$0].item == .towel })
+        XCTAssertTrue(sim.layout.bins.indices.contains { sim.stationOpen($0) && sim.layout.bins[$0].kind == .trash }, "the aft closet still works")
     }
 
     func testVipHasShorterFusesAndPaysMore() {
@@ -643,7 +658,7 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertEqual(L.aisles, [180])
         XCTAssertEqual(L.rows[0].seats.map(\.y), [64, 108, 252, 296])
         let kinds = L.bins.map(\.kind)
-        for k: StationKind in [.drinks, .oven, .bin(.towel), .bin(.snack), .bin(.toy), .trash, .bin(.plunger)] {
+        for k: StationKind in [.drinks, .oven, .bin(.snack), .bin(.toy), .trash, .bin(.plunger)] {
             XCTAssertTrue(kinds.contains(k), "\(k)")
         }
         XCTAssertFalse(L.bins.contains { $0.item == .usedBag })
@@ -795,34 +810,36 @@ final class FlightSimulationTests: XCTestCase {
 
     // MARK: Slipping and cold food (GDD §5a, §6a)
 
-    func testSlippingWithDrinksSplashesThemAndGrowsTheSpill() {
-        let sim = runningSim()
-        let id = sim.addSpill(row: 6)
-        var spill: Occurrence { sim.occurrences.first { $0.id == id }! }
-        let before = spill.x - 60
-        sim.crew.x = before
-        sim.crew.tray = [.juice, .snack]
-        let sat = sim.satisfaction
-        _ = sim.drainEvents()
-        sim.crew.target = CrewTarget(x: spill.x + 100, action: .none)
-        step(sim, seconds: 0.5)
-        XCTAssertEqual(sim.crew.tray, [.snack], "the juice splashed out, the snack stayed")
-        XCTAssertEqual(spill.size, 2)
-        XCTAssertEqual(sim.satisfaction, sat, "a slip resets the streak, it doesn't take points")
-        XCTAssertTrue(sim.drainEvents().contains { if case .slipped = $0 { return true }; return false })
-        XCTAssertGreaterThan(sim.reach(spill), Tuning.stopDistance, "a bigger puddle covers more aisle")
-    }
-
-    func testNoSlipWithoutDrinks() {
+    func testWalkingThroughASpillWithDrinksOnlySlowsYou() {
         let sim = runningSim()
         let id = sim.addSpill(row: 6)
         let spill = sim.occurrences.first { $0.id == id }!
         sim.crew.x = spill.x - 60
-        sim.crew.tray = [.towel]
+        sim.crew.tray = [.juice, .snack]
+        _ = sim.drainEvents()
         sim.crew.target = CrewTarget(x: spill.x + 100, action: .none)
         step(sim, seconds: 0.5)
+        XCTAssertEqual(sim.crew.tray, [.juice, .snack], "walking: nothing splashes")
         XCTAssertEqual(sim.occurrences.first { $0.id == id }!.size, 1)
-        XCTAssertEqual(sim.crew.tray, [.towel])
+        XCTAssertFalse(sim.drainEvents().contains { if case .fell = $0 { return true }; return false })
+    }
+
+    func testRunningIntoASpillWithDrinksSplashesThemAndGrowsTheSpill() {
+        let sim = runningSim()
+        let id = sim.addSpill(row: 6)
+        var spill: Occurrence { sim.occurrences.first { $0.id == id }! }
+        sim.crew.x = spill.x - 90
+        sim.crew.tray = [.juice, .snack]
+        let sat = sim.satisfaction
+        for _ in 0..<3 {
+            sim.tap(x: spill.x + 150, y: sim.layout.aisles[0])
+            step(sim, seconds: 0.1)
+        }
+        step(sim, seconds: 0.5)
+        XCTAssertEqual(sim.crew.tray, [.snack], "the juice splashed out, the snack stayed")
+        XCTAssertEqual(spill.size, 2)
+        XCTAssertEqual(sim.satisfaction, sat, "a fall resets the streak, it doesn't take points")
+        XCTAssertGreaterThan(sim.reach(spill), Tuning.stopDistance, "a bigger puddle covers more aisle")
     }
 
     func testCoffeeGoesColdOnTheTrayAndIsRefused() {
@@ -922,13 +939,12 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertEqual(sim.crew.tray, [.chicken])
     }
 
-    func testDirtyLavatoryIsWipedWithATowel() {
+    func testDirtyLavatoryIsCleanedOnTheSpot() {
         let sim = runningSim(plan: flight("TB102"))
         let id = sim.makeDirty(lavatory: 0)
         let o = sim.occurrences.first { $0.id == id }!
-        XCTAssertEqual(o.need, .item(.towel))
+        XCTAssertEqual(o.need, .clean, "no towel needed")
         XCTAssertFalse(sim.isClogged(0), "dirty still works")
-        sim.crew.tray = [.towel]
         sim.crew.aisle = o.aisle; sim.crew.x = o.x - 40
         sim.tap(x: o.x, y: o.y)
         step(sim, seconds: 2.5)
