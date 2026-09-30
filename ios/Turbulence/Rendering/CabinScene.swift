@@ -77,6 +77,10 @@ final class CabinScene: SKScene {
     private var builtFor: String?
     private var freshNodes: [Int: SKSpriteNode] = [:]      // stations new on this flight, popped in at Go
     private var dustTimer = 0.0
+    /// A coloured frame around each seat that's asking for something, under the passenger.
+    private var seatFrames: [Int: SKShapeNode] = [:]
+    private let seatLayer = SKNode()
+    static let iconOffset = 22.0
     /// Three streaks behind the crew while running.
     private lazy var speedLines: SKNode = {
         let n = SKNode()
@@ -143,8 +147,8 @@ final class CabinScene: SKScene {
         helperNode.addChild(badge)
         world.addChild(helperNode)
 
-        paxLayer.zPosition = 2; spillLayer.zPosition = 4; iconLayer.zPosition = 7; fxLayer.zPosition = 8
-        [paxLayer, spillLayer, iconLayer, fxLayer].forEach(world.addChild)
+        seatLayer.zPosition = 1.9; paxLayer.zPosition = 2; spillLayer.zPosition = 4; iconLayer.zPosition = 7; fxLayer.zPosition = 8
+        [seatLayer, paxLayer, spillLayer, iconLayer, fxLayer].forEach(world.addChild)
 
         targetMarker.strokeColor = Palette.teal.withAlphaComponent(0.8); targetMarker.lineWidth = 2
         targetMarker.fillColor = .clear; targetMarker.zPosition = 5
@@ -297,8 +301,8 @@ final class CabinScene: SKScene {
 
     /// Rebuild per-flight nodes after the controller swaps in a new simulation.
     func reset() {
-        paxLayer.removeAllChildren(); spillLayer.removeAllChildren(); iconLayer.removeAllChildren(); fxLayer.removeAllChildren()
-        iconNodes.removeAll(); spillNodes.removeAll(); jamNodes.removeAll(); noiseTimers.removeAll()
+        paxLayer.removeAllChildren(); seatLayer.removeAllChildren(); spillLayer.removeAllChildren(); iconLayer.removeAllChildren(); fxLayer.removeAllChildren()
+        iconNodes.removeAll(); seatFrames.removeAll(); spillNodes.removeAll(); jamNodes.removeAll(); noiseTimers.removeAll()
         guard let sim = game?.sim else { paxNodes = []; return }
         let hiding = Set(sim.freshStations)
         if builtFor != staticKey(sim.layout, hiding) { buildStatic(sim.layout, hiding: hiding) }
@@ -370,11 +374,38 @@ final class CabinScene: SKScene {
             }
             let icon = iconNodes[o.id] ?? {
                 let n = IconNode(o)
-                n.position = pt(o.x, o.kind.atSeat ? o.y : o.y - (o.kind.isCart ? 22 : o.kind.atLavatory ? 30 : 2))
+                if o.kind.atSeat, let pi = o.passenger {
+                    // off the seat, into free space (toward the wall for window seats, the aisle otherwise),
+                    // with a tail pointing back at the seat
+                    let p = sim.passengers[pi]
+                    let aisleY = sim.layout.aisles[p.aisle]
+                    let towardAisle: Double = aisleY > p.y ? 1 : -1
+                    let dir = p.isWindow ? -towardAisle : towardAisle
+                    n.position = pt(o.x, o.y + dir * Self.iconOffset)
+                    n.pointTail(dir > 0 ? -1 : 1)
+                } else {
+                    n.position = pt(o.x, o.y - (o.kind.isCart ? 22 : o.kind.atLavatory ? 30 : 2))
+                }
                 iconLayer.addChild(n); iconNodes[o.id] = n; return n
             }()
             icon.sync(o, clock: clock)
             icon.isHidden = sim.isBehindCurtain(o)
+            if o.kind.atSeat, let pi = o.passenger {
+                let frame = seatFrames[o.id] ?? {
+                    let p = sim.passengers[pi]
+                    let w: CGFloat = p.premium ? 40 : 36, h: CGFloat = p.premium ? 48 : 46
+                    let f = SKShapeNode(rect: CGRect(x: -w / 2 + 1, y: -h / 2, width: w, height: h), cornerRadius: 9)
+                    f.lineWidth = 3.5; f.glowWidth = 2
+                    f.position = pt(p.x, p.y)
+                    seatLayer.addChild(f); seatFrames[o.id] = f
+                    return f
+                }()
+                let color = Palette.escalation(o.state)
+                frame.strokeColor = color
+                frame.fillColor = color.withAlphaComponent(0.22)
+                frame.isHidden = icon.isHidden
+                frame.alpha = o.state == .critical ? 0.7 + 0.3 * CGFloat(sin(clock * 14)) : 1
+            }
 
             let noise = sim.noiseLevel(o)
             if noise > 0 {
@@ -386,6 +417,10 @@ final class CabinScene: SKScene {
                     noiseTimers[o.id] = left
                 }
             }
+        }
+        for (id, f) in seatFrames where !live.contains(id) {
+            seatFrames[id] = nil
+            f.run(.sequence([.fadeOut(withDuration: 0.15), .removeFromParent()]))
         }
         for (id, n) in iconNodes where !live.contains(id) {
             iconNodes[id] = nil
@@ -845,12 +880,21 @@ final class IconNode: SKNode {
     private let item = SKSpriteNode()
     private var pips: [SKShapeNode] = []
     private var lastRem = -1.0
+    /// A speech-bubble tail pointing back at the seat (at-seat problems only).
+    private let tail = SKShapeNode()
+    static let scale: CGFloat = 1.25
 
     init(_ o: Occurrence) {
         super.init()
         glow.size = CGSize(width: 68, height: 68); glow.isHidden = true
         addChild(glow)
         addChild(body)
+        let t = CGMutablePath()
+        t.move(to: CGPoint(x: -7, y: 0)); t.addLine(to: CGPoint(x: 0, y: -11)); t.addLine(to: CGPoint(x: 7, y: 0)); t.closeSubpath()
+        tail.path = t
+        tail.fillColor = Art.white(0.95); tail.strokeColor = Palette.navy; tail.lineWidth = 2
+        tail.isHidden = true
+        body.addChild(tail)
         let shadow = SKShapeNode(circleOfRadius: 18)
         shadow.fillColor = Art.ink(0.3); shadow.strokeColor = .clear; shadow.position = CGPoint(x: 2, y: -3)
         body.addChild(shadow)
@@ -879,13 +923,21 @@ final class IconNode: SKNode {
 
     required init?(coder: NSCoder) { fatalError() }
 
+    /// Points the bubble's tail at the seat: +1 = the seat is below the icon on screen, −1 = above.
+    func pointTail(_ direction: CGFloat) {
+        tail.isHidden = false
+        tail.zRotation = direction > 0 ? 0 : .pi
+        tail.position = CGPoint(x: 0, y: direction > 0 ? -15 : 15)
+        tail.zPosition = -1
+    }
+
     func sync(_ o: Occurrence, clock: Double) {
         let crit = o.state == .critical
         let pop = easeOutBack(min(1, o.life / 0.35))
         let pulse = crit ? 1 + 0.09 * sin(clock * 14) : 1
-        body.setScale(pop * pulse)
+        body.setScale(pop * pulse * IconNode.scale)
         glow.isHidden = !crit
-        if crit { glow.setScale(pulse) }
+        if crit { glow.setScale(pulse * IconNode.scale) }
         disc.fillColor = Palette.escalation(o.state)
         item.texture = CabinScene.Tex.icon(o)
         for (i, pip) in pips.enumerated() { pip.fillColor = i < o.step ? Palette.teal : .white }

@@ -1599,7 +1599,7 @@ final class FlightSimulation {
             if let o = occurrences.first(where: { o in
                 guard !o.dead, let pi = o.passenger else { return false }
                 return passengers[pi].row == row && passengers[pi].seat == seat
-            }), let pi = o.passenger {
+            }) {
                 use(on: o.id, duration: 0)
             }
         }
