@@ -60,3 +60,33 @@ func botAct(_ sim: FlightSimulation) {
         }
     }
 }
+
+/// How quickly the bot decides: the seconds it waits before each decision once it's free (GDD §2 Stars).
+enum BotSkill {
+    static let expert = 0.0          // reacts at once and never wastes a step: a near-perfect run
+    static let novice = 1.5          // a newcomer: notices things late and thinks before each move
+}
+
+/// Flies a whole flight with the bot. `onFrame` runs after every update (for measuring).
+@discardableResult
+func flyWithBot(_ plan: FlightPlan, seed: UInt64, reaction: Double = BotSkill.expert,
+                onFrame: ((FlightSimulation) -> Void)? = nil) -> FlightSimulation {
+    let sim = FlightSimulation(plan: plan, seed: seed)
+    sim.start()
+    var thinkingSince: Double?
+    var n = 0
+    while sim.phase != .ended && n < 40_000 {
+        let free = sim.crew.busy == nil && sim.crew.target == nil && sim.crew.queued == nil
+        if free {
+            let since = thinkingSince ?? sim.t
+            thinkingSince = since
+            if sim.t - since >= reaction { botAct(sim); thinkingSince = nil }
+        } else {
+            thinkingSince = nil
+        }
+        sim.update(dt: 1.0 / 30)
+        onFrame?(sim)
+        n += 1
+    }
+    return sim
+}

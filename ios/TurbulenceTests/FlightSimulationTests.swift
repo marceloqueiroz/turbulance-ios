@@ -315,7 +315,7 @@ final class FlightSimulationTests: XCTestCase {
         let id = sim.addAtSeat(.call, passenger: v, steps: [.hands], fuse: 16)
         let o = sim.occurrences.first { $0.id == id }!
         XCTAssertTrue(o.vip)
-        XCTAssertEqual(o.fuse, 16 * Tuning.vipFuseScale, accuracy: 0.001)
+        XCTAssertEqual(o.fuse, 16 * Tuning.vipFuseScale * sim.plan.pace.fuseScale, accuracy: 0.001)
         let before = sim.satisfaction
         serve(sim, passenger: v)
         XCTAssertEqual(sim.satisfaction - before, ((3 + 2) * Tuning.vipPay).rounded(), accuracy: 0.01, "a quick VIP call pays 1.5×")
@@ -400,32 +400,38 @@ final class FlightSimulationTests: XCTestCase {
     }
 
     /// A simple greedy player: every flight is winnable and satisfaction never goes down.
+    /// Stars must be reachable: on Route 1 (the tutorial map) a newcomer earns at least one star (two on the
+    /// first flight) and an expert earns three; on later routes the expert bot lands between one and two.
+    /// Score only drops through the two penalties. Prints `CAL <id> <expert median> <novice median> ...` lines.
     func testBotEarnsStarsOnEveryFlightAndScoreNeverDrops() {
         var report: [String] = []
+        let route1 = Set(Campaign.route1.flights.map(\.id))
         for plan in Campaign.routes.flatMap(\.flights) {
-            var scores: [Double] = []
+            var expert: [Double] = [], novice: [Double] = []
             for seed: UInt64 in [3, 11, 29, 41, 57, 73, 88] {
-                let sim = FlightSimulation(plan: plan, seed: seed)
-                sim.start()
                 var last = 0.0
-                var n = 0
-                while sim.phase != .ended && n < 20_000 {
-                    if sim.crew.busy == nil && sim.crew.target == nil && sim.crew.queued == nil { botAct(sim) }
-                    sim.update(dt: 1.0 / 30)
+                let sim = flyWithBot(plan, seed: seed) { sim in
                     // only the two penalties (a wrong item, a passenger slipping on a spill) may take points away
                     let penalised = sim.drainEvents().contains { e in
                         switch e { case .wrongItem, .paxSlipped: return true; default: return false }
                     }
                     if !penalised { XCTAssertGreaterThanOrEqual(sim.satisfaction, last, "\(plan.id) satisfaction dropped") }
                     last = sim.satisfaction
-                    n += 1
                 }
-                scores.append(sim.satisfaction)
+                expert.append(sim.satisfaction)
+                if route1.contains(plan.id) { novice.append(flyWithBot(plan, seed: seed, reaction: BotSkill.novice).satisfaction) }
             }
-            let median = scores.sorted()[scores.count / 2]
-            report.append("CAL \(plan.id) \(Int(median)) targets \(plan.targets) bot \(scores.map { Int($0) }) → \(plan.stars(for: median))★")
-            XCTAssertGreaterThanOrEqual(plan.stars(for: median), 1, "\(plan.id): a plain run earns a star")
-            XCTAssertLessThan(plan.stars(for: median), 3, "\(plan.id): three stars needs better than the bot")
+            let e = expert.sorted()[expert.count / 2]
+            let n = novice.isEmpty ? 0 : novice.sorted()[novice.count / 2]
+            report.append("CAL \(plan.id) \(Int(e)) \(Int(n)) targets \(plan.targets) expert \(plan.stars(for: e))★ novice \(plan.stars(for: n))★")
+            if route1.contains(plan.id) {
+                let first = plan == Campaign.route1.flights[0]
+                XCTAssertGreaterThanOrEqual(plan.stars(for: n), first ? 2 : 1, "\(plan.id): a newcomer earns \(first ? "two stars" : "a star")")
+                XCTAssertEqual(plan.stars(for: e), 3, "\(plan.id): expert play earns three stars")
+            } else {
+                XCTAssertGreaterThanOrEqual(plan.stars(for: e), 1, "\(plan.id): a plain run earns a star")
+                XCTAssertLessThan(plan.stars(for: e), 3, "\(plan.id): three stars needs better than the bot")
+            }
         }
         print("BOT REPORT\n" + report.joined(separator: "\n"))
     }

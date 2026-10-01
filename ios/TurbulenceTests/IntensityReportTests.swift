@@ -17,7 +17,13 @@ final class IntensityReportTests: XCTestCase {
         var botIdle = 0.0               // share of the cruise with nothing to do
         var meanFuse = 0.0              // average seconds a new problem gives you
         var kinds: [String] = []        // what turned up
-        var stars = 0.0                 // the bot's average stars
+        var stars = 0.0                 // the expert bot's average stars
+        var targets: [Int] = []         // the flight's star targets
+        var expertScore = 0.0           // median score, expert bot (instant decisions)
+        var noviceScore = 0.0           // median score, newcomer bot (1.5 s before each decision)
+        var expertStars = 0
+        var noviceStars = 0
+        var perfectShare = 0.0          // the 3-star target as a share of the expert's score
     }
 
     static let seeds: [UInt64] = [3, 11, 29, 41, 57]
@@ -38,6 +44,12 @@ final class IntensityReportTests: XCTestCase {
             r.meanFuse = reports.map(\.meanFuse).reduce(0, +) / n
             r.kinds = Array(Set(reports.flatMap(\.kinds))).sorted()
             r.stars = reports.map(\.stars).reduce(0, +) / n
+            let expert = Self.seeds.map { flyWithBot(plan, seed: $0).satisfaction }.sorted()[Self.seeds.count / 2]
+            let novice = Self.seeds.map { flyWithBot(plan, seed: $0, reaction: BotSkill.novice).satisfaction }.sorted()[Self.seeds.count / 2]
+            r.targets = plan.targets
+            r.expertScore = expert; r.noviceScore = novice
+            r.expertStars = plan.stars(for: expert); r.noviceStars = plan.stars(for: novice)
+            r.perfectShare = expert > 0 ? Double(plan.targets[2]) / expert : 0
             let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
             let json = String(data: try enc.encode(r), encoding: .utf8)!
             print("INTENSITY \(plan.id) \(json)")

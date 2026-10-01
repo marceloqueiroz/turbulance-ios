@@ -234,11 +234,12 @@ struct Route: Identifiable, Equatable {
 
 /// v1.0 routes (GDD §9a, §11): Routes 1–3, 30 flights. Every flight mixes several task types (GDD §6a).
 enum Campaign {
-    /// Satisfaction for 1/2/3 stars, set from a greedy bot's median run over 7 seeds (0.4× · 0.85× · 1.3×):
-    /// a plain run earns one or two stars, three needs clean streaks and full trays (GDD §2 Scoring).
+    /// Satisfaction for 1/2/3 stars (GDD §2 Scoring). Route 1 is set from the test bots over 7 seeds:
+    /// 3★ ≈ 0.8× the expert median (and below every expert seed), 1★ ≈ 0.8–0.9× the newcomer median,
+    /// 2★ in between. Later routes are set from a greedy bot's median (0.4× · 0.85× · 1.3×).
     static let starTargets: [String: [Int]] = [
-        "TB101": [35, 75, 115], "TB102": [135, 285, 440], "TB103": [215, 460, 700],
-        "TB104": [180, 385, 590], "TB105": [130, 275, 420], "TB106": [145, 315, 480],
+        "TB101": [20, 40, 55], "TB102": [100, 180, 245], "TB103": [190, 330, 410],
+        "TB104": [150, 255, 345], "TB105": [65, 150, 240], "TB106": [200, 310, 415],
         "TB201": [200, 425, 655], "TB202": [180, 375, 575], "TB203": [180, 375, 575],
         "TB204": [90, 190, 285], "TB205": [50, 100, 155], "TB206": [45, 90, 140],
         "TB207": [190, 400, 615], "TB208": [250, 530, 810], "TB209": [200, 425, 645],
@@ -268,18 +269,18 @@ enum Campaign {
         id: 1, name: "Regional Hops", aircraftNames: Aircraft.comet.displayName,
         cities: ["Port Wren", "Halden", "Marisol Bay", "Kestrel Falls", "Ashby Cross", "Lumen Harbour", "Vale City"],
         flights: [
-            FlightPlan(id: "TB101", name: "First Service", aircraft: .comet, duration: 80,
+            FlightPlan(id: "TB101", name: "First Service", aircraft: .comet, duration: 75,
                        kinds: [.call, .drink], script: [.drink, .call, .drink], maxCap: 1, menu: [.water, .juice],
                        story: .commuters, goal: .serveAllOrders,
                        whatsNew: "Tap the drinks machine and pick a drink: you grab it the moment you get there. Call buttons just need you at the seat.",
                        pace: Pace(fuseScale: 2.0, spawnEvery: 10...12, rush: false)),
-            FlightPlan(id: "TB102", name: "Mind the Aisle", aircraft: .comet, duration: 100,
+            FlightPlan(id: "TB102", name: "Mind the Aisle", aircraft: .comet, duration: 90,
                        kinds: [.call, .drink, .spill, .dirtyLav], script: [.spill, .drink], maxCap: 2,
                        menu: [.water, .juice, .soda, .coffee], strolls: true,
                        story: .weekend, goal: .noMisses,
                        whatsNew: "Spills need a quick mop: tap them. Coffee has its own machine and goes cold if it waits. Lavatories get dirty: tap one to clean it.",
                        pace: Pace(fuseScale: 1.6, spawnEvery: 5...7, rush: false)),
-            FlightPlan(id: "TB103", name: "Little Ones", aircraft: .comet, duration: 115,
+            FlightPlan(id: "TB103", name: "Little Ones", aircraft: .comet, duration: 110,
                        kinds: [.call, .drink, .spill, .baby, .dirtyLav], script: [.baby, .drink], maxCap: 3,
                        menu: [.water, .juice, .soda, .coffee, .chicken, .pasta], strolls: true,
                        story: .family, goal: .serveAllOrders,
@@ -291,17 +292,17 @@ enum Campaign {
                        turbulence: [TurbulenceBump(start: 55, duration: 7, intensity: 0.375, warning: 8)],
                        story: .skiTrip, goal: .seatedEveryBump,
                        whatsNew: "Turbulence! When the seatbelt sign comes on, get to a jump seat before it hits. Sick passengers: clean them up, bin the bag, then bring water.",
-                       pace: Pace(fuseScale: 1.25, spawnEvery: 5...7, rush: false)),
+                       pace: Pace(fuseScale: 1.7, spawnEvery: 5...7, rush: false)),
             FlightPlan(id: "TB105", name: "Night Flight", aircraft: .comet, duration: 135,
                        kinds: full, script: [.drink, .call], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
                        turbulence: bump(55), twist: .redEye, story: .commuters, goal: .noneWoken,
                        whatsNew: "A dim red-eye: don't wake the sleepers. Snacks and two-item combo orders. A dirty loo left too long clogs and needs the plunger. Midway, a rush of requests hits at once.",
                        pace: Pace(fuseScale: 1.0, spawnEvery: 4.5...6, rush: true)),
-            FlightPlan(id: "TB106", name: "Full Service", aircraft: .comet, duration: 150,
+            FlightPlan(id: "TB106", name: "Full Service", aircraft: .comet, duration: 180,
                        kinds: full, script: [.drink, .sick], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
                        turbulence: bump(100), twist: .mealService, story: .celebrity, goal: .vipHappy,
                        whatsNew: "Everything at once, with a meal-service rush and a celebrity on board.",
-                       pace: Pace(fuseScale: 1.0, spawnEvery: 4...6, rush: false))
+                       pace: Pace(fuseScale: 1.15, spawnEvery: 4...6, rush: false))
         ],
         unlockStars: 0)
 
