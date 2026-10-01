@@ -127,13 +127,13 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(sim.stats.failed, 1)
     }
 
-    func testFailedSpillStays() {
+    func testSpillHasNoTimer() {
         let sim = runningSim()
-        let id = sim.addSpill(row: 10, age: Tuning.spillFuse - 0.01)
-        step(sim, seconds: 0.1)
+        let id = sim.addSpill(row: 10)
+        step(sim, seconds: 60, dt: 0.1)
         let o = sim.occurrences.first { $0.id == id }!
-        XCTAssertTrue(o.failed)
-        XCTAssertEqual(o.state, .failed)
+        XCTAssertFalse(o.failed, "a spill never runs out: it waits to be mopped")
+        XCTAssertEqual(o.state, .calm)
     }
 
     // MARK: Movement
@@ -388,7 +388,7 @@ final class FlightSimulationTests: XCTestCase {
     func testGoalsAreTracked() {
         let sim = runningSim()
         XCTAssertTrue(sim.goalMet, "no misses yet")
-        sim.addSpill(row: 3, age: Tuning.spillFuse - 0.01)
+        sim.addAtSeat(.call, passenger: 20, steps: [.hands], fuse: 10, age: 10 - 0.01)
         step(sim, seconds: 0.1)
         XCTAssertFalse(sim.goalMet)
     }
@@ -434,7 +434,7 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertEqual(sim.streak, 2)
         let before = sim.satisfaction
         _ = sim.drainEvents()
-        sim.addSpill(row: 10, age: Tuning.spillFuse - 0.01)
+        sim.addAtSeat(.call, passenger: 20, steps: [.hands], fuse: 10, age: 10 - 0.01)
         step(sim, seconds: 0.1)
         XCTAssertEqual(sim.streak, 1)
         XCTAssertEqual(sim.satisfaction, before, "a miss costs the streak, not points")
@@ -472,7 +472,11 @@ final class FlightSimulationTests: XCTestCase {
                 while sim.phase != .ended && n < 20_000 {
                     if sim.crew.busy == nil && sim.crew.target == nil && sim.crew.queued == nil { botAct(sim) }
                     sim.update(dt: 1.0 / 30)
-                    XCTAssertGreaterThanOrEqual(sim.satisfaction, last, "\(plan.id) satisfaction dropped")
+                    // only the two penalties (a wrong item, a passenger slipping on a spill) may take points away
+                    let penalised = sim.drainEvents().contains { e in
+                        switch e { case .wrongItem, .paxSlipped: return true; default: return false }
+                    }
+                    if !penalised { XCTAssertGreaterThanOrEqual(sim.satisfaction, last, "\(plan.id) satisfaction dropped") }
                     last = sim.satisfaction
                     n += 1
                 }
@@ -499,7 +503,7 @@ final class FlightSimulationTests: XCTestCase {
     func testFlightEndsAndPenalisesUnresolved() {
         let sim = runningSim()
         step(sim, seconds: 140, dt: 0.1)
-        sim.addSpill(row: 2)                       // too young to fail before touchdown
+        sim.addAtSeat(.call, passenger: 20, steps: [.hands], fuse: 60)   // too young to fail before touchdown
         let failedBefore = sim.stats.failed
         step(sim, seconds: 11, dt: 0.1)
         XCTAssertEqual(sim.phase, .ended)
@@ -1112,5 +1116,66 @@ final class FlightSimulationTests: XCTestCase {
         let tb102 = FlightSimulation(plan: flight("TB102"), seed: 1)
         tb102.crew.tray = [.juice]
         XCTAssertFalse(tb102.poursAway(atStation: tb102.layout.bins.firstIndex { $0.kind == .drinks }!), "once there's a bin, use it")
+    }
+
+    // MARK: Wrong items, wet floors, the premium curtain
+
+    func testWrongItemCostsPointsAndDoesNotSayWhatsNeeded() {
+        let sim = runningSim()
+        guard let pi = sim.passengers.firstIndex(where: { $0.reach == 0 && $0.row == 4 }) else { return XCTFail() }
+        for k in 0..<3 {                                          // earn some points first
+            sim.addAtSeat(.call, passenger: k + 10, steps: [.hands], fuse: 60)
+            serve(sim, passenger: k + 10)
+        }
+        let id = sim.addAtSeat(.drink, passenger: pi, steps: [.item(.juice)], fuse: 60)
+        sim.crew.tray = [.water]
+        let before = sim.satisfaction
+        _ = sim.drainEvents()
+        serve(sim, passenger: pi)
+        XCTAssertEqual(sim.satisfaction, before - Tuning.wrongItemPenalty, accuracy: 0.01)
+        XCTAssertTrue(sim.occurrences.contains { $0.id == id }, "still waiting for juice")
+        XCTAssertEqual(sim.crew.tray, [.water], "kept the wrong item")
+        XCTAssertFalse((sim.crew.bubble ?? "").lowercased().contains("juice"), "the crew doesn't say what they wanted")
+        XCTAssertTrue(sim.drainEvents().contains { if case .wrongItem = $0 { return true }; return false })
+    }
+
+    func testEmptyTrayIsNotPenalised() {
+        let sim = runningSim()
+        guard let pi = sim.passengers.firstIndex(where: { $0.reach == 0 && $0.row == 4 }) else { return XCTFail() }
+        sim.addAtSeat(.drink, passenger: pi, steps: [.item(.juice)], fuse: 60)
+        let before = sim.satisfaction
+        serve(sim, passenger: pi)
+        XCTAssertEqual(sim.satisfaction, before)
+    }
+
+    func testWalkingPassengerSlipsOnASpillOnce() {
+        let sim = runningSim()
+        for k in 0..<3 {
+            sim.addAtSeat(.call, passenger: k + 10, steps: [.hands], fuse: 60)
+            serve(sim, passenger: k + 10)
+        }
+        let row = 6
+        sim.addSpill(row: row)
+        let spillX = sim.layout.rows[row].x
+        guard let i = sim.passengers.firstIndex(where: { $0.row == row - 3 && $0.aisle == 0 }) else { return XCTFail() }
+        sim.crew.x = sim.layout.maxX                             // out of the way
+        sim.placeStroller(passenger: i, x: spillX - 60)       // walking aft, toward the lavatory, over the spill
+        let before = sim.satisfaction
+        _ = sim.drainEvents()
+        step(sim, seconds: 4)
+        XCTAssertEqual(sim.stats.paxSlips, 1, "slips once on that spill")
+        XCTAssertEqual(sim.satisfaction, before - Tuning.paxSlipPenalty, accuracy: 0.01)
+    }
+
+    func testPremiumRequestStaysVisibleOnceSeen() {
+        let sim = runningSim(plan: flight("TB202"))
+        let pi = sim.passengers.firstIndex { $0.premium && !$0.vip }!
+        let id = sim.addAtSeat(.call, passenger: pi, steps: [.hands], fuse: 60)
+        var o: Occurrence { sim.occurrences.first { $0.id == id }! }
+        sim.crew.x = 150                                          // in the premium cabin: seen
+        sim.update(dt: 0.01)
+        sim.crew.x = sim.layout.rows.last!.x                      // back behind the curtain
+        sim.update(dt: 0.01)
+        XCTAssertFalse(sim.isBehindCurtain(o), "doesn't hide again")
     }
 }

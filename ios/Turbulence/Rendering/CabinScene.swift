@@ -657,6 +657,12 @@ final class CabinScene: SKScene {
             floatText("Oof!", x: x, y: y - 28, color: Palette.critical)
         case .rush:
             if let c = game?.sim.crew { floatText("Rush!", x: c.x, y: c.y - 56, color: Palette.coral) }
+        case let .wrongItem(x, y):
+            floatText("Wrong! −\(Int(Tuning.wrongItemPenalty))", x: x, y: y - 26, color: Palette.critical)
+        case let .paxSlipped(x, y):
+            shake = max(shake, 0.15)
+            burst(.puff, x: x, y: y, count: 8, colors: [UIColor(hex: 0x8A4B22, alpha: 0.8), UIColor(hex: 0xC8BCAA, alpha: 0.9)])
+            floatText("Slipped! −\(Int(Tuning.paxSlipPenalty))", x: x, y: y - 26, color: Palette.critical)
         case .jumpSeatsAway:
             for n in jumpSeatNodes {
                 n.run(.sequence([.wait(forDuration: 1.2),
@@ -972,6 +978,7 @@ final class IconNode: SKNode {
         disc.fillColor = Palette.escalation(o.state)
         item.texture = CabinScene.Tex.icon(o)
         for (i, pip) in pips.enumerated() { pip.fillColor = i < o.step ? Palette.teal : .white }
+        ringFG.isHidden = !o.fuse.isFinite              // spills have no timer (GDD §5a)
         let rem = o.failed ? 0 : o.remaining
         if abs(rem - lastRem) > 0.002 {
             lastRem = rem

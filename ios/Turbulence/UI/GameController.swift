@@ -281,6 +281,11 @@ final class GameController {
             if haptics { bump.impactOccurred(intensity: 0.7) }
         case .newStations: synth.play(.streakUp)
         case .jumpSeatsAway: break
+        case .wrongItem:
+            if haptics { jolt.impactOccurred(intensity: 0.6) }
+        case .paxSlipped:
+            synth.play(.whoa)
+            if haptics { jolt.impactOccurred(intensity: 0.5) }
         case .cart(let out): if out { synth.play(.chime) }
         case .toast(let text):
             toast = text

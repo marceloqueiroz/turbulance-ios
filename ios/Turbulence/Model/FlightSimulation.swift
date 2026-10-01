@@ -38,7 +38,8 @@ enum Tuning {
     static let callFuse = 11.0
     static let drinkFuse = 20.0
     static let sickFuse = 24.0
-    static let spillFuse = 18.0
+    static let wrongItemPenalty = 3.0           // handing a passenger the wrong thing (GDD §2 Scoring)
+    static let paxSlipPenalty = 3.0             // a passenger slipping on an unmopped spill
     static let babyFuse = 22.0
     static let bagFuse = 20.0
     static let dirtyLavFuse = 22.0
@@ -193,6 +194,8 @@ struct Stroll: Equatable {
     var dwell = 0.0
     var inLavatory = false
     var face = -1.0
+    /// Spills this walker has already slipped on (once each).
+    var slippedOn: Set<Int> = []
     /// Standing in the aisle (slows the crew a little, stumbles in turbulence).
     var inAisle: Bool { stage == .walking || stage == .returning || (stage == .dwelling && !inLavatory) }
 }
@@ -265,6 +268,7 @@ struct Occurrence: Identifiable {
     /// Spills grow (1–3) when someone slips in them carrying drinks (GDD §5a).
     var size = 1
     var peaked = false                 // reached critical at some point: pays no speed bonus
+    var seen = false                   // has been on screen: a premium request stays visible after that
     var step = 0
     var age = 0.0
     var life = 0.0
@@ -379,6 +383,8 @@ struct FlightStats {
     var ordersMissed = 0
     var crewStumbles = 0
     var vipFailed = false
+    var wrongItems = 0
+    var paxSlips = 0
     var bestStreak = 1
     var fixTimes: [Double] = []
     var averageFix: Double? { fixTimes.isEmpty ? nil : fixTimes.reduce(0, +) / Double(fixTimes.count) }
@@ -398,6 +404,8 @@ enum SimEvent: Equatable {
     case rush
     case newStations([Int])
     case jumpSeatsAway                     // no turbulence on this flight: the seats fold away after Go
+    case wrongItem(x: Double, y: Double)
+    case paxSlipped(x: Double, y: Double)
     case nope
     case phase(Phase)
     case toast(String)
@@ -580,6 +588,7 @@ final class FlightSimulation {
         occurrences.removeAll { $0.dead }
 
         moveCrew(dt: dt)
+        markSeen()
         coolTray(dt: dt)
         moveHelper(dt: dt)
         occurrences.removeAll { $0.dead }
@@ -637,7 +646,7 @@ final class FlightSimulation {
     }
 
     private func endFlight() {
-        for o in occurrences where !o.dead && !o.failed {
+        for o in occurrences where !o.dead && !o.failed && o.fuse.isFinite {
             breakStreak(x: o.x, y: o.y)
             stats.failed += 1
             if o.kind == .drink { stats.ordersMissed += 1 }
@@ -797,7 +806,7 @@ final class FlightSimulation {
 
     @discardableResult
     func addSpill(row: Int, aisle: Int = 0, age: Double = 0) -> Int {
-        addAisle(.spill, row: row, aisle: aisle, steps: [.clean], fuse: Tuning.spillFuse, age: age)
+        addAisle(.spill, row: row, aisle: aisle, steps: [.clean], fuse: .infinity, age: age)   // no timer: it waits to be mopped
     }
 
     @discardableResult
@@ -958,15 +967,15 @@ final class FlightSimulation {
             }
         case .item(let need):
             guard crew.tray.contains(need) else {
-                if let cold = need.cold, crew.tray.contains(cold) { goneCold(); return }
-                missing([need]); return
+                if let cold = need.cold, crew.tray.contains(cold), o.kind.atSeat { wrongItem(at: o, cold: true); return }
+                missing([need], at: o); return
             }
         case .combo(let items):
             var tray = crew.tray
             for it in items {
                 guard let k = tray.firstIndex(of: it) else {
-                    if let cold = it.cold, tray.contains(cold) { goneCold(); return }
-                    missing(items); return
+                    if let cold = it.cold, tray.contains(cold), o.kind.atSeat { wrongItem(at: o, cold: true); return }
+                    missing(items, at: o); return
                 }
                 tray.remove(at: k)
             }
@@ -976,12 +985,6 @@ final class FlightSimulation {
         } else {
             crew.busy = BusyAction(duration: duration, task: .apply(occurrence: id))
         }
-    }
-
-    private func goneCold() {
-        say("It's gone cold!")
-        hint("cold", "Hot drinks and meals go cold on your tray. Bin a cold one and make it fresh.")
-        events.append(.nope)
     }
 
     /// Hot items on the tray count down and turn cold (GDD §6a). Tokens are matched to the tray every frame,
@@ -1016,17 +1019,38 @@ final class FlightSimulation {
         return nth < tokens.count ? max(0, tokens[nth].left / full) : 1
     }
 
-    private func missing(_ items: [Item]) {
-        let names = items.map { $0.displayName.lowercased() }.joined(separator: " + ")
-        say(crew.tray.isEmpty ? "Bring \(names)" : "Needs \(names)")
+    /// The tray doesn't have what they need. The crew never says what that is (the icon shows it); handing a
+    /// passenger the wrong thing costs points (GDD §2 Scoring), an empty tray just doesn't help.
+    private func missing(_ items: [Item], at o: Occurrence) {
+        if crew.tray.isEmpty || !o.kind.atSeat {
+            say(crew.tray.isEmpty ? "Empty tray" : "That won't help")
+            events.append(.nope)
+            return
+        }
+        wrongItem(at: o, cold: false)
+    }
+
+    private func wrongItem(at o: Occurrence, cold: Bool) {
+        satisfaction = max(0, satisfaction - Tuning.wrongItemPenalty)
+        say(cold ? "It's gone cold!" : "That's not it!")
+        if cold { hint("cold", "Hot drinks and meals go cold. Bin a cold one and make it fresh.") }
+        stats.wrongItems += 1
+        events.append(.wrongItem(x: o.x, y: o.y))
         events.append(.nope)
     }
 
     /// True while a premium passenger's problem is still calm and the crew is outside the premium cabin:
     /// the curtain hides it (GDD §4a N737-Swift). The icon appears once it gets urgent.
     func isBehindCurtain(_ o: Occurrence) -> Bool {
-        guard let pi = o.passenger, passengers[pi].premium, o.state == .calm, let curtain = layout.curtainX else { return false }
+        guard !o.seen, let pi = o.passenger, passengers[pi].premium, o.state == .calm, let curtain = layout.curtainX else { return false }
         return crew.x > curtain
+    }
+
+    /// Once a request has been on screen it stays there, even if the crew walks back behind the curtain.
+    private func markSeen() {
+        for i in occurrences.indices where !occurrences[i].seen && !isBehindCurtain(occurrences[i]) {
+            occurrences[i].seen = true
+        }
     }
 
     // MARK: - Galley stations
@@ -1303,6 +1327,7 @@ final class FlightSimulation {
             case .walking, .returning:
                 let d = s.targetX - s.x
                 if d != 0 { s.face = d < 0 ? -1 : 1 }
+                paxSlip(&s, aisle: home.aisle)
                 if approach(&s.x, s.targetX, walk * dt) {
                     if s.stage == .returning {
                         s.stage = .sitting
@@ -1337,6 +1362,18 @@ final class FlightSimulation {
                 if approach(&s.y, home.y, Tuning.paxStepSpeed * hurry * dt) { passengers[i].stroll = nil; continue }
             }
             passengers[i].stroll = s
+        }
+    }
+
+    /// A walking passenger who steps on an unmopped spill slips, once per spill (GDD §5a).
+    private func paxSlip(_ s: inout Stroll, aisle: Int) {
+        for o in occurrences where o.kind == .spill && !o.dead && o.aisle == aisle && !s.slippedOn.contains(o.id)
+            && abs(o.x - s.x) < reach(o) {
+            s.slippedOn.insert(o.id)
+            satisfaction = max(0, satisfaction - Tuning.paxSlipPenalty)
+            stats.paxSlips += 1
+            events.append(.paxSlipped(x: s.x, y: s.y))
+            hint("paxSlip", "A passenger slipped on the spill! Mop spills up before someone walks through them.")
         }
     }
 
