@@ -600,6 +600,13 @@ final class FlightSimulation {
 
     private func runDirector(dt: Double) {
         guard phase == .cruise else { return }
+        // mid-flight rush: extra problems at once, over the cap, right on time (GDD §6a Pace); never mid-bump
+        if plan.pace.rush, !rushDone, t >= plan.duration * Tuning.rushAt, turbulenceIntensity == 0 {
+            rushDone = true
+            var n = 0
+            for _ in 0..<Tuning.rushSize * 3 where n < Tuning.rushSize { if spawn(rollKind()) { n += 1 } }
+            if n > 0 { events.append(.rush); say("Here we go!") }
+        }
         spawnTimer -= dt * (turbulenceIntensity > 0 ? Tuning.turbulenceSpawnBoost : 1)
         guard spawnTimer <= 0 else { return }
         if turbulenceIntensity > 0 {
@@ -607,12 +614,6 @@ final class FlightSimulation {
             deferredSpawns = min(2, deferredSpawns + 1)
             spawnTimer = random(in: plan.pace.spawnEvery)
             return
-        }
-        if plan.pace.rush, !rushDone, t >= plan.duration * Tuning.rushAt {
-            rushDone = true                            // mid-flight rush: extra problems at once, over the cap (GDD §6a Pace)
-            var n = 0
-            for _ in 0..<Tuning.rushSize * 3 where n < Tuning.rushSize { if spawn(rollKind()) { n += 1 } }
-            if n > 0 { events.append(.rush); say("Here we go!") }
         }
         let cap = plan.cap(at: t) + (mealServiceOn ? 1 : 0)
         if activeCount < cap {
