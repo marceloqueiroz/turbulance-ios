@@ -34,66 +34,6 @@ final class FlightSimulationTests: XCTestCase {
         step(sim, seconds: 1.5)
     }
 
-    /// One decision for the greedy bot: buckle up, bin junk, then work on the most urgent problem.
-    private func botAct(_ sim: FlightSimulation) {
-        let crew = sim.crew
-        if sim.seatbeltOn {
-            if crew.seated == nil, let j = sim.nearestJumpSeat() {
-                let js = sim.layout.jumpSeats[j]
-                sim.tap(x: js.x, y: sim.jumpSeatY(js))
-            }
-            return
-        }
-        func nearest(_ match: (StationKind) -> Bool) -> Int? {
-            sim.layout.bins.indices.filter { sim.stationOpen($0) && match(sim.layout.bins[$0].kind) }
-                .min { abs(sim.layout.bins[$0].x - crew.x) < abs(sim.layout.bins[$1].x - crew.x) }
-        }
-        func tapStation(_ i: Int) { let b = sim.layout.bins[i]; sim.tap(x: b.x, y: b.y) }
-        func trash() { if let i = nearest({ $0 == .trash }) { tapStation(i) } }
-        func tapProblem(_ o: Occurrence) {
-            if let pi = o.passenger { sim.tap(x: sim.passengers[pi].x, y: sim.passengers[pi].y) } else { sim.tap(x: o.x, y: o.y) }
-        }
-        func fetch(_ it: Item) {
-            guard crew.hasFreeHand else { return trash() }
-            if let i = nearest({ $0 == .bin(it) }) { return tapStation(i) }
-            // a machine already making or holding it: wait for it / take it
-            let mine = sim.layout.bins.indices.filter { i in
-                switch sim.machines[i] {
-                case .working(it, _)?, .ready(it, _)?: return true
-                default: return false
-                }
-            }.first
-            if let i = mine {
-                if case .ready? = sim.machines[i] { tapStation(i) }
-                return
-            }
-            if it == .coffee, let i = nearest({ $0 == .coffee }) { return tapStation(i) }
-            if let i = sim.layout.bins.indices.filter({ sim.choices(atStation: $0)?.contains(it) == true })
-                .min(by: { abs(sim.layout.bins[$0].x - crew.x) < abs(sim.layout.bins[$1].x - crew.x) }) {
-                let b = sim.layout.bins[i]
-                sim.tap(x: b.x, y: b.y, choice: it)
-            }
-        }
-        if crew.tray.contains(where: \.isCold) { return trash() }
-        let live = sim.occurrences.filter { !$0.dead }
-            .sorted { ($0.failed ? -1 : $0.age / $0.fuse) > ($1.failed ? -1 : $1.age / $1.fuse) }
-        for o in live {
-            switch o.need {
-            case .trash:
-                if crew.tray.contains(.usedBag) { return trash() }
-            case .hands, .order:
-                return crew.hasFreeHand ? tapProblem(o) : trash()
-            case .clean:
-                return o.kind == .sick && !crew.hasFreeHand ? trash() : tapProblem(o)
-            case .item(let it):
-                return crew.tray.contains(it) ? tapProblem(o) : fetch(it)
-            case .combo(let items):
-                if let missing = items.first(where: { !crew.tray.contains($0) }) { return fetch(missing) }
-                return tapProblem(o)
-            }
-        }
-    }
-
     /// Walks to a station and uses it.
     private func use(_ sim: FlightSimulation, _ b: SupplyBin) {
         sim.crew.aisle = b.aisle

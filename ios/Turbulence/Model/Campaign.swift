@@ -142,6 +142,13 @@ extension Story {
 }
 
 /// One flight (level): what can happen on it and when (GDD §6, §6a, §9a).
+/// Per-flight intensity knobs (GDD §6a Pace): early flights are gentler, later ones push harder.
+struct Pace: Equatable {
+    var fuseScale = 1.0                                 // × every problem's timer (above 1 = more time)
+    var spawnEvery: ClosedRange<Double> = Tuning.spawnInterval   // seconds between new problems
+    var rush = true                                     // the mid-flight rush of extra problems
+}
+
 struct FlightPlan: Identifiable, Equatable {
     let id: String                     // flight code, e.g. "TB101"
     let name: String
@@ -160,6 +167,7 @@ struct FlightPlan: Identifiable, Equatable {
     var story: Story = .commuters
     var goal: Goal = .noMisses
     let whatsNew: String               // the one new thing this flight teaches
+    var pace = Pace()                  // how hard the flight pushes (GDD §6a Pace)
 
     var landingAt: Double { duration - Tuning.landingLead }
 

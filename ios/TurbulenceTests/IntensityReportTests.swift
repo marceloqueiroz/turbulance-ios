@@ -1,0 +1,90 @@
+import XCTest
+@testable import Turbulence
+
+/// Measures how intense each Route 1 flight is, by flying it with the test bot over several seeds.
+/// Run on its own to tune difficulty (GDD §6a Pace, Route 1 flight checklist):
+///   xcodebuild test ... -only-testing:TurbulenceTests/IntensityReportTests
+/// Each flight prints one line: `INTENSITY TB101 {json}`. The test only fails if a flight can't be flown.
+final class IntensityReportTests: XCTestCase {
+    struct Report: Codable {
+        let flight: String
+        var problemsPerMin = 0.0        // new problems per minute of cruise
+        var meanOpen = 0.0              // problems open at once, averaged over the cruise
+        var peakOpen = 0                // most open at once (median of the seeds)
+        var timeTwoPlus = 0.0           // share of the cruise with 2+ open
+        var timeThreePlus = 0.0         // share with 3+ open
+        var botFailRate = 0.0           // share of problems the bot missed
+        var botIdle = 0.0               // share of the cruise with nothing to do
+        var meanFuse = 0.0              // average seconds a new problem gives you
+        var kinds: [String] = []        // what turned up
+        var stars = 0.0                 // the bot's average stars
+    }
+
+    static let seeds: [UInt64] = [3, 11, 29, 41, 57]
+
+    func testRoute1IntensityReport() throws {
+        for plan in Campaign.route1.flights {
+            var reports: [Report] = []
+            for seed in Self.seeds { reports.append(measure(plan, seed: seed)) }
+            var r = Report(flight: plan.id)
+            let n = Double(reports.count)
+            r.problemsPerMin = reports.map(\.problemsPerMin).reduce(0, +) / n
+            r.meanOpen = reports.map(\.meanOpen).reduce(0, +) / n
+            r.peakOpen = reports.map(\.peakOpen).sorted()[reports.count / 2]
+            r.timeTwoPlus = reports.map(\.timeTwoPlus).reduce(0, +) / n
+            r.timeThreePlus = reports.map(\.timeThreePlus).reduce(0, +) / n
+            r.botFailRate = reports.map(\.botFailRate).reduce(0, +) / n
+            r.botIdle = reports.map(\.botIdle).reduce(0, +) / n
+            r.meanFuse = reports.map(\.meanFuse).reduce(0, +) / n
+            r.kinds = Array(Set(reports.flatMap(\.kinds))).sorted()
+            r.stars = reports.map(\.stars).reduce(0, +) / n
+            let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
+            let json = String(data: try enc.encode(r), encoding: .utf8)!
+            print("INTENSITY \(plan.id) \(json)")
+        }
+    }
+
+    private func measure(_ plan: FlightPlan, seed: UInt64) -> Report {
+        var r = Report(flight: plan.id)
+        let sim = FlightSimulation(plan: plan, seed: seed)
+        sim.start()
+        let dt = 1.0 / 30
+        var cruise = 0.0, openSum = 0.0, two = 0.0, three = 0.0, idle = 0.0, peak = 0
+        var seen = Set<Int>(), fuses: [Double] = [], kinds = Set<String>()
+        var n = 0
+        while sim.phase != .ended && n < 30_000 {
+            if sim.crew.busy == nil && sim.crew.target == nil && sim.crew.queued == nil { botAct(sim) }
+            sim.update(dt: dt)
+            _ = sim.drainEvents()
+            for o in sim.occurrences where !seen.contains(o.id) {
+                seen.insert(o.id)
+                if o.fuse.isFinite { fuses.append(o.fuse) }
+                kinds.insert("\(o.kind)")
+            }
+            if sim.phase == .cruise {
+                let open = sim.occurrences.filter { !$0.dead && !$0.failed }.count
+                cruise += dt
+                openSum += Double(open) * dt
+                if open >= 2 { two += dt }
+                if open >= 3 { three += dt }
+                if open == 0 { idle += dt }
+                peak = max(peak, open)
+            }
+            n += 1
+        }
+        XCTAssertEqual(sim.phase, .ended, "\(plan.id) flies to landing")
+        let minutes = max(cruise, 1) / 60
+        r.problemsPerMin = Double(seen.count) / minutes
+        r.meanOpen = openSum / max(cruise, 1)
+        r.peakOpen = peak
+        r.timeTwoPlus = two / max(cruise, 1)
+        r.timeThreePlus = three / max(cruise, 1)
+        let done = sim.stats.resolved + sim.stats.failed
+        r.botFailRate = done == 0 ? 0 : Double(sim.stats.failed) / Double(done)
+        r.botIdle = idle / max(cruise, 1)
+        r.meanFuse = fuses.isEmpty ? 0 : fuses.reduce(0, +) / Double(fuses.count)
+        r.kinds = kinds.sorted()
+        r.stars = Double(sim.stars)
+        return r
+    }
+}

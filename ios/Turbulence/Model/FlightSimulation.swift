@@ -261,7 +261,7 @@ struct Occurrence: Identifiable {
     let y: Double
     let aisle: Int
     let steps: [Step]
-    let fuse: Double
+    var fuse: Double
     let seed: Double
     var lavatory: Int?
     var vip = false
@@ -605,10 +605,10 @@ final class FlightSimulation {
         if turbulenceIntensity > 0 {
             // everyone's strapped in: new problems wait and arrive as a rush when it clears (GDD §5b)
             deferredSpawns = min(2, deferredSpawns + 1)
-            spawnTimer = random(in: Tuning.spawnInterval)
+            spawnTimer = random(in: plan.pace.spawnEvery)
             return
         }
-        if !rushDone, t >= plan.duration * Tuning.rushAt {
+        if plan.pace.rush, !rushDone, t >= plan.duration * Tuning.rushAt {
             rushDone = true                            // mid-flight rush: extra problems at once, over the cap (GDD §6a Pace)
             var n = 0
             for _ in 0..<Tuning.rushSize * 3 where n < Tuning.rushSize { if spawn(rollKind()) { n += 1 } }
@@ -618,7 +618,7 @@ final class FlightSimulation {
         if activeCount < cap {
             let kind = script.isEmpty ? rollKind() : script.removeFirst()
             if !spawn(kind), kind != .call { spawn(.call) }
-            spawnTimer = random(in: Tuning.spawnInterval)
+            spawnTimer = random(in: plan.pace.spawnEvery)
         } else {
             spawnTimer = 1
         }
@@ -769,6 +769,10 @@ final class FlightSimulation {
 
     private func add(_ o: Occurrence) {
         var o = o
+        if o.fuse.isFinite && plan.pace.fuseScale != 1 {           // the flight's pace (GDD §6a)
+            o.fuse *= plan.pace.fuseScale
+            o.state = Escalation.forFraction(o.age / o.fuse)
+        }
         if let pi = o.passenger, passengers[pi].vip { o.vip = true }
         occurrences.append(o)
         nextID += 1
@@ -1241,7 +1245,7 @@ final class FlightSimulation {
             // the problems that waited arrive now
             for _ in 0..<deferredSpawns { spawn(rollKind()) }
             deferredSpawns = 0
-            spawnTimer = random(in: Tuning.spawnInterval)
+            spawnTimer = random(in: plan.pace.spawnEvery)
         }
     }
 
