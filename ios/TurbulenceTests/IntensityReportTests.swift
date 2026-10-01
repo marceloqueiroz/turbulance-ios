@@ -102,3 +102,51 @@ final class IntensityReportTests: XCTestCase {
         return r
     }
 }
+
+/// How much a flight's outcome depends on the seed rather than the player (GDD §2 Stars). For each flight, flies
+/// the expert bot over 17 seeds and prints `SPREAD <id> {json}`: the score's coefficient of variation (std ÷ mean),
+/// worst ÷ median, and the spread of how many problems appeared and how many sleepers were woken.
+/// Filter with TEST_RUNNER_ROUTE=<n>. Never fails.
+final class ScoreSpreadReportTests: XCTestCase {
+    struct Spread: Codable {
+        let flight: String
+        var scoreCV = 0.0           // std ÷ mean of the expert score (lower = fairer)
+        var worstOverMedian = 0.0   // the worst run ÷ the median run
+        var problemsMin = 0, problemsMax = 0
+        var problemsCV = 0.0
+        var wokenMin = 0, wokenMax = 0
+        var failsMax = 0
+    }
+
+    static let seeds: [UInt64] = [3, 11, 29, 41, 57, 73, 88, 5, 17, 23, 37, 61, 79, 97, 113, 131, 149]
+
+    func testScoreSpreadReport() throws {
+        let only = ProcessInfo.processInfo.environment["ROUTE"].flatMap(Int.init)
+        for plan in Campaign.routes.filter({ only == nil || $0.id == only }).flatMap(\.flights) {
+            var scores: [Double] = [], problems: [Double] = [], woken: [Int] = [], fails: [Int] = []
+            for seed in Self.seeds {
+                let sim = flyWithBot(plan, seed: seed)
+                scores.append(sim.satisfaction)
+                problems.append(Double(sim.stats.resolved + sim.stats.failed))
+                woken.append(sim.stats.woken)
+                fails.append(sim.stats.failed)
+            }
+            func cv(_ xs: [Double]) -> Double {
+                let m = xs.reduce(0, +) / Double(xs.count)
+                guard m > 0 else { return 0 }
+                let v = xs.map { ($0 - m) * ($0 - m) }.reduce(0, +) / Double(xs.count)
+                return v.squareRoot() / m
+            }
+            let sorted = scores.sorted()
+            var s = Spread(flight: plan.id)
+            s.scoreCV = cv(scores)
+            s.worstOverMedian = sorted[0] / max(1, sorted[sorted.count / 2])
+            s.problemsMin = Int(problems.min()!); s.problemsMax = Int(problems.max()!)
+            s.problemsCV = cv(problems)
+            s.wokenMin = woken.min()!; s.wokenMax = woken.max()!
+            s.failsMax = fails.max()!
+            let enc = JSONEncoder(); enc.outputFormatting = [.sortedKeys]
+            print("SPREAD \(plan.id) \(String(data: try enc.encode(s), encoding: .utf8)!)")
+        }
+    }
+}

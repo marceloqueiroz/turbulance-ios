@@ -47,6 +47,14 @@ enum Tuning {
     static let lavUsesBeforeDirty = 2
     static let rushAt = 0.6                     // share of the flight when the mid-flight rush hits
     static let rushSize = 2
+    static let capBreather = 1.0                // a full cabin: the next problem comes this long after a slot frees
+
+    // Fair draws (GDD §6a Pace): the director deals kinds, orders and seats so every flight gets a steady mix,
+    // not a lucky or unlucky streak. Each pick goes to the most overdue option, with a little noise.
+    static let kindDrawNoise = 0.6
+    static let orderDrawNoise = 0.5
+    static let zoneDrawNoise = 0.3
+    static let comboChance = 0.35
 
     // Hurry (GDD §6a): quick repeated taps speed the crew up; hurrying into a spill knocks them down.
     static let hurryStep = 0.25
@@ -93,7 +101,8 @@ enum Tuning {
 
     // Dozing and noise (GDD §7): passengers nod off; unattended problems get louder and wake them.
     static let dozeChancePerSecond = 0.0015          // per seated, awake passenger during cruise
-    static func noiseRows(_ state: Escalation) -> Int { state == .urgent ? 1 : state == .critical ? 2 : 0 }
+    static let wakeCostEvery = 30.0                  // waking sleepers costs a streak level at most this often
+    static func noiseRows(_ state: Escalation) -> Int { state == .critical ? 2 : 0 }   // only critical problems are loud
 }
 
 struct SplitMix64: RandomNumberGenerator {
@@ -448,6 +457,13 @@ final class FlightSimulation {
     var cartMode: CartMode
 
     private var spawnTimer = 1.0
+    private var capHeld = false                // the cabin was full when a problem was due
+    private var kindDue: [OccurrenceKind: Double] = [:]   // fair draws: how overdue each option is
+    private var itemDue: [Item: Double] = [:]
+    private var comboDue = 0.0
+    private var zoneDue: [Int: Double] = [:]
+    private var cartTroubleDue = 0.0
+    private var lastWakeCost = -Double.infinity
     private var script: [OccurrenceKind]
     private var hinted = Set<String>()
     private var nextID = 1
@@ -613,16 +629,31 @@ final class FlightSimulation {
             // everyone's strapped in: new problems wait and arrive as a rush when it clears (GDD §5b)
             deferredSpawns = min(2, deferredSpawns + 1)
             spawnTimer = random(in: plan.pace.spawnEvery)
+            capHeld = false
             return
         }
         let cap = plan.cap(at: t) + (mealServiceOn ? 1 : 0)
-        if activeCount < cap {
+        if activeCount >= cap {
+            capHeld = true                       // wait for a free slot
+        } else if capHeld {
+            capHeld = false                      // a slot just freed: a short breather first
+            spawnTimer = Tuning.capBreather
+        } else {
             let kind = script.isEmpty ? rollKind() : script.removeFirst()
             if !spawn(kind), kind != .call { spawn(.call) }
             spawnTimer = random(in: plan.pace.spawnEvery)
-        } else {
-            spawnTimer = 1
         }
+    }
+
+    /// A fair draw (GDD §6a Pace): every option earns its share of a pick each time, and the most overdue one
+    /// (plus a little noise) is taken. Over a flight each option turns up close to its share, without runs.
+    private func fairDraw<T: Hashable>(_ options: [(T, Double)], due: inout [T: Double], noise: Double) -> T {
+        let total = options.reduce(0) { $0 + $1.1 }
+        for (o, w) in options { due[o, default: 0] += w / total }
+        let score = options.map { due[$0.0]! + random() * noise }
+        let pick = options[score.indices.max { score[$0] < score[$1] }!].0
+        due[pick]! -= 1
+        return pick
     }
 
     /// Weighted pick among the kinds this flight allows; turbulence, drink service and meal service shift the odds.
@@ -640,10 +671,8 @@ final class FlightSimulation {
         var weights: [(kind: OccurrenceKind, weight: Double)] = []
         var total = 0.0
         for w in all where plan.kinds.contains(w.kind) && w.weight > 0 { weights.append(w); total += w.weight }
-        guard let last = weights.last else { return .call }
-        var r = random() * total
-        for w in weights { r -= w.weight; if r <= 0 { return w.kind } }
-        return last.kind
+        guard !weights.isEmpty, total > 0 else { return .call }
+        return fairDraw(weights.map { ($0.kind, $0.weight) }, due: &kindDue, noise: Tuning.kindDrawNoise)
     }
 
     private func endFlight() {
@@ -668,11 +697,23 @@ final class FlightSimulation {
         }
     }
 
+    /// Which third of the cabin a row is in.
+    private func zone(ofRow r: Int) -> Int { min(2, r * 3 / max(1, layout.rows.count)) }
+
+    /// New problems take turns between the front, middle and back of the cabin (GDD §6a Pace), so no flight
+    /// gets all its problems bunched at one end: keeps the candidates in the third whose turn it is.
+    private func spreadOut<T>(_ candidates: [T], row: (T) -> Int) -> [T] {
+        let thirds = Set(candidates.map { zone(ofRow: row($0)) }).sorted()
+        guard thirds.count > 1 else { return candidates }
+        let third = fairDraw(thirds.map { ($0, 1.0) }, due: &zoneDue, noise: Tuning.zoneDrawNoise)
+        return candidates.filter { zone(ofRow: row($0)) == third }
+    }
+
     @discardableResult
     func spawn(_ kind: OccurrenceKind) -> Bool {
         switch kind {
         case .sick:
-            let candidates = freePassengers()
+            let candidates = spreadOut(freePassengers()) { self.passengers[$0].row }
             guard !candidates.isEmpty else { return false }
             let pi = candidates[randomInt(candidates.count)]
             addSick(passenger: pi)
@@ -681,7 +722,7 @@ final class FlightSimulation {
             hint("sick", "\(p.label) is feeling sick. Their icon shows what they need next, one step at a time.")
             curtainHint(p)
         case .call, .drink:
-            let candidates = freePassengers { !$0.asleep }
+            let candidates = spreadOut(freePassengers { !$0.asleep }) { self.passengers[$0].row }
             guard !candidates.isEmpty else { return false }
             // business travellers press the button and order more
             let pi = candidates[pickWeighted(candidates.map { passengers[$0].archetype == .business ? 2.5 : 1 })]
@@ -706,6 +747,7 @@ final class FlightSimulation {
             var candidates: [(Int, Int)] = []
             for r in 1..<layout.rows.count { for a in layout.aisles.indices where obstacleAllowed(row: r, aisle: a) { candidates.append((r, a)) } }
             guard !candidates.isEmpty else { return false }
+            candidates = spreadOut(candidates) { $0.0 }
             let (row, aisle) = candidates[randomInt(candidates.count)]
             let n = layout.rows[row].number
             switch kind {
@@ -746,10 +788,15 @@ final class FlightSimulation {
             layout.bins.enumerated().contains { i, b in b.offers.contains(item) && stationOpen(i) }
         }
         if menu.isEmpty { menu = [.water] }
-        let first = menu[randomInt(menu.count)]
-        if plan.combos, random() < 0.35 {
+        // fair draws: the whole menu comes up evenly, and about one order in three is a combo
+        let first = fairDraw(menu.map { ($0, 1.0) }, due: &itemDue, noise: Tuning.orderDrawNoise)
+        if plan.combos {
+            comboDue += Tuning.comboChance
             let sides = menu.filter { $0 != first }
-            if !sides.isEmpty { return .combo([first, sides[randomInt(sides.count)]]) }
+            if !sides.isEmpty, comboDue >= 0.25 + random() * 0.5 {
+                comboDue -= 1
+                return .combo([first, sides[randomInt(sides.count)]])
+            }
         }
         return .item(first)
     }
@@ -897,6 +944,13 @@ final class FlightSimulation {
     private func breakStreak(x: Double, y: Double) {
         if streak > 1 { events.append(.streakLost(x: x, y: y)) }
         streak = 1
+        streakProgress = 0
+    }
+
+    /// Waking sleepers costs one streak level rather than the whole streak.
+    private func lowerStreak(x: Double, y: Double) {
+        if streak > 1 { events.append(.streakLost(x: x, y: y)) }
+        streak = max(1, streak - 1)
         streakProgress = 0
     }
 
@@ -1164,11 +1218,14 @@ final class FlightSimulation {
                     c.x += (d < 0 ? -1 : 1) * Tuning.cartSpeed * dt
                 }
             }
-            if c.active && !heading && cartMode != .service && activeCount < plan.cap(at: t)
-                && random() < Tuning.cartTroubleChancePerSecond * dt {
-                cart = c
-                spawn(cartMode == .breaks ? .brokenCart : .stuckCart)
-                return
+            if c.active && !heading && cartMode != .service && activeCount < plan.cap(at: t) {
+                cartTroubleDue += Tuning.cartTroubleChancePerSecond * dt   // trouble comes at a steady rate
+                if cartTroubleDue >= 1 {
+                    cartTroubleDue -= 1
+                    cart = c
+                    spawn(cartMode == .breaks ? .brokenCart : .stuckCart)
+                    return
+                }
             }
         }
         cart = c
@@ -1289,7 +1346,7 @@ final class FlightSimulation {
 
     // MARK: - Dozing and noise
 
-    /// How loud an occurrence is, in rows: a crying baby is loud from the start; others once urgent.
+    /// How loud an occurrence is, in rows: a crying baby is loud from the start; others only once critical.
     func noiseLevel(_ o: Occurrence) -> Int {
         guard o.passenger != nil, !o.dead, !o.failed, o.kind != .call else { return 0 }
         var rows = o.kind == .baby ? max(1, Tuning.noiseRows(o.state)) : Tuning.noiseRows(o.state)
@@ -1311,7 +1368,12 @@ final class FlightSimulation {
             guard rows > 0 else { continue }
             for i in passengers.indices where passengers[i].asleep && abs(passengers[i].row - o.row) <= rows {
                 passengers[i].asleep = false
-                breakStreak(x: passengers[i].x, y: passengers[i].y)
+                // waking sleepers knocks the streak down a level, at most once every 30 s; a crying baby's
+                // noise before it gets urgent isn't the crew's fault (GDD §2 Scoring, §7)
+                if !(o.kind == .baby && o.state == .calm) && t - lastWakeCost >= Tuning.wakeCostEvery {
+                    lastWakeCost = t
+                    lowerStreak(x: passengers[i].x, y: passengers[i].y)
+                }
                 stats.woken += 1
                 events.append(.wokeUp(x: passengers[i].x, y: passengers[i].y))
                 hint("woke", "Unattended passengers get noisy and wake the people sleeping around them.")

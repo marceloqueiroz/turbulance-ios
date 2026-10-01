@@ -234,20 +234,20 @@ struct Route: Identifiable, Equatable {
 
 /// v1.0 routes (GDD §9a, §11): Routes 1–3, 30 flights. Every flight mixes several task types (GDD §6a).
 enum Campaign {
-    /// Satisfaction for 1/2/3 stars (GDD §2 Scoring). Route 1 is set from the test bots over 7 seeds:
-    /// 3★ ≈ 0.8× the expert median (and below every expert seed), 1★ ≈ 0.8–0.9× the newcomer median,
-    /// 2★ in between. Later routes are set from a greedy bot's median (0.4× · 0.85× · 1.3×).
+    /// Satisfaction for 1/2/3 stars (GDD §2 Scoring), fitted from the test bots over 17 seeds:
+    /// 3★ = min(0.8× the expert median, the second-lowest expert run ÷ 1.03); 1★ = the newcomer's 30th percentile,
+    /// at most 0.55× 3★; 2★ = min(the mid-skill bot's 30th percentile, halfway from 1★ to 3★). All rounded down to 5.
     static let starTargets: [String: [Int]] = [
-        "TB101": [20, 40, 55], "TB102": [100, 180, 245], "TB103": [190, 330, 410],
-        "TB104": [150, 255, 345], "TB105": [65, 150, 240], "TB106": [150, 295, 415],
-        "TB201": [275, 400, 500], "TB202": [225, 315, 410], "TB203": [255, 375, 470],
-        "TB204": [145, 215, 270], "TB205": [85, 145, 195], "TB206": [85, 145, 190],
-        "TB207": [185, 270, 340], "TB208": [300, 440, 550], "TB209": [240, 355, 445],
-        "TB210": [120, 195, 255], "TB211": [115, 200, 265], "TB212": [145, 205, 265],
-        "TB301": [220, 320, 400], "TB302": [330, 480, 600], "TB303": [220, 335, 425],
-        "TB304": [140, 210, 280], "TB305": [175, 245, 320], "TB306": [145, 210, 265],
-        "TB307": [315, 460, 580], "TB308": [365, 530, 665], "TB309": [475, 690, 865],
-        "TB310": [235, 415, 595], "TB311": [160, 275, 365], "TB312": [185, 300, 390]
+        "TB101": [30, 45, 60], "TB102": [120, 170, 225], "TB103": [230, 325, 420],
+        "TB104": [195, 275, 360], "TB105": [95, 235, 390], "TB106": [165, 375, 680],
+        "TB201": [290, 410, 530], "TB202": [230, 325, 420], "TB203": [265, 375, 490],
+        "TB204": [275, 385, 500], "TB205": [210, 300, 390], "TB206": [135, 290, 450],
+        "TB207": [225, 320, 415], "TB208": [310, 435, 565], "TB209": [275, 390, 505],
+        "TB210": [235, 335, 435], "TB211": [215, 285, 395], "TB212": [260, 365, 475],
+        "TB301": [255, 360, 465], "TB302": [320, 455, 590], "TB303": [225, 315, 410],
+        "TB304": [260, 370, 480], "TB305": [290, 410, 535], "TB306": [220, 340, 465],
+        "TB307": [295, 415, 540], "TB308": [375, 530, 685], "TB309": [455, 640, 830],
+        "TB310": [430, 610, 790], "TB311": [285, 400, 520], "TB312": [240, 460, 680]
     ]
 
     private static func bump(_ start: Double, _ duration: Double = 7, _ intensity: Double = 0.375) -> [TurbulenceBump] {
@@ -297,7 +297,7 @@ enum Campaign {
                        kinds: full, script: [.drink, .call], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
                        turbulence: bump(55), twist: .redEye, story: .commuters, goal: .noneWoken,
                        whatsNew: "A dim red-eye: don't wake the sleepers. Snacks and two-item combo orders. A dirty loo left too long clogs and needs the plunger. Midway, a rush of requests hits at once.",
-                       pace: Pace(fuseScale: 1.0, spawnEvery: 4.5...6, rush: true)),
+                       pace: Pace(fuseScale: 1.0, spawnEvery: 5...6.5, rush: true)),
             FlightPlan(id: "TB106", name: "Full Service", aircraft: .comet, duration: 180,
                        kinds: full, script: [.drink, .sick], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
                        turbulence: bump(100), twist: .mealService, story: .celebrity, goal: .vipHappy,
@@ -425,7 +425,7 @@ enum Campaign {
                        kinds: full, script: [.drink], maxCap: 4, menu: simple, strolls: true,
                        twist: .galleyClosed, story: .weekend, goal: .quickService,
                        whatsNew: "The forward galley is closed. Work from the middle galley instead.",
-                       pace: Pace(fuseScale: 2.0, spawnEvery: 3...5, rush: true)),
+                       pace: Pace(fuseScale: 2.0, spawnEvery: 2.5...4.5, rush: true)),
             FlightPlan(id: "TB309", name: "Broken Cart", aircraft: .voyager, duration: 180,
                        kinds: cabin, script: [.call], maxCap: 4, menu: cafe, cart: .breaks,
                        twist: .boardingRush, story: .engineers, goal: .noMisses,

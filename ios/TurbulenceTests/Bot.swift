@@ -64,6 +64,7 @@ func botAct(_ sim: FlightSimulation) {
 /// How quickly the bot decides: the seconds it waits before each decision once it's free (GDD §2 Stars).
 enum BotSkill {
     static let expert = 0.0          // reacts at once and never wastes a step: a near-perfect run
+    static let mid = 0.75            // a decent player: 2★ is fitted to this one
     static let novice = 1.5          // a newcomer: notices things late and thinks before each move
 }
 

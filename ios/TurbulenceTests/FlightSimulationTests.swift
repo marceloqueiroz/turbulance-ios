@@ -409,7 +409,7 @@ final class FlightSimulationTests: XCTestCase {
     func testBotEarnsStarsOnEveryFlightAndScoreNeverDrops() {
         var report: [String] = []
         for plan in Campaign.routes.flatMap(\.flights) {
-            var expert: [Double] = [], novice: [Double] = []
+            var expert: [Double] = [], novice: [Double] = [], mid: [Double] = []
             for seed: UInt64 in Self.starSeeds {
                 var last = 0.0
                 let sim = flyWithBot(plan, seed: seed) { sim in
@@ -422,12 +422,13 @@ final class FlightSimulationTests: XCTestCase {
                 }
                 expert.append(sim.satisfaction)
                 novice.append(flyWithBot(plan, seed: seed, reaction: BotSkill.novice).satisfaction)
+                mid.append(flyWithBot(plan, seed: seed, reaction: BotSkill.mid).satisfaction)
             }
             let e = expert.sorted()[expert.count / 2]
             let n = novice.sorted()[novice.count / 2]
             let expertThrees = expert.filter { plan.stars(for: $0) == 3 }.count
             report.append("CAL \(plan.id) \(Int(e)) \(Int(n)) targets \(plan.targets) expert \(plan.stars(for: e))★ (3★ on \(expertThrees)/\(expert.count)) novice \(plan.stars(for: n))★ "
-                          + "expertRuns \(expert.map { Int($0) }.sorted()) noviceRuns \(novice.map { Int($0) }.sorted())")
+                          + "expertRuns \(expert.map { Int($0) }.sorted()) midRuns \(mid.map { Int($0) }.sorted()) noviceRuns \(novice.map { Int($0) }.sorted())")
             let first = plan == Campaign.route1.flights[0]
             XCTAssertGreaterThanOrEqual(plan.stars(for: n), first ? 2 : 1, "\(plan.id): a newcomer earns \(first ? "two stars" : "a star")")
             XCTAssertEqual(plan.stars(for: e), 3, "\(plan.id): expert play earns three stars")
@@ -498,10 +499,12 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertNotNil(sim.crew.seated)
         step(sim, seconds: 4)
         XCTAssertEqual(sim.turbulence, .none)
-        sim.tap(x: 400, y: 180)
+        // an empty stretch of aisle (a tap on a spill would mop it instead)
+        let free = [400.0, 300, 500, 250].first { x in !sim.occurrences.contains { !$0.kind.atSeat && abs($0.x - x) < 40 } }!
+        sim.tap(x: free, y: 180)
         step(sim, seconds: 3)
         XCTAssertNil(sim.crew.seated)
-        XCTAssertEqual(sim.crew.x, 400, accuracy: 0.5, "unbuckles, then goes where you tapped")
+        XCTAssertEqual(sim.crew.x, free, accuracy: 0.5, "unbuckles, then goes where you tapped")
         XCTAssertTrue(sim.goalMet || sim.plan.goal != .seatedEveryBump)
     }
 
@@ -596,7 +599,9 @@ final class FlightSimulationTests: XCTestCase {
         sim.addSick(passenger: loud, age: Tuning.sickFuse * 0.3)
         sim.update(dt: 0.01)
         XCTAssertTrue(sim.passengers[sleeper].asleep)
-        step(sim, seconds: Tuning.sickFuse * 0.2)
+        step(sim, seconds: Tuning.sickFuse * 0.2)                 // urgent: not loud enough yet (GDD §7)
+        XCTAssertTrue(sim.passengers[sleeper].asleep, "only critical problems wake sleepers")
+        step(sim, seconds: Tuning.sickFuse * 0.35)                // critical now
         XCTAssertFalse(sim.passengers[sleeper].asleep)
         XCTAssertGreaterThanOrEqual(sim.stats.woken, 1)
     }
