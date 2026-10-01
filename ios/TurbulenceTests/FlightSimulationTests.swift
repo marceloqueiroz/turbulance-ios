@@ -933,7 +933,7 @@ final class FlightSimulationTests: XCTestCase {
         if case .working(.coffee, _)? = sim.machines[i] {} else { XCTFail("brewing") }
     }
 
-    func testOvenHeatsTheDishYouPickAndTheWrongOneIsRefused() {
+    func testOvenHeatsTheDishYouPickAndTheWrongOneDoesNotCount() {
         let sim = runningSim()
         let oven = station(sim, .oven)
         let pi = sim.passengers.firstIndex { $0.reach == 0 && $0.row == 4 }!
@@ -946,8 +946,8 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertEqual(sim.crew.tray, [.chicken])
         _ = sim.drainEvents()
         serve(sim, passenger: pi)
-        XCTAssertTrue(sim.occurrences.contains { $0.id == id }, "they asked for pasta")
-        XCTAssertEqual(sim.crew.tray, [.chicken])
+        XCTAssertTrue(sim.occurrences.contains { $0.id == id }, "they asked for pasta: still waiting")
+        XCTAssertTrue(sim.crew.tray.isEmpty, "the chicken was handed over anyway (and cost points)")
     }
 
     func testDirtyLavatoryIsCleanedOnTheSpot() {
@@ -1120,7 +1120,7 @@ final class FlightSimulationTests: XCTestCase {
 
     // MARK: Wrong items, wet floors, the premium curtain
 
-    func testWrongItemCostsPointsAndDoesNotSayWhatsNeeded() {
+    func testWrongItemIsHandedOverCostsPointsAndDoesNotSayWhatsNeeded() {
         let sim = runningSim()
         guard let pi = sim.passengers.firstIndex(where: { $0.reach == 0 && $0.row == 4 }) else { return XCTFail() }
         for k in 0..<3 {                                          // earn some points first
@@ -1134,7 +1134,7 @@ final class FlightSimulationTests: XCTestCase {
         serve(sim, passenger: pi)
         XCTAssertEqual(sim.satisfaction, before - Tuning.wrongItemPenalty, accuracy: 0.01)
         XCTAssertTrue(sim.occurrences.contains { $0.id == id }, "still waiting for juice")
-        XCTAssertEqual(sim.crew.tray, [.water], "kept the wrong item")
+        XCTAssertTrue(sim.crew.tray.isEmpty, "the wrong item is handed over anyway")
         XCTAssertFalse((sim.crew.bubble ?? "").lowercased().contains("juice"), "the crew doesn't say what they wanted")
         XCTAssertTrue(sim.drainEvents().contains { if case .wrongItem = $0 { return true }; return false })
     }

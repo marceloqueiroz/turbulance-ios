@@ -1022,15 +1022,20 @@ final class FlightSimulation {
     /// The tray doesn't have what they need. The crew never says what that is (the icon shows it); handing a
     /// passenger the wrong thing costs points (GDD §2 Scoring), an empty tray just doesn't help.
     private func missing(_ items: [Item], at o: Occurrence) {
-        if crew.tray.isEmpty || !o.kind.atSeat {
-            say(crew.tray.isEmpty ? "Empty tray" : "That won't help")
+        let giveable = crew.tray.contains { $0 != .usedBag }
+        if !giveable || !o.kind.atSeat {
+            say(giveable ? "That won't help" : "Empty tray")
             events.append(.nope)
             return
         }
         wrongItem(at: o, cold: false)
     }
 
+    /// The wrong thing is handed over anyway (it leaves the tray) and it costs points; they keep waiting.
     private func wrongItem(at o: Occurrence, cold: Bool) {
+        if let k = cold ? crew.tray.firstIndex(where: \.isCold) : crew.tray.firstIndex(where: { $0 != .usedBag }) {
+            crew.tray.remove(at: k)
+        }
         satisfaction = max(0, satisfaction - Tuning.wrongItemPenalty)
         say(cold ? "It's gone cold!" : "That's not it!")
         if cold { hint("cold", "Hot drinks and meals go cold. Bin a cold one and make it fresh.") }
