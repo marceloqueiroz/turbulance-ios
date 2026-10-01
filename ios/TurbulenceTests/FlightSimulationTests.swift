@@ -400,15 +400,17 @@ final class FlightSimulationTests: XCTestCase {
     }
 
     /// A simple greedy player: every flight is winnable and satisfaction never goes down.
-    /// Stars must be reachable: on Route 1 (the tutorial map) a newcomer earns at least one star (two on the
-    /// first flight) and an expert earns three; on later routes the expert bot lands between one and two.
+    /// Stars must be reachable on every flight: an expert earns three and a newcomer at least one (two on the
+    /// first flight, the tutorial).
     /// Score only drops through the two penalties. Prints `CAL <id> <expert median> <novice median> ...` lines.
+    /// 17 seeds: enough that targets aren't fitted to a lucky handful of runs.
+    static let starSeeds: [UInt64] = [3, 11, 29, 41, 57, 73, 88, 5, 17, 23, 37, 61, 79, 97, 113, 131, 149]
+
     func testBotEarnsStarsOnEveryFlightAndScoreNeverDrops() {
         var report: [String] = []
-        let route1 = Set(Campaign.route1.flights.map(\.id))
         for plan in Campaign.routes.flatMap(\.flights) {
             var expert: [Double] = [], novice: [Double] = []
-            for seed: UInt64 in [3, 11, 29, 41, 57, 73, 88] {
+            for seed: UInt64 in Self.starSeeds {
                 var last = 0.0
                 let sim = flyWithBot(plan, seed: seed) { sim in
                     // only the two penalties (a wrong item, a passenger slipping on a spill) may take points away
@@ -419,19 +421,18 @@ final class FlightSimulationTests: XCTestCase {
                     last = sim.satisfaction
                 }
                 expert.append(sim.satisfaction)
-                if route1.contains(plan.id) { novice.append(flyWithBot(plan, seed: seed, reaction: BotSkill.novice).satisfaction) }
+                novice.append(flyWithBot(plan, seed: seed, reaction: BotSkill.novice).satisfaction)
             }
             let e = expert.sorted()[expert.count / 2]
-            let n = novice.isEmpty ? 0 : novice.sorted()[novice.count / 2]
-            report.append("CAL \(plan.id) \(Int(e)) \(Int(n)) targets \(plan.targets) expert \(plan.stars(for: e))★ novice \(plan.stars(for: n))★")
-            if route1.contains(plan.id) {
-                let first = plan == Campaign.route1.flights[0]
-                XCTAssertGreaterThanOrEqual(plan.stars(for: n), first ? 2 : 1, "\(plan.id): a newcomer earns \(first ? "two stars" : "a star")")
-                XCTAssertEqual(plan.stars(for: e), 3, "\(plan.id): expert play earns three stars")
-            } else {
-                XCTAssertGreaterThanOrEqual(plan.stars(for: e), 1, "\(plan.id): a plain run earns a star")
-                XCTAssertLessThan(plan.stars(for: e), 3, "\(plan.id): three stars needs better than the bot")
-            }
+            let n = novice.sorted()[novice.count / 2]
+            let expertThrees = expert.filter { plan.stars(for: $0) == 3 }.count
+            report.append("CAL \(plan.id) \(Int(e)) \(Int(n)) targets \(plan.targets) expert \(plan.stars(for: e))★ (3★ on \(expertThrees)/\(expert.count)) novice \(plan.stars(for: n))★ "
+                          + "expertRuns \(expert.map { Int($0) }.sorted()) noviceRuns \(novice.map { Int($0) }.sorted())")
+            let first = plan == Campaign.route1.flights[0]
+            XCTAssertGreaterThanOrEqual(plan.stars(for: n), first ? 2 : 1, "\(plan.id): a newcomer earns \(first ? "two stars" : "a star")")
+            XCTAssertEqual(plan.stars(for: e), 3, "\(plan.id): expert play earns three stars")
+            XCTAssertGreaterThanOrEqual(expertThrees, expert.count - 2,
+                                        "\(plan.id): expert play reaches three stars on all but at most 2 of \(expert.count) runs")
         }
         print("BOT REPORT\n" + report.joined(separator: "\n"))
     }
@@ -701,7 +702,7 @@ final class FlightSimulationTests: XCTestCase {
         sim.crew.x = 150
         XCTAssertFalse(sim.isBehindCurtain(o))
         sim.crew.x = sim.layout.rows.last!.x
-        step(sim, seconds: Tuning.sickFuse * 0.5)
+        step(sim, seconds: o.fuse * 0.5)                         // urgent by now, whatever the flight's timer scale
         XCTAssertFalse(sim.isBehindCurtain(o))
     }
 

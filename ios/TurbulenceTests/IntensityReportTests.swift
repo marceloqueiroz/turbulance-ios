@@ -1,7 +1,7 @@
 import XCTest
 @testable import Turbulence
 
-/// Measures how intense each Route 1 flight is, by flying it with the test bot over several seeds.
+/// Measures how intense each flight is, by flying it with the test bot over several seeds.
 /// Run on its own to tune difficulty (GDD §6a Pace, Route 1 flight checklist):
 ///   xcodebuild test ... -only-testing:TurbulenceTests/IntensityReportTests
 /// Each flight prints one line: `INTENSITY TB101 {json}`. The test only fails if a flight can't be flown.
@@ -28,8 +28,10 @@ final class IntensityReportTests: XCTestCase {
 
     static let seeds: [UInt64] = [3, 11, 29, 41, 57]
 
-    func testRoute1IntensityReport() throws {
-        for plan in Campaign.route1.flights {
+    func testIntensityReport() throws {
+        // ROUTE=2 (env var TEST_RUNNER_ROUTE, or via -only-testing) limits it to one route; default: every flight
+        let only = ProcessInfo.processInfo.environment["ROUTE"].flatMap(Int.init)
+        for plan in Campaign.routes.filter({ only == nil || $0.id == only }).flatMap(\.flights) {
             var reports: [Report] = []
             for seed in Self.seeds { reports.append(measure(plan, seed: seed)) }
             var r = Report(flight: plan.id)
