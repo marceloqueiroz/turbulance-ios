@@ -227,24 +227,49 @@ final class GameController {
         synth.muted = muted
     }
 
+    /// A machine the attendant is walking to; its menu opens on arrival.
+    @ObservationIgnored private var pendingPicker: Int?
+
     /// A cabin tap. Tapping a drinks machine or oven that's waiting for a pick opens its menu first
-    /// (the "two-tap" machines, GDD §6a); any other tap closes an open menu.
+    /// (the "two-tap" machines, GDD §6a). From afar, the attendant walks there first and the menu opens on
+    /// arrival. Any other tap closes an open menu.
     func tap(x: Double, y: Double) {
         guard screen == .playing else { return }
         picker = nil
-        if let i = sim.station(forTapAt: x, y), !sim.poursAway(atStation: i), let options = sim.choices(atStation: i), !options.isEmpty,
-           let point = scene.viewPoint(x: sim.layout.bins[i].x, y: sim.layout.bins[i].y) {
-            picker = MachinePicker(station: i, options: options, point: point)
-            synth.play(.pick)
+        pendingPicker = nil
+        if let i = sim.station(forTapAt: x, y), !sim.poursAway(atStation: i), let options = sim.choices(atStation: i), !options.isEmpty {
+            if sim.isAtStation(i) {
+                openPicker(i, options)
+            } else {
+                sim.walk(toStation: i)
+                pendingPicker = i
+            }
             return
         }
         sim.tap(x: x, y: y)
+    }
+
+    private func openPicker(_ i: Int, _ options: [Item]) {
+        guard let point = scene.viewPoint(x: sim.layout.bins[i].x, y: sim.layout.bins[i].y) else { return }
+        picker = MachinePicker(station: i, options: options, point: point)
+        synth.play(.pick)
+    }
+
+    /// Opens a machine's menu once the attendant has walked up to it.
+    private func checkPendingPicker() {
+        guard let i = pendingPicker, screen == .playing else { return }
+        let c = sim.crew
+        if c.target == nil && c.busy == nil && c.queued == nil {
+            pendingPicker = nil
+            if sim.isAtStation(i), let options = sim.choices(atStation: i), !options.isEmpty { openPicker(i, options) }
+        }
     }
 
     /// The switch button: control (and the camera) moves to the other attendant.
     func switchCrew() {
         guard screen == .playing, sim.twoCrew else { return }
         picker = nil
+        pendingPicker = nil
         sim.switchCrew()
         synth.play(.pick)
         if haptics { bump.impactOccurred(intensity: 0.6) }
@@ -263,6 +288,7 @@ final class GameController {
         if screen == .playing {
             sim.update(dt: dt)
             playAmbience(dt)
+            checkPendingPicker()
         }
         for e in sim.drainEvents() { handle(e) }
         if toast != nil && screen != .paused {

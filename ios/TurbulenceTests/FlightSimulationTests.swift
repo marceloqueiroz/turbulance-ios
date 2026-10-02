@@ -44,6 +44,17 @@ final class FlightSimulationTests: XCTestCase {
 
     // MARK: Escalation
 
+    func testTappingAMachineFromAfarWalksThereFirst() {
+        let sim = runningSim()
+        let i = sim.layout.bins.firstIndex { $0.kind == .drinks }!
+        sim.crew.x = sim.layout.bins[i].x + 400
+        XCTAssertFalse(sim.isAtStation(i))
+        sim.walk(toStation: i)
+        step(sim, seconds: 8)
+        XCTAssertTrue(sim.isAtStation(i), "arrived at the machine")
+        XCTAssertTrue(sim.crew.tray.isEmpty, "walking up doesn't use the machine")
+    }
+
     // MARK: - Two attendants (GDD §8a)
 
     func testTwinAislePlanesHaveOneAttendantPerAisle() {

@@ -230,7 +230,7 @@ struct CabinLayout: Equatable {
 
         // Forward galley (GDD §6a): drinks, machines and food above the top aisle; snacks, toys
         // and trash below the bottom aisle; a toolkit counter between aisles on wide-bodies.
-        blocks.append(CabinBlock(kind: .counter, x: 60, y: 30, w: 150, h: topAisle - 86, label: "FWD GALLEY"))
+        blocks.append(CabinBlock(kind: .counter, x: 60, y: 30, w: 150, h: topAisle - 86, label: ""))      // no floor label (GDD §8a)
         blocks.append(CabinBlock(kind: .counter, x: 60, y: bottomAisle + 56, w: 150, h: height - 50 - (bottomAisle + 56)))
         let topY = topAisle - 102, bottomY = bottomAisle + 102
         bins += [SupplyBin(.drinks, x: 96, y: topY, aisle: 0),

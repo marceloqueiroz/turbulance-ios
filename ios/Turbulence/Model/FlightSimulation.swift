@@ -1618,6 +1618,29 @@ final class FlightSimulation {
         if crew.busy != nil { crew.queued = target } else { crew.target = target }
     }
 
+    /// Whether the attendant you control is standing at a station (close enough to use its menu).
+    func isAtStation(_ i: Int) -> Bool {
+        guard layout.bins.indices.contains(i) else { return false }
+        let b = layout.bins[i]
+        return crew.aisle == b.aisle && abs(crew.y - layout.aisles[b.aisle]) < 1 && abs(crew.x - b.x) < 40
+            && crew.target == nil && crew.seated == nil
+    }
+
+    /// Walks the attendant you control up to a station without using it (its menu opens on arrival).
+    func walk(toStation i: Int) {
+        guard running, layout.bins.indices.contains(i) else { return }
+        let b = layout.bins[i]
+        cur = active
+        let target = CrewTarget(x: b.x, aisle: b.aisle, action: .none)
+        if crew.seated != nil {
+            if seatbeltOn { say("Stay seated!"); events.append(.nope); return }
+            crew.busy = BusyAction(duration: Tuning.unbuckleDuration, task: .unbuckle)
+            crew.queued = target
+            return
+        }
+        if crew.busy != nil { crew.queued = target } else { crew.target = target }
+    }
+
     /// The problem a tap target is about, if any.
     private func occurrence(for target: CrewTarget) -> Occurrence? {
         switch target.action {

@@ -140,12 +140,8 @@ struct HUDBar: View {
                         .rotationEffect(.degrees(-90))
                 }
                 .frame(width: 32, height: 32)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(game.timeText).font(rounded(21, .semibold)).monospacedDigit().foregroundStyle(Color.text)
-                    (Text(game.phaseText).bold().foregroundColor(.text) + Text(" · \(game.flightLabel)"))
-                        .font(rounded(10, .semibold)).foregroundStyle(Color.muted).lineLimit(1)
-                }
-                .fixedSize()
+                Text(game.timeText).font(rounded(21, .semibold)).monospacedDigit().foregroundStyle(Color.text)
+                    .fixedSize()
                 if game.seatbelt { SeatbeltSign() }
             }
             Spacer(minLength: 4)
