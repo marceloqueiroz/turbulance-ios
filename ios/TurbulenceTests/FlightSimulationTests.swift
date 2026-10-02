@@ -459,7 +459,7 @@ final class FlightSimulationTests: XCTestCase {
     /// A simple greedy player: every flight is winnable and satisfaction never goes down.
     /// Stars must be reachable on every flight: an expert earns three and a newcomer at least one (two on the
     /// first flight, the tutorial).
-    /// Score only drops through the two penalties. Prints `CAL <id> <expert median> <novice median> ...` lines.
+    /// Score only drops through the penalties. Prints `CAL <id> <expert median> <novice median> ...` lines.
     /// 17 seeds: enough that targets aren't fitted to a lucky handful of runs.
     static let starSeeds: [UInt64] = [3, 11, 29, 41, 57, 73, 88, 5, 17, 23, 37, 61, 79, 97, 113, 131, 149]
 
@@ -470,9 +470,9 @@ final class FlightSimulationTests: XCTestCase {
             for seed: UInt64 in Self.starSeeds {
                 var last = 0.0
                 let sim = flyWithBot(plan, seed: seed) { sim in
-                    // only the two penalties (a wrong item, a passenger slipping on a spill) may take points away
+                    // only the penalties (a wrong item, a passenger slipping, a line at a dirty lavatory) may take points away
                     let penalised = sim.drainEvents().contains { e in
-                        switch e { case .wrongItem, .paxSlipped: return true; default: return false }
+                        switch e { case .wrongItem, .paxSlipped, .queueCost: return true; default: return false }
                     }
                     if !penalised { XCTAssertGreaterThanOrEqual(sim.satisfaction, last, "\(plan.id) satisfaction dropped") }
                     last = sim.satisfaction
@@ -972,15 +972,34 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertFalse(sim.occurrences.contains { $0.id == id })
     }
 
-    func testIgnoredDirtyLavatoryClogsOnlyOnceClogsAreIn() {
-        let early = runningSim(plan: flight("TB102"))
-        early.makeDirty(lavatory: 0)
-        step(early, seconds: Tuning.dirtyLavFuse * early.plan.pace.fuseScale + 0.2)
-        XCTAssertFalse(early.isClogged(0), "no plunger on TB102: it just stays dirty")
-        let late = runningSim(plan: flight("TB105"))
-        late.makeDirty(lavatory: 0)
-        step(late, seconds: Tuning.dirtyLavFuse * late.plan.pace.fuseScale + 0.2)
-        XCTAssertTrue(late.isClogged(0), "left dirty too long, it clogs")
+    func testDirtyLavatoryHasNoTimer() {
+        let sim = runningSim(plan: flight("TB102"))
+        let id = sim.makeDirty(lavatory: 0)
+        step(sim, seconds: 60)
+        let o = sim.occurrences.first { $0.id == id }
+        XCTAssertNotNil(o, "still waiting to be cleaned")
+        XCTAssertEqual(o?.failed, false)
+        XCTAssertEqual(sim.stats.failed, 0)
+    }
+
+    func testADirtyLavatoryDrawsALineThatCostsSatisfaction() {
+        let sim = runningSim(plan: flight("TB102"))
+        sim.strollsEnabled = true
+        step(sim, seconds: Tuning.boardingEnds + 0.5)
+        sim.makeDirty(lavatory: 0)
+        step(sim, seconds: 30)
+        XCTAssertGreaterThan(sim.lavQueue(0), 0, "passengers line up for it")
+        XCTAssertGreaterThan(sim.stats.queueCost, 0, "and waiting costs points")
+        XCTAssertFalse(sim.isClogged(0), "no plunger on TB102: the line just waits")
+    }
+
+    func testAFullLineClogsTheLavatoryOnceClogsAreIn() {
+        let sim = runningSim(plan: flight("TB105"))
+        sim.strollsEnabled = true
+        step(sim, seconds: Tuning.boardingEnds + 0.5)
+        sim.makeDirty(lavatory: 0)
+        step(sim, seconds: 45)
+        XCTAssertTrue(sim.isClogged(0), "the line filled up: someone went in anyway")
     }
 
     func testQuickTapsMakeTheCrewHurryUpToACap() {

@@ -348,6 +348,7 @@ final class GameController {
         case .jumpSeatsAway: break
         case .wrongItem:
             if haptics { jolt.impactOccurred(intensity: 0.6) }
+        case .queueCost: break
         case .paxSlipped(let x, _):
             synth.play(.whoa, pan: scene.pan(forX: x))
             if haptics { jolt.impactOccurred(intensity: 0.5) }

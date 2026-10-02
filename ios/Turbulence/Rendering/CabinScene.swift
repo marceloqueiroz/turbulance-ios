@@ -872,6 +872,8 @@ final class CabinScene: SKScene {
             if let c = game?.sim.crew { floatText("Rush!", x: c.x, y: c.y - 56, color: Palette.coral) }
         case let .wrongItem(x, y):
             floatText("Wrong! −\(Int(Tuning.wrongItemPenalty))", x: x, y: y - 26, color: Palette.critical)
+        case let .queueCost(x, y):
+            floatText("−1", x: x, y: y - 30, color: Palette.critical)
         case let .paxSlipped(x, y):
             shake = max(shake, 0.15)
             burst(.puff, x: x, y: y, count: 8, colors: [UIColor(hex: 0x8A4B22, alpha: 0.8), UIColor(hex: 0xC8BCAA, alpha: 0.9)])

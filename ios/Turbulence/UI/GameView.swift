@@ -4,6 +4,7 @@ import SwiftUI
 struct GameView: View {
     let app: AppModel
     let game: GameController
+    @State private var pickerSize = CGSize(width: 260, height: 96)
 
     var body: some View {
         GeometryReader { geo in
@@ -34,9 +35,13 @@ struct GameView: View {
                 }
                 if let p = game.picker {
                     GeometryReader { full in
+                        let inset = game.scene.contentInsets
+                        let hw = pickerSize.width / 2 + 10, hh = pickerSize.height / 2 + 8
                         MachinePickerView(options: p.options) { game.pick($0) }
-                            .position(x: min(max(p.point.x, 120), full.size.width - 120),
-                                      y: min(p.point.y + 62, full.size.height - 40))
+                            .onGeometryChange(for: CGSize.self) { $0.size } action: { pickerSize = $0 }
+                            // under the machine, but never under the camera cutout or off screen
+                            .position(x: min(max(p.point.x, inset.left + hw), full.size.width - inset.right - hw),
+                                      y: min(max(p.point.y + 62, inset.top + hh), full.size.height - hh))
                     }
                     .ignoresSafeArea()
                     .transition(.opacity)                    // a plain fade: no bounce

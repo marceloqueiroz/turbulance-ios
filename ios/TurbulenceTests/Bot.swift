@@ -49,8 +49,14 @@ func botAct(_ sim: FlightSimulation) {
         let onScreen = abs(o.x - crew.x) <= half.w && abs(o.y - crew.y) <= half.h + 40
         return onScreen || o.life >= BotSkill.offScreenDelay
     }
+    // how pressing each problem is: its timer, or for a dirty lavatory (no timer) how long its line is
+    func urgency(_ o: Occurrence) -> Double {
+        if o.failed { return -1 }
+        if o.kind == .dirtyLav, let li = o.lavatory { return 0.45 + 0.2 * Double(sim.lavQueue(li)) }
+        return o.age / o.fuse
+    }
     let live = sim.occurrences.filter { !$0.dead && (!sim.twoCrew || sim.owner(of: $0) == sim.active) && noticed($0) }
-        .sorted { ($0.failed ? -1 : $0.age / $0.fuse) > ($1.failed ? -1 : $1.age / $1.fuse) }
+        .sorted { urgency($0) > urgency($1) }
     for o in live {
         switch o.need {
         case .trash:

@@ -109,22 +109,37 @@ enum Art {
             c.setStrokeColor(Palette.navy.withAlphaComponent(0.6).cgColor); c.setLineWidth(1.5)
             c.move(to: P(-3, -8)); c.addQuadCurve(to: P(-3, -13), control: P(-6, -10)); c.move(to: P(2, -8)); c.addQuadCurve(to: P(2, -13), control: P(-1, -10)); c.strokePath()
         case .chicken, .coldChicken:
-            // a plate with a drumstick and greens (pale and frosted once cold)
+            // a big drumstick: golden meat and a white bone (pale and frosted once cold)
             let cold = item == .coldChicken
-            fillStroke(CGPath(ellipseIn: CGRect(x: -12, y: -9, width: 24, height: 19), transform: nil), cold ? UIColor(hex: 0xDCE6EF) : .white)
-            dot(c, -6, 4, 3.2, cold ? UIColor(hex: 0x9FB3A2) : UIColor(hex: 0x5DAE5B))
-            let leg = CGPath(ellipseIn: CGRect(x: -5, y: -6, width: 13, height: 10), transform: nil)
-            fillStroke(leg, cold ? UIColor(hex: 0xB9A791) : UIColor(hex: 0xC8733A))
-            c.setFillColor(UIColor(hex: 0xF4EBDD).cgColor); c.fill(CGRect(x: -8, y: -3, width: 5, height: 3))
+            c.saveGState()
+            c.rotate(by: -.pi / 4)
+            let bone = cold ? UIColor(hex: 0xE4E8EC) : UIColor(hex: 0xFFF6E6)
+            fillStroke(CGPath(roundedRect: CGRect(x: 2, y: -2.2, width: 11, height: 4.4), cornerWidth: 2, cornerHeight: 2, transform: nil), bone)
+            fillStroke(CGPath(ellipseIn: CGRect(x: 10.5, y: -5.5, width: 5, height: 5), transform: nil), bone)
+            fillStroke(CGPath(ellipseIn: CGRect(x: 10.5, y: 0.5, width: 5, height: 5), transform: nil), bone)
+            fillStroke(CGPath(ellipseIn: CGRect(x: -13, y: -8, width: 19, height: 16), transform: nil),
+                       cold ? UIColor(hex: 0xB9A791) : UIColor(hex: 0xD9822F))
+            dot(c, -7, -3, 2.6, cold ? UIColor(hex: 0xCFC2AE) : UIColor(hex: 0xF2B25C))   // a shine on the skin
+            c.restoreGState()
             if cold { frost(c, 9, -9) }
         case .pasta, .coldPasta:
-            // a plate of spaghetti with tomato sauce
+            // a teal bowl piled with spaghetti, tomato sauce on top and a fork stuck in
             let cold = item == .coldPasta
-            fillStroke(CGPath(ellipseIn: CGRect(x: -12, y: -9, width: 24, height: 19), transform: nil), cold ? UIColor(hex: 0xDCE6EF) : .white)
-            fillStroke(CGPath(ellipseIn: CGRect(x: -8, y: -6, width: 16, height: 12), transform: nil), cold ? UIColor(hex: 0xD9CFA6) : UIColor(hex: 0xF2C84B))
+            c.setStrokeColor(UIColor(hex: 0x8A93A0).cgColor); c.setLineWidth(1.8)
+            c.move(to: P(4, -3)); c.addLine(to: P(9, -14)); c.strokePath()
+            c.move(to: P(7.5, -13)); c.addLine(to: P(8.5, -16)); c.move(to: P(9.5, -12.2)); c.addLine(to: P(11, -15)); c.strokePath()
+            c.setStrokeColor(Palette.navy.cgColor); c.setLineWidth(2)
+            fillStroke(CGPath(ellipseIn: CGRect(x: -10, y: -8, width: 20, height: 12), transform: nil),
+                       cold ? UIColor(hex: 0xD9CFA6) : UIColor(hex: 0xF5CF4F))
             c.setStrokeColor((cold ? UIColor(hex: 0xB9AD86) : UIColor(hex: 0xD9A626)).cgColor); c.setLineWidth(1.2)
-            c.move(to: P(-6, -2)); c.addQuadCurve(to: P(6, -1), control: P(0, -6)); c.move(to: P(-6, 2)); c.addQuadCurve(to: P(6, 3), control: P(0, -2)); c.strokePath()
-            dot(c, 1, 0, 3, cold ? UIColor(hex: 0xB98C84) : UIColor(hex: 0xD6452B))
+            c.move(to: P(-7, -2)); c.addQuadCurve(to: P(5, -3), control: P(-1, -7)); c.move(to: P(-5, 1)); c.addQuadCurve(to: P(7, 0), control: P(1, -4)); c.strokePath()
+            c.setStrokeColor(Palette.navy.cgColor); c.setLineWidth(2)
+            fillStroke(CGPath(ellipseIn: CGRect(x: -4.5, y: -7.5, width: 8, height: 5.5), transform: nil),
+                       cold ? UIColor(hex: 0xB98C84) : UIColor(hex: 0xD6452B))
+            let bowl = CGMutablePath()
+            bowl.move(to: P(-12, -1)); bowl.addLine(to: P(12, -1))
+            bowl.addCurve(to: P(-12, -1), control1: P(11, 13), control2: P(-11, 13)); bowl.closeSubpath()
+            fillStroke(bowl, cold ? UIColor(hex: 0x9CB8BA) : Palette.teal)
             if cold { frost(c, 9, -9) }
         case .toy:
             // a teddy bear
