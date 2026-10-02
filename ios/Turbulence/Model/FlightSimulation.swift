@@ -253,6 +253,22 @@ enum OccurrenceKind: Equatable, CaseIterable {
     var isCart: Bool { self == .stuckCart || self == .brokenCart }
     /// Stays put after failing, until someone clears it.
     var lingers: Bool { !atSeat }
+    /// How the scorecard names it.
+    var scoreName: String {
+        switch self {
+        case .sick: return "Sick passenger"
+        case .call: return "Call button"
+        case .drink: return "Order"
+        case .baby: return "Crying baby"
+        case .spill: return "Spill"
+        case .binJam: return "Open bin"
+        case .carryOn: return "Carry-on bag"
+        case .toilet: return "Clogged toilet"
+        case .dirtyLav: return "Dirty lavatory"
+        case .stuckCart: return "Stuck cart"
+        case .brokenCart: return "Broken cart"
+        }
+    }
     /// Happens at a lavatory door.
     var atLavatory: Bool { self == .toilet || self == .dirtyLav }
 
@@ -392,6 +408,15 @@ struct Crew {
     }
 }
 
+/// One change to the score, in flight order: the scorecard replays them (GDD §2 Scoring).
+struct ScoreEvent: Equatable {
+    enum Kind: Equatable { case fixed, missed, penalty }
+    let kind: Kind
+    var delta: Double
+    /// What happened, as the scorecard shows it ("Call button", "Wrong item").
+    var label = ""
+}
+
 struct FlightStats {
     var resolved = 0
     var failed = 0
@@ -445,6 +470,8 @@ final class FlightSimulation {
     private(set) var passengers: [Passenger] = []
     private(set) var occurrences: [Occurrence] = []
     private(set) var satisfaction = 0.0
+    /// Every fix, penalty and miss, in order, for the animated scorecard.
+    private(set) var scoreLog: [ScoreEvent] = []
     private(set) var streak = 1
     private(set) var streakProgress = 0
     private(set) var stats = FlightStats()
@@ -761,6 +788,7 @@ final class FlightSimulation {
         for o in occurrences where !o.dead && !o.failed && o.fuse.isFinite {
             breakStreak(x: o.x, y: o.y)
             stats.failed += 1
+            scoreLog.append(ScoreEvent(kind: .missed, delta: 0, label: o.kind.scoreName))
             if o.kind == .drink { stats.ordersMissed += 1 }
             if o.vip { stats.vipFailed = true }
         }
@@ -1015,8 +1043,22 @@ final class FlightSimulation {
     func isClogged(_ li: Int) -> Bool { occurrences.contains { $0.kind == .toilet && !$0.dead && $0.lavatory == li } }
     private func needsCleaning(_ li: Int) -> Bool { occurrences.contains { $0.kind.atLavatory && !$0.dead && $0.lavatory == li } }
 
+    /// Changes the score (never below 0) and logs it for the scorecard.
+    /// Changes the score (never below 0) and logs it for the scorecard; back-to-back points lost to the same
+    /// lavatory line count as one entry.
+    private func score(_ delta: Double, _ kind: ScoreEvent.Kind, _ label: String) {
+        let before = satisfaction
+        satisfaction = max(0, satisfaction + delta)
+        if kind == .penalty, let last = scoreLog.last, last.kind == .penalty, last.label == label, label == "Lavatory line" {
+            scoreLog[scoreLog.count - 1].delta += satisfaction - before
+        } else {
+            scoreLog.append(ScoreEvent(kind: kind, delta: satisfaction - before, label: label))
+        }
+    }
+
     private func fail(_ i: Int) {
         stats.failed += 1
+        scoreLog.append(ScoreEvent(kind: .missed, delta: 0, label: occurrences[i].kind.scoreName))
         let o = occurrences[i]
         if o.kind == .drink { stats.ordersMissed += 1 }
         if o.vip { stats.vipFailed = true }
@@ -1074,7 +1116,7 @@ final class FlightSimulation {
         if o.kind.isCart { cart?.stuck = false }
         if o.failed {
             occurrences[i].dead = true
-            satisfaction += Tuning.moppedPay
+            score(Tuning.moppedPay, .fixed, o.kind.scoreName)
             events.append(.mopped(x: o.x, y: o.y))
             return
         }
@@ -1086,7 +1128,7 @@ final class FlightSimulation {
             if o.vip { pay = (pay * Tuning.vipPay).rounded() }
             let bonus = pay * Double(streak)
             let paidAt = streak
-            satisfaction += bonus
+            score(bonus, .fixed, o.vip ? "VIP " + o.kind.scoreName.lowercased() : o.kind.scoreName)
             climbStreak()
             stats.resolved += 1
             stats.fixTimes.append(o.life)
@@ -1204,7 +1246,7 @@ final class FlightSimulation {
         if let k = cold ? crew.tray.firstIndex(where: \.isCold) : crew.tray.firstIndex(where: { $0 != .usedBag }) {
             crew.tray.remove(at: k)
         }
-        satisfaction = max(0, satisfaction - Tuning.wrongItemPenalty)
+        score(-Tuning.wrongItemPenalty, .penalty, "Wrong item")
         say(cold ? "It's gone cold!" : "That's not it!")
         if cold { hint("cold", "Hot drinks and meals go cold. Bin a cold one and make it fresh.") }
         stats.wrongItems += 1
@@ -1361,7 +1403,7 @@ final class FlightSimulation {
             if h.busy <= 0, let id = h.target {
                 if let i = occurrences.firstIndex(where: { $0.id == id && !$0.dead }) {
                     occurrences[i].dead = true
-                    satisfaction += 2
+                    score(2, .fixed, "Trainee helped")
                     stats.resolved += 1
                     events.append(.resolved(x: occurrences[i].x, y: occurrences[i].y, bonus: 2, streak: 1, passenger: occurrences[i].passenger))
                 }
@@ -1598,7 +1640,7 @@ final class FlightSimulation {
         queueDrain += Tuning.lavQueueDrain * Double(waiting.count) * dt
         while queueDrain >= 1 {
             queueDrain -= 1
-            satisfaction = max(0, satisfaction - 1)
+            score(-1, .penalty, "Lavatory line")
             stats.queueCost += 1
             let front = passengers[waiting[stats.queueCost % waiting.count]]
             events.append(.queueCost(x: front.drawX, y: front.drawY))
@@ -1640,7 +1682,7 @@ final class FlightSimulation {
         for o in occurrences where o.kind == .spill && !o.dead && o.aisle == aisle && !s.slippedOn.contains(o.id)
             && abs(o.x - s.x) < reach(o) {
             s.slippedOn.insert(o.id)
-            satisfaction = max(0, satisfaction - Tuning.paxSlipPenalty)
+            score(-Tuning.paxSlipPenalty, .penalty, "Passenger slipped")
             stats.paxSlips += 1
             events.append(.paxSlipped(x: s.x, y: s.y))
             hint("paxSlip", "A passenger slipped on the spill! Mop spills up before someone walks through them.")

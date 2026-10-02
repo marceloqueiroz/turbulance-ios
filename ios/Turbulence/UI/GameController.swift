@@ -13,6 +13,9 @@ struct FlightResult: Equatable {
     var bestStreak = 1
     var goal: Goal = .noMisses
     var goalMet = false
+    /// Every fix, penalty and miss in order, and the star targets: the scorecard counts them up.
+    var log: [ScoreEvent] = []
+    var targets: [Int] = [1, 2, 3]
 }
 
 /// Glue between the model, the SpriteKit renderer and the SwiftUI HUD.
@@ -96,6 +99,20 @@ final class GameController {
                   let p = Campaign.routes.flatMap(\.flights).first(where: { $0.id == args[i + 1] }) {
             plan = p                                 // jump straight into one flight, e.g. -flight TB307
             debugFlight = p
+        } else if args.contains("-scorecard") {
+            // a sample scorecard (screenshots): a run of fixes with a few misses and penalties
+            plan = Campaign.route1.flights[1]
+            var log: [ScoreEvent] = []
+            let kinds: [OccurrenceKind] = [.call, .drink, .spill, .baby, .sick]
+            for k in 0..<24 {
+                log.append(ScoreEvent(kind: .fixed, delta: Double(6 + (k % 4) * 3), label: kinds[k % kinds.count].scoreName))
+                if k % 7 == 3 { log.append(ScoreEvent(kind: .missed, delta: 0, label: "Order")) }
+                if k % 9 == 5 { log.append(ScoreEvent(kind: .penalty, delta: -3, label: "Wrong item")) }
+            }
+            let total = Int(log.map(\.delta).reduce(0, +))
+            result = FlightResult(stars: plan.stars(for: Double(total)), resolved: 24, missed: 4, averageFix: nil,
+                                  satisfaction: total, goal: plan.goal, goalMet: true, log: log, targets: plan.targets)
+            screen = .ended
         } else if args.contains("-autostart") || args.contains("-turbulence") {
             plan = .prototype
             sim = FlightSimulation()
@@ -265,6 +282,9 @@ final class GameController {
         }
     }
 
+    /// Sounds for the scorecard's count-up.
+    func playUI(_ s: Synth.Sound) { synth.play(s) }
+
     /// The switch button: control (and the camera) moves to the other attendant.
     func switchCrew() {
         guard screen == .playing, sim.twoCrew else { return }
@@ -362,7 +382,8 @@ final class GameController {
                 toast = nil
                 let r = FlightResult(stars: sim.stars, resolved: sim.stats.resolved, missed: sim.stats.failed,
                                      averageFix: sim.stats.averageFix, satisfaction: Int(sim.satisfaction.rounded()),
-                                     bestStreak: sim.stats.bestStreak, goal: sim.plan.goal, goalMet: sim.goalMet)
+                                     bestStreak: sim.stats.bestStreak, goal: sim.plan.goal, goalMet: sim.goalMet,
+                                     log: sim.scoreLog, targets: sim.plan.targets)
                 result = r
                 onEnded?(plan, r)
                 screen = .ended

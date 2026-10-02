@@ -87,7 +87,7 @@ struct GameView: View {
             }
         case .ended:
             Scrim {
-                EndCard(plan: game.plan, result: game.result, newBest: app.newBest,
+                EndCard(plan: game.plan, result: game.result, newBest: app.newBest, sound: { game.playUI($0) },
                         next: app.nextFlight(after: game.plan).map { next in { app.openMap(brief: next) } },
                         retry: { app.board(game.plan) }, map: { app.openMap() })
             }
@@ -161,39 +161,13 @@ struct HUDBar: View {
                     .onDisappear { game.scene.stripSlot = nil }
             }
             Spacer(minLength: 4)
+            // the score and its multiplier, nothing else: the stars are revealed on the scorecard (GDD §8a)
+            Text("\(game.satisfaction)").font(rounded(26, .heavy)).monospacedDigit().foregroundStyle(Color.text)
+                .contentTransition(.numericText(value: Double(game.satisfaction)))
+                .animation(.easeOut(duration: 0.25), value: game.satisfaction)
+                .fixedSize()
+                .accessibilityLabel("Score \(game.satisfaction)")
             StreakBadge(streak: game.streak)
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text("SATISFACTION").font(rounded(8, .heavy)).tracking(0.5).foregroundStyle(Color.muted)
-                        .lineLimit(1).minimumScaleFactor(0.6)
-                    Spacer(minLength: 0)
-                    Text("\(game.satisfaction)").font(rounded(13, .heavy)).monospacedDigit().foregroundStyle(Color.text)
-                        .contentTransition(.numericText(value: Double(game.satisfaction)))
-                        .fixedSize()
-                    HStack(spacing: 1) {
-                        ForEach(0..<3, id: \.self) { i in
-                            Image(systemName: i < earned ? "star.fill" : "star")
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundStyle(i < earned ? Color.calm : Color.muted)
-                        }
-                    }
-                    .fixedSize()
-                    .accessibilityLabel("\(earned) of 3 stars")
-                }
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule().fill(Color.panel).overlay(Capsule().stroke(Color.panelLine, lineWidth: 1))
-                        Capsule().fill(satColor).frame(width: geo.size.width * progress)
-                        ForEach(game.starTargets.dropLast(), id: \.self) { t in
-                            Rectangle().fill(Color.sky.opacity(0.7)).frame(width: 2)
-                                .offset(x: geo.size.width * CGFloat(t) / CGFloat(max(1, top)))
-                        }
-                    }
-                    .animation(.easeOut(duration: 0.25), value: game.satisfaction)
-                }
-                .frame(height: 10)
-            }
-            .frame(width: 140)
             HStack(spacing: 8) {
                 RoundButton(system: game.muted ? "speaker.slash.fill" : "speaker.wave.2.fill", label: "Sound") { game.toggleMute() }
                 RoundButton(system: "pause.fill", label: "Pause") { game.setPaused(game.screen == .playing) }
@@ -201,12 +175,6 @@ struct HUDBar: View {
         }
         .frame(height: 40)
     }
-
-    private var top: Int { game.starTargets.last ?? 1 }
-    private var earned: Int { game.starTargets.filter { game.satisfaction >= $0 }.count }
-    /// The bar fills towards the 3-star target; the ticks mark 1 and 2 stars.
-    private var progress: CGFloat { min(1, CGFloat(game.satisfaction) / CGFloat(max(1, top))) }
-    private var satColor: Color { earned >= 2 ? .teal : Color(uiColor: Palette.calm) }
 }
 
 /// Twin-aisle planes: switches control and the camera to the other attendant. A red dot shows when the other
@@ -394,58 +362,157 @@ struct PauseCard: View {
     }
 }
 
+/// The animated scorecard (GDD §2 Scoring): the score counts up event by event (each one named on its own line), stars fill as it passes each
+/// target, then the title, the bonus medal (only if earned) and a NEW BEST badge land. Tap to skip the count.
 struct EndCard: View {
     let plan: FlightPlan
     let result: FlightResult?
     let newBest: Bool
+    let sound: (Synth.Sound) -> Void
     let next: (() -> Void)?
     let retry: () -> Void
     let map: () -> Void
+
+    @State private var shown = 0.0
+    @State private var resolved = 0
+    @State private var missed = 0
+    @State private var lit = 0
+    @State private var delta: ScoreEvent?
+    @State private var deltaID = 0
+    @State private var done = false
+    @State private var bounce = false
+
+    private var r: FlightResult { result ?? FlightResult(stars: 0, resolved: 0, missed: 0, averageFix: nil, satisfaction: 0) }
+    private static let titles = ["Rough flight", "Safe landing", "Smooth flight", "Perfect flight!"]
+
     var body: some View {
-        let r = result ?? FlightResult(stars: 0, resolved: 0, missed: 0, averageFix: nil, satisfaction: 0)
-        let t = plan.targets
         Card {
-            Eyebrow(text: "Landed · \(plan.id) \(plan.name)")
-            HStack(spacing: 14) {
-                Text(["Rough landing", "Bumpy but done", "Smooth landing", "Five-star crew"][r.stars]).font(rounded(26, .bold))
-                HStack(spacing: 4) {
-                    ForEach(0..<3, id: \.self) { i in
-                        Image(systemName: i < r.stars ? "star.fill" : "star")
-                            .font(.system(size: 26, weight: .bold))
-                            .foregroundStyle(i < r.stars ? Color.coral : Color.navy)
+          VStack(spacing: 10) {
+            Text(done ? Self.titles[r.stars] : "Touchdown!")
+                .font(rounded(30, .heavy))
+                .id(done)
+                .transition(.scale(scale: 0.6).combined(with: .opacity))
+            HStack(spacing: 10) {
+                ForEach(0..<3, id: \.self) { i in
+                    Image(systemName: i < lit ? "star.fill" : "star")
+                        .font(.system(size: 40, weight: .bold))
+                        .foregroundStyle(i < lit ? Color.calm : Color.navy.opacity(0.35))
+                        .scaleEffect(i < lit ? 1.15 : 0.9)
+                        .animation(.spring(response: 0.35, dampingFraction: 0.45), value: lit)
+                }
+            }
+            .accessibilityLabel("\(lit) of 3 stars")
+            Text("\(Int(shown.rounded()))")
+                .font(rounded(52, .heavy)).monospacedDigit()
+                .contentTransition(.numericText(value: shown))
+                .frame(minWidth: 160)
+            // what just happened, one line per event, sliding in as the score counts to it
+            ZStack {
+                if let d = delta {
+                    HStack(spacing: 8) {
+                        Image(systemName: d.kind == .fixed ? "checkmark.circle.fill" : d.kind == .missed ? "xmark.circle.fill" : "minus.circle.fill")
+                            .foregroundStyle(d.kind == .fixed ? Color.teal : Color(uiColor: Palette.critical))
+                        Text(d.kind == .missed ? "Missed: \(d.label.lowercased())" : d.label).font(rounded(16, .bold))
+                        if d.kind != .missed {
+                            Text(d.delta >= 0 ? "+\(Int(d.delta.rounded()))" : "\(Int(d.delta.rounded()))")
+                                .font(rounded(16, .heavy)).monospacedDigit()
+                                .foregroundStyle(d.kind == .fixed ? Color.teal : Color(uiColor: Palette.critical))
+                        }
                     }
+                    .id(deltaID)
+                    .transition(.asymmetric(insertion: .move(edge: .bottom).combined(with: .opacity),
+                                            removal: .move(edge: .top).combined(with: .opacity)))
+                } else if !done {
+                    Text("Tap to skip").font(rounded(12, .medium)).foregroundStyle(Color.finePrint)
                 }
-                .accessibilityLabel("\(r.stars) of 3 stars")
-                if newBest {
-                    Text("NEW BEST").font(rounded(11, .heavy)).tracking(1).foregroundStyle(.white)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
-                        .background(Color.teal, in: Capsule())
+            }
+            .frame(height: 24)
+            .clipped()
+            HStack(spacing: 10) {
+                Stat(label: "Resolved", value: "\(resolved)")
+                Stat(label: "Missed", value: "\(missed)")
+            }
+            .frame(maxWidth: 320)
+            if done && r.goalMet {
+                HStack(spacing: 8) {
+                    Image(systemName: "medal.fill").font(.system(size: 20, weight: .bold)).foregroundStyle(Color.calm)
+                    Text("Bonus goal: \(r.goal.title)").font(rounded(14, .bold))
                 }
+                .transition(.scale(scale: 0.4).combined(with: .opacity))
             }
-            HStack(spacing: 8) {
-                Stat(label: "Resolved", value: "\(r.resolved)")
-                Stat(label: "Missed", value: "\(r.missed)")
-                Stat(label: "Avg fix", value: r.averageFix.map { String(format: "%.1fs", $0) } ?? "–")
-                Stat(label: "Best streak", value: "×\(r.bestStreak)")
-                Stat(label: "Satisfaction", value: "\(r.satisfaction)")
+            if done && r.stars == 0 {
+                Text("Earn a star (\(r.targets[0])) to open the next flight.")
+                    .font(rounded(12, .medium)).foregroundStyle(Color.finePrint)
             }
-            HStack(spacing: 8) {
-                Image(systemName: r.goalMet ? "medal.fill" : "medal")
-                    .font(.system(size: 18, weight: .bold))
-                    .foregroundStyle(r.goalMet ? Color.calm : Color.finePrint)
-                Text("Bonus goal: \(r.goal.title) \(r.goalMet ? "· medal earned" : "· not this time")")
-                    .font(rounded(13, .bold))
-            }
-            Text(r.stars == 0 ? "Earn at least one star (\(t[0]) satisfaction) to open the next flight."
-                              : "Stars: \(t[0]) · \(t[1]) · \(t[2]) satisfaction. Keep the streak going to earn faster.")
-                .font(rounded(11, .medium)).foregroundStyle(Color.finePrint)
             HStack(spacing: 12) {
                 if let next { CTA(title: "Next flight", action: next) }
                 CTA(title: "Retry", color: next == nil ? .coral : .teal, action: retry)
                 CTA(title: "Route map", color: .navy, action: map)
             }
             .padding(.bottom, 4)
+          }
+          .frame(maxWidth: .infinity)
         }
+        .overlay(alignment: .topTrailing) {
+            if done && newBest {
+                Text("NEW BEST").font(rounded(15, .heavy)).tracking(1.2).foregroundStyle(.white)
+                    .padding(.horizontal, 14).padding(.vertical, 8)
+                    .background(Color.coral, in: Capsule())
+                    .overlay(Capsule().stroke(Color.navy, lineWidth: 2.5))
+                    .rotationEffect(.degrees(bounce ? 8 : -4))
+                    .scaleEffect(bounce ? 1.08 : 0.96)
+                    .offset(x: 18, y: -16)
+                    .transition(.scale(scale: 0.2).combined(with: .opacity))
+                    .onAppear { withAnimation(.easeInOut(duration: 0.6).repeatForever(autoreverses: true)) { bounce = true } }
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { finish() }
+        .task(id: result) { await countUp() }
+    }
+
+    /// Replays the flight's score events, one beat each (0.3–0.6 s).
+    private func countUp() async {
+        shown = 0; resolved = 0; missed = 0; lit = 0; done = false; delta = nil
+        let log = r.log
+        guard !log.isEmpty else { finish(); return }
+        try? await Task.sleep(for: .milliseconds(450))
+        // each event gets its own beat (about half a second), a bit quicker on very busy flights
+        let step = min(0.6, max(0.3, 24 / Double(log.count)))
+        var total = 0.0
+        for e in log {
+            if Task.isCancelled || done { return }
+            total += e.delta
+            withAnimation(.easeOut(duration: 0.25)) { delta = e; deltaID += 1 }
+            withAnimation(.easeOut(duration: step * 0.8)) {
+                shown = total
+                if e.kind == .fixed { resolved += 1 }
+                if e.kind == .missed { missed += 1 }
+            }
+            let nowLit = r.targets.filter { total >= Double($0) }.count
+            if nowLit != lit {
+                if nowLit > lit { sound(.streakUp) }
+                lit = nowLit
+            } else {
+                sound(e.kind == .fixed ? .pick : .nope)
+            }
+            try? await Task.sleep(for: .seconds(step))
+        }
+        try? await Task.sleep(for: .milliseconds(250))
+        finish()
+    }
+
+    private func finish() {
+        guard !done else { return }
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.6)) {
+            shown = Double(r.satisfaction)
+            resolved = r.resolved
+            missed = r.missed
+            lit = r.stars
+            delta = nil
+            done = true
+        }
+        sound(r.stars == 3 ? .streakUp : .ding)
     }
 }
 
