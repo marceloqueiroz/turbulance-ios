@@ -22,6 +22,15 @@ final class CabinScene: SKScene {
     private var iconNodes: [Int: IconNode] = [:]
     private var spillNodes: [Int: SpillNode] = [:]
     private let crewNode = CrewNode()
+    /// The second attendant on twin-aisle planes, and the chevron over whichever one you control (GDD §8a).
+    private let partnerNode = CrewNode()
+    private let activeMark: SKShapeNode = {
+        let p = CGMutablePath()
+        p.move(to: CGPoint(x: -7, y: 6)); p.addLine(to: CGPoint(x: 7, y: 6)); p.addLine(to: CGPoint(x: 0, y: -3)); p.closeSubpath()
+        let n = SKShapeNode(path: p)
+        n.fillColor = Palette.teal; n.strokeColor = .white; n.lineWidth = 1.5; n.zPosition = 6.5; n.isHidden = true
+        return n
+    }()
     private let targetMarker = SKShapeNode(ellipseOf: CGSize(width: 20, height: 9))
     private var worldBase = CGPoint.zero
     private var shake: CGFloat = 0
@@ -106,6 +115,20 @@ final class CabinScene: SKScene {
     private let helperNode = CrewNode()
     private var jumpGlows: [SKShapeNode] = []
 
+    // Follow camera (GDD §8a): the clear area on screen, the fit and current zoom, and the cabin point at its centre.
+    private var clear = CGRect(x: 0, y: 0, width: 1000, height: 380)
+    private var fitS: CGFloat = 1
+    private var camS: CGFloat = 1
+    private var focus = CGPoint(x: 500, y: 190)
+    private var goal = CGPoint(x: 500, y: 190)
+    private var peekX: Double?
+    private weak var peekTouch: UITouch?
+    private let markerLayer = SKNode()
+    private var markers: [String: EdgeMarker] = [:]
+    private let strip = CabinStrip()
+    /// The HUD's free slot for the cabin strip, in screen points (top-left origin); nil while the HUD needs it.
+    var stripSlot: CGRect?
+
     /// Model point (y down) → world node point (y up).
     func pt(_ x: Double, _ y: Double) -> CGPoint { CGPoint(x: x, y: worldH - y) }
 
@@ -119,6 +142,8 @@ final class CabinScene: SKScene {
         vignetteNode.anchorPoint = .zero; vignetteNode.zPosition = 100
         addChild(cam); camera = cam
         cam.addChild(skyNode); cam.addChild(vignetteNode)     // sky and vignette stay fixed on screen
+        markerLayer.zPosition = 110; strip.zPosition = 112; strip.isHidden = true
+        cam.addChild(markerLayer); cam.addChild(strip)
         addChild(world)
 
         for i in 0..<16 {
@@ -157,6 +182,10 @@ final class CabinScene: SKScene {
         world.addChild(targetMarker)
         crewNode.zPosition = 6
         world.addChild(crewNode)
+        partnerNode.zPosition = 6; partnerNode.isHidden = true
+        partnerNode.setLook(skin: UIColor(hex: 0x8D5A3B), hair: UIColor(hex: 0x2B2118))
+        world.addChild(partnerNode)
+        world.addChild(activeMark)
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
@@ -189,11 +218,10 @@ final class CabinScene: SKScene {
         // fit the cabin into the clear area (no clipping under the cutout), centred in it
         let i = contentInsets
         let availW = size.width - i.left - i.right, availH = size.height - i.top - i.bottom
-        let s = CGFloat(Self.fitScale(availW: Double(availW), availH: Double(availH), width: worldW, height: worldH))
-        world.setScale(s)
+        fitS = CGFloat(Self.fitScale(availW: Double(availW), availH: Double(availH), width: worldW, height: worldH))
         // model y runs down while the scene's y runs up: the top inset lowers the cabin, the bottom inset raises it
-        worldBase = CGPoint(x: i.left + (availW - worldW * s) / 2,
-                            y: Self.worldBaseY(viewH: size.height, insetTop: i.top, insetBottom: i.bottom, worldH: worldH, scale: s))
+        clear = CGRect(x: i.left, y: i.bottom, width: availW, height: availH)
+        updateCamera(dt: 0, snap: !following)
         world.position = worldBase
         if renderedSize != size {
             renderedSize = size
@@ -203,6 +231,143 @@ final class CabinScene: SKScene {
         skyNode.position = CGPoint(x: -size.width / 2, y: -size.height / 2)
         vignetteNode.position = skyNode.position
         cam.position = CGPoint(x: size.width / 2, y: size.height / 2)
+    }
+
+    // MARK: - Follow camera (GDD §8a)
+
+    /// Whether the camera follows the attendant now: never on the Comet, and only once the flight is under way
+    /// (the intro lands on the whole cabin and the countdown shows it; on Go the camera eases in).
+    private var following: Bool {
+        guard let g = game, g.sim.plan.aircraft.followZoom != nil else { return false }
+        switch g.screen {
+        case .playing, .paused, .ended: return true
+        case .idle, .intro, .countdown: return false
+        }
+    }
+
+    private var interiorCenter: CGPoint { CGPoint(x: worldW / 2, y: worldH / 2) }
+
+    /// The visible half-size around the camera's centre, in cabin units.
+    private var visibleHalf: (w: Double, h: Double) { (Double(clear.width / 2 / camS), Double(clear.height / 2 / camS)) }
+
+    /// Keeps a camera centre inside the cabin's interior (end stops): centred when the view is bigger than the cabin.
+    private func clampAxis(_ v: Double, half: Double, size: Double) -> Double {
+        let lo = Self.hullMargin, hi = size - Self.hullMargin
+        return hi - lo <= 2 * half ? (lo + hi) / 2 : min(max(v, lo + half), hi - half)
+    }
+
+    /// Moves the camera: a dead zone over the middle 40% of the screen, a little look-ahead in the walking
+    /// direction, a ~0.3 s spring with no overshoot, and end stops at the nose and tail.
+    private func updateCamera(dt: Double, snap: Bool = false) {
+        let zoom = game?.sim.plan.aircraft.followZoom.map { CGFloat($0) }
+        let targetS = following ? max(fitS, zoom ?? fitS) : fitS
+        camS += (targetS - camS) * (snap ? 1 : CGFloat(1 - exp(-dt / 0.12)))
+        let half = visibleHalf
+        if following, let c = game?.sim.crew {
+            let dir = c.target.map { $0.x < c.x ? -1.0 : 1.0 } ?? c.face
+            let ax = c.x + (c.isMoving ? dir * half.w * 0.25 : 0)
+            let dzx = half.w * 0.4, dzy = half.h * 0.4
+            if ax - goal.x > dzx { goal.x = ax - dzx } else if goal.x - ax > dzx { goal.x = ax + dzx }
+            if (game?.sim.layout.aisles.count ?? 1) > 1 {
+                goal.y = c.y                          // twin aisles: the camera frames the attendant's aisle
+            } else if c.y - goal.y > dzy { goal.y = c.y - dzy } else if goal.y - c.y > dzy { goal.y = c.y + dzy }
+        } else {
+            goal = interiorCenter
+        }
+        goal.x = clampAxis(goal.x, half: half.w, size: worldW)
+        goal.y = clampAxis(goal.y, half: half.h, size: worldH)
+        let aim = CGPoint(x: peekX.map { clampAxis($0, half: half.w, size: worldW) } ?? goal.x, y: goal.y)
+        let k = snap ? 1 : CGFloat(1 - exp(-dt / 0.075))
+        focus.x += (aim.x - focus.x) * k
+        focus.y += (aim.y - focus.y) * k
+        world.setScale(camS)
+        worldBase = CGPoint(x: clear.midX - focus.x * camS, y: clear.midY - (worldH - focus.y) * camS)
+    }
+
+    /// Where a cabin point is on screen (scene coordinates), ignoring shake.
+    private func scenePoint(_ x: Double, _ y: Double) -> CGPoint {
+        CGPoint(x: worldBase.x + x * camS, y: worldBase.y + (worldH - y) * camS)
+    }
+
+    /// Stereo position for a sound at cabin x: -1 hard left … 1 hard right (GDD §8a).
+    func pan(forX x: Double) -> Float {
+        guard size.width > 1 else { return 0 }
+        let p = (scenePoint(x, 0).x - size.width / 2) / (size.width / 2)
+        return Float(max(-1, min(1, p)) * 0.8)
+    }
+
+    /// Off-screen problems pinned to the screen edge, and galley tabs for machines that are ready (GDD §8a).
+    private func updateMarkers(_ sim: FlightSimulation) {
+        var wanted: [String: (anchor: CGPoint, tex: SKTexture, color: UIColor, tap: (Double, Double), urgent: Bool)] = [:]
+        if following && game?.screen == .playing {
+            let view = clear.insetBy(dx: 6, dy: 6)
+            for o in sim.occurrences where !o.dead && !o.failed && !sim.isBehindCurtain(o) {
+                let a: (x: Double, y: Double) = o.kind.atSeat && o.passenger != nil ? sim.bubbleCenter(o) : (o.x, o.y)
+                let p = scenePoint(a.x, a.y)
+                guard !view.contains(p) else { continue }
+                let tap = o.passenger.map { (sim.passengers[$0].x, sim.passengers[$0].y) } ?? (o.x, o.y)
+                wanted["o\(o.id)"] = (p, Tex.icon(o), Palette.escalation(o.state), tap, o.state == .critical)
+            }
+            for (i, state) in sim.machines {
+                guard case .ready(let item, _) = state, sim.layout.bins.indices.contains(i) else { continue }
+                let b = sim.layout.bins[i]
+                let p = scenePoint(b.x, b.y)
+                guard !view.contains(p) else { continue }
+                let w = sim.warmth(ofMachine: i) ?? 1
+                wanted["m\(i)"] = (p, Tex.items[item]!, w < 0.3 ? Palette.critical : UIColor(hex: 0x6FD08C), (b.x, b.y), w < 0.3)
+            }
+        }
+        for (key, m) in markers where wanted[key] == nil {
+            markers[key] = nil
+            m.run(.sequence([.scale(to: 0, duration: 0.12), .removeFromParent()]))
+        }
+        let edge = clear.insetBy(dx: 30, dy: 30)
+        for (key, w) in wanted {
+            let m = markers[key] ?? {
+                let n = EdgeMarker()
+                n.setScale(0); n.run(.scale(to: 1, duration: 0.15))
+                markerLayer.addChild(n); markers[key] = n
+                return n
+            }()
+            let at = CGPoint(x: min(max(w.anchor.x, edge.minX), edge.maxX), y: min(max(w.anchor.y, edge.minY), edge.maxY))
+            m.position = CGPoint(x: at.x - cam.position.x, y: at.y - cam.position.y)
+            m.tap = w.tap
+            m.show(w.tex, color: w.color, pointing: atan2(w.anchor.y - at.y, w.anchor.x - at.x),
+                   pulse: w.urgent ? 1 + 0.12 * CGFloat(sin(clock * 12)) : 1)
+        }
+        if !wanted.isEmpty { game?.hintOnce("edgeMarkers", "Something needs you off screen: its icon waits at the edge. Tap it to go there, or drag along the cabin strip at the top to look.") }
+    }
+
+    /// The cabin strip under the HUD: the whole cabin, a dot per open problem and a box for the view.
+    private func updateStrip(_ sim: FlightSimulation) {
+        let half = visibleHalf
+        let iw = worldW - 2 * Self.hullMargin, ih = worldH - 2 * Self.hullMargin
+        let show = following && (half.w * 2 < iw - 1 || half.h * 2 < ih - 1)
+        strip.isHidden = !show || stripSlot == nil
+        guard show, let slot = stripSlot else { return }
+        let w = slot.width, h: CGFloat = sim.layout.aisles.count > 1 ? 22 : 14
+        strip.layout(width: w, height: h, aisles: sim.layout.aisles.map { CGFloat(($0 - Self.hullMargin) / ih) })
+        strip.position = CGPoint(x: slot.midX - cam.position.x, y: size.height - slot.midY - cam.position.y)
+        func sp(_ x: Double, _ y: Double) -> CGPoint {
+            CGPoint(x: CGFloat((x - Self.hullMargin) / iw - 0.5) * w, y: CGFloat(0.5 - (y - Self.hullMargin) / ih) * h)
+        }
+        var dots: [(CGPoint, UIColor)] = []
+        for o in sim.occurrences where !o.dead && !o.failed && !sim.isBehindCurtain(o) {
+            dots.append((sp(o.x, o.y), Palette.escalation(o.state)))
+        }
+        let box = CGRect(x: CGFloat((Double(focus.x) - half.w - Self.hullMargin) / iw - 0.5) * w,
+                         y: CGFloat(0.5 - (Double(focus.y) + half.h - Self.hullMargin) / ih) * h,
+                         width: CGFloat(half.w * 2 / iw) * w, height: CGFloat(half.h * 2 / ih) * h)
+        strip.sync(dots: dots, crew: sp(sim.crew.x, sim.crew.y), view: box)
+    }
+
+    /// A touch on the cabin strip: the cabin x under it, or nil when the strip isn't there.
+    private func stripX(_ touch: UITouch) -> Double? {
+        guard !strip.isHidden else { return nil }
+        let p = touch.location(in: strip)
+        guard abs(p.x) <= strip.width / 2 + 16, abs(p.y) <= strip.height / 2 + 16 else { return nil }
+        let f = Double(min(max(p.x / strip.width + 0.5, 0), 1))
+        return Self.hullMargin + f * (worldW - 2 * Self.hullMargin)
     }
 
     /// Cabin art, wings and bin highlights for one aircraft; rebuilt when the flight's aircraft changes.
@@ -357,6 +522,11 @@ final class CabinScene: SKScene {
         }
         shake = 0
         turbAmp = 0
+        markers.values.forEach { $0.removeFromParent() }
+        markers.removeAll()
+        peekX = nil; peekTouch = nil
+        camS = fitS; focus = interiorCenter; goal = focus
+        updateCamera(dt: 0, snap: !following)
     }
 
     override func update(_ currentTime: TimeInterval) {
@@ -375,6 +545,7 @@ final class CabinScene: SKScene {
             }
         }
         guard let sim = game?.sim else { return }
+        updateCamera(dt: dt)
 
         let turbulence = sim.turbulenceIntensity
         for (i, p) in sim.passengers.enumerated() where i < paxNodes.count {
@@ -532,7 +703,6 @@ final class CabinScene: SKScene {
         }
 
         let crew = sim.crew
-        crewNode.trayWarmth = crew.tray.indices.map { sim.warmth(ofTraySlot: $0) }
         // running (GDD §6a Hurry): smoke puffs kick up at the feet and speed lines trail behind, more the faster
         let running = crew.hurry > 1.05 && crew.target != nil && crew.busy == nil
         let strength = CGFloat(min(1, max(0, (crew.hurry - 1) / (Tuning.maxHurry - 1))))
@@ -552,8 +722,15 @@ final class CabinScene: SKScene {
                 n.xScale = 0.6 + 0.6 * strength + 0.15 * CGFloat(sin(clock * 30 + Double(k) * 2))
             }
         }
-        crewNode.sync(crew, clock: clock)
-        crewNode.position = pt(crew.x, crew.y)
+        for (i, c) in sim.crews.enumerated() {
+            let node = i == 0 ? crewNode : partnerNode
+            node.trayWarmth = c.tray.indices.map { sim.warmth(ofTraySlot: $0, crew: i) }
+            node.sync(c, clock: clock)
+            node.position = pt(c.x, c.y)
+        }
+        partnerNode.isHidden = !sim.twoCrew
+        activeMark.isHidden = !sim.twoCrew
+        if sim.twoCrew { activeMark.position = pt(crew.x, crew.y - 36 - 3 * sin(clock * 5)) }
         if let t = crew.target {
             targetMarker.isHidden = false
             targetMarker.position = pt(t.x, sim.layout.aisles[min(t.aisle, sim.layout.aisles.count - 1)] + 22)
@@ -582,6 +759,8 @@ final class CabinScene: SKScene {
         }
         let target = CGPoint(x: worldBase.x + offset.x, y: worldBase.y + offset.y)
         if world.position != target { world.position = target }
+        updateMarkers(sim)
+        updateStrip(sim)
     }
 
     func setCrewLook(skin: UIColor, hair: UIColor) { crewNode.setLook(skin: skin, hair: hair) }
@@ -606,6 +785,19 @@ final class CabinScene: SKScene {
     override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
         guard let touch = touches.first else { return }
         if game?.screen == .intro { game?.skipIntro(); return }
+        if game?.screen == .playing {
+            // the cabin strip: press and drag to look along the cabin; it springs back on release
+            if let x = stripX(touch) { peekTouch = touch; peekX = x; return }
+            // an edge marker: walk to what it points at
+            let c = touch.location(in: markerLayer)
+            if let m = markers.values.min(by: { hypot($0.position.x - c.x, $0.position.y - c.y)
+                                                 < hypot($1.position.x - c.x, $1.position.y - c.y) }),
+               hypot(m.position.x - c.x, m.position.y - c.y) < 30, let t = m.tap {
+                m.run(.sequence([.scale(to: 1.25, duration: 0.06), .scale(to: 1, duration: 0.1)]))
+                game?.tap(x: t.0, y: t.1)
+                return
+            }
+        }
         let p = touch.location(in: world)
         let x = Double(p.x), y = worldH - Double(p.y)
         if game?.screen == .playing {
@@ -617,6 +809,19 @@ final class CabinScene: SKScene {
         }
         game?.tap(x: x, y: y)
     }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let t = peekTouch, touches.contains(t) else { return }
+        let p = t.location(in: strip)
+        let f = Double(min(max(p.x / strip.width + 0.5, 0), 1))
+        peekX = Self.hullMargin + f * (worldW - 2 * Self.hullMargin)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        if let t = peekTouch, touches.contains(t) { peekTouch = nil; peekX = nil }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) { touchesEnded(touches, with: event) }
 
     // MARK: - One-shot effects
 
@@ -1174,3 +1379,85 @@ final class CrewNode: SKNode {
 }
 
 
+
+
+/// An off-screen problem or a ready machine, pinned to the screen edge with an arrow toward it (GDD §8a).
+final class EdgeMarker: SKNode {
+    private let disc = SKShapeNode(circleOfRadius: 19)
+    private let icon = SKSpriteNode()
+    private let arrow: SKShapeNode = {
+        let p = CGMutablePath()
+        p.move(to: CGPoint(x: 31, y: 0)); p.addLine(to: CGPoint(x: 21, y: 7)); p.addLine(to: CGPoint(x: 21, y: -7)); p.closeSubpath()
+        return SKShapeNode(path: p)
+    }()
+    private let pivot = SKNode()
+    var tap: (Double, Double)?
+
+    override init() {
+        super.init()
+        disc.fillColor = UIColor(white: 1, alpha: 0.96); disc.lineWidth = 3.5
+        icon.size = CGSize(width: 26, height: 26); icon.zPosition = 1
+        arrow.lineWidth = 0
+        pivot.addChild(arrow)
+        [pivot, disc, icon].forEach(addChild)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func show(_ tex: SKTexture, color: UIColor, pointing angle: CGFloat, pulse: CGFloat) {
+        if icon.texture !== tex { icon.texture = tex }
+        disc.strokeColor = color
+        arrow.fillColor = color
+        pivot.zRotation = angle
+        disc.setScale(pulse)
+    }
+}
+
+/// The thin cabin mini-map under the HUD: aisles, a dot per open problem, the crew and the camera's view box.
+final class CabinStrip: SKNode {
+    private let bg = SKShapeNode()
+    private let box = SKShapeNode()
+    private let crewDot = SKShapeNode(circleOfRadius: 3)
+    private var aisleLines: [SKShapeNode] = []
+    private var dots: [SKShapeNode] = []
+    private(set) var width: CGFloat = 0
+    private(set) var height: CGFloat = 0
+    private var aisleKey: [CGFloat] = []
+
+    override init() {
+        super.init()
+        bg.fillColor = UIColor(hex: 0x1B2A4A, alpha: 0.72); bg.strokeColor = UIColor(white: 1, alpha: 0.35); bg.lineWidth = 1
+        box.strokeColor = .white; box.lineWidth = 1.5; box.fillColor = UIColor(white: 1, alpha: 0.12); box.zPosition = 2
+        crewDot.fillColor = Palette.teal; crewDot.strokeColor = .white; crewDot.lineWidth = 1; crewDot.zPosition = 4
+        [bg, box, crewDot].forEach(addChild)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
+
+    func layout(width w: CGFloat, height h: CGFloat, aisles: [CGFloat]) {
+        guard w != width || h != height || aisles != aisleKey else { return }
+        width = w; height = h; aisleKey = aisles
+        bg.path = CGPath(roundedRect: CGRect(x: -w / 2, y: -h / 2, width: w, height: h), cornerWidth: 5, cornerHeight: 5, transform: nil)
+        aisleLines.forEach { $0.removeFromParent() }
+        aisleLines = aisles.map { f in
+            let y = (0.5 - f) * h
+            let l = SKShapeNode(rect: CGRect(x: -w / 2 + 3, y: y - 0.75, width: w - 6, height: 1.5))
+            l.fillColor = Palette.coral.withAlphaComponent(0.7); l.lineWidth = 0; l.zPosition = 1
+            addChild(l)
+            return l
+        }
+    }
+
+    func sync(dots list: [(CGPoint, UIColor)], crew: CGPoint, view: CGRect) {
+        while dots.count < list.count {
+            let d = SKShapeNode(circleOfRadius: 2.6); d.lineWidth = 0; d.zPosition = 3
+            addChild(d); dots.append(d)
+        }
+        for (k, d) in dots.enumerated() {
+            d.isHidden = k >= list.count
+            if k < list.count { d.position = list[k].0; d.fillColor = list[k].1 }
+        }
+        crewDot.position = crew
+        box.path = CGPath(roundedRect: view, cornerWidth: 3, cornerHeight: 3, transform: nil)
+    }
+}

@@ -41,6 +41,11 @@ struct GameView: View {
                     .ignoresSafeArea()
                     .transition(.opacity)                    // a plain fade: no bounce
                 }
+                if game.twoCrew && (game.screen == .playing || game.screen == .countdown) {
+                    CrewSwitchButton(game: game)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        .padding(.leading, 14).padding(.bottom, 10)
+                }
                 overlay.ignoresSafeArea()
                 if game.screen == .intro { IntroLetterbox(game: game).transition(.opacity) }
             }
@@ -143,7 +148,16 @@ struct HUDBar: View {
                 if game.seatbelt { SeatbeltSign() }
             }
             Spacer(minLength: 4)
-            if game.seatPrompt != .none { SeatPromptPill(prompt: game.seatPrompt) }
+            if game.seatPrompt != .none {
+                SeatPromptPill(prompt: game.seatPrompt)
+            } else {
+                // where the scene draws the cabin strip (GDD §8a Follow camera)
+                Color.clear
+                    .frame(minWidth: 110, maxWidth: 230)
+                    .frame(height: 22)
+                    .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { game.scene.stripSlot = $0 }
+                    .onDisappear { game.scene.stripSlot = nil }
+            }
             Spacer(minLength: 4)
             StreakBadge(streak: game.streak)
             VStack(alignment: .leading, spacing: 4) {
@@ -191,6 +205,31 @@ struct HUDBar: View {
     /// The bar fills towards the 3-star target; the ticks mark 1 and 2 stars.
     private var progress: CGFloat { min(1, CGFloat(game.satisfaction) / CGFloat(max(1, top))) }
     private var satColor: Color { earned >= 2 ? .teal : Color(uiColor: Palette.calm) }
+}
+
+/// Twin-aisle planes: switches control and the camera to the other attendant. A red dot shows when the other
+/// side has an urgent or critical problem (GDD §8a Two attendants).
+struct CrewSwitchButton: View {
+    let game: GameController
+    var body: some View {
+        Button { game.switchCrew() } label: {
+            ZStack(alignment: .topTrailing) {
+                Image(systemName: game.activeCrew == 0 ? "arrow.down" : "arrow.up")
+                    .font(.system(size: 18, weight: .heavy))
+                    .foregroundStyle(Color.text)
+                    .frame(width: 46, height: 46)
+                    .background(Circle().fill(Color.panel))
+                    .overlay(Circle().stroke(Color.navy, lineWidth: 2.5))
+                if game.partnerAlert {
+                    Circle().fill(Color(uiColor: Palette.critical)).frame(width: 14, height: 14)
+                        .overlay(Circle().stroke(Color.white, lineWidth: 2))
+                        .offset(x: 4, y: -4)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(game.activeCrew == 0 ? "Switch to the bottom aisle" : "Switch to the top aisle")
+    }
 }
 
 /// The ×1–×4 streak multiplier: it pops when it climbs and drops back to ×1 on a mistake (GDD §2 Scoring).

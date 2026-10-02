@@ -67,7 +67,10 @@ final class IntensityReportTests: XCTestCase {
         var seen = Set<Int>(), fuses: [Double] = [], kinds = Set<String>()
         var n = 0
         while sim.phase != .ended && n < 30_000 {
-            if sim.crew.busy == nil && sim.crew.target == nil && sim.crew.queued == nil { botAct(sim) }
+            for i in sim.crews.indices {
+                let c = sim.crews[i]
+                if c.busy == nil && c.target == nil && c.queued == nil { sim.select(i); botAct(sim) }
+            }
             sim.update(dt: dt)
             _ = sim.drainEvents()
             for o in sim.occurrences where !seen.contains(o.id) {

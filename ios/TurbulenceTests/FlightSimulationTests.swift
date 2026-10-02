@@ -44,6 +44,52 @@ final class FlightSimulationTests: XCTestCase {
 
     // MARK: Escalation
 
+    // MARK: - Two attendants (GDD §8a)
+
+    func testTwinAislePlanesHaveOneAttendantPerAisle() {
+        let sim = runningSim(plan: flight("TB307"))
+        XCTAssertTrue(sim.twoCrew)
+        XCTAssertEqual(sim.crews.count, 2)
+        XCTAssertEqual(sim.crews[0].aisle, 0)
+        XCTAssertEqual(sim.crews[1].aisle, sim.layout.aisles.count - 1)
+        XCTAssertFalse(runningSim(plan: flight("TB201")).twoCrew)
+    }
+
+    func testAProblemGoesToTheAttendantOnItsSide() {
+        let sim = runningSim(plan: flight("TB307"))
+        step(sim, seconds: 2)
+        let bottom = sim.layout.aisles.count - 1
+        guard let pi = sim.passengers.indices.first(where: { sim.passengers[$0].aisle == bottom }) else { return XCTFail("no passenger") }
+        _ = sim.addAtSeat(.call, passenger: pi, steps: [.hands], fuse: 30)
+        XCTAssertEqual(sim.active, 0)
+        sim.tap(x: sim.passengers[pi].x, y: sim.passengers[pi].y)
+        XCTAssertEqual(sim.active, 0, "control stays with the attendant you're playing")
+        let partner = sim.crews[1]
+        XCTAssertTrue(partner.target != nil || partner.queued != nil, "the bottom-aisle attendant takes it")
+        XCTAssertNil(sim.crews[0].target, "the top-aisle attendant stays put")
+    }
+
+    func testSwitchingMovesControlToTheOtherAttendant() {
+        let sim = runningSim(plan: flight("TB307"))
+        step(sim, seconds: 2)
+        sim.switchCrew()
+        XCTAssertEqual(sim.active, 1)
+        sim.tap(x: 600, y: sim.layout.aisles[sim.homeAisle(1)])
+        XCTAssertNotNil(sim.crews[1].target ?? sim.crews[1].queued)
+        sim.switchCrew()
+        XCTAssertEqual(sim.active, 0)
+    }
+
+    func testTheOtherAttendantBucklesInByThemselves() {
+        let sim = FlightSimulation(plan: flight("TB307"), seed: 7)
+        sim.cartMode = .none; sim.strollsEnabled = false; sim.sleepEnabled = false
+        sim.turbulenceSchedule = [TurbulenceBump(start: Tuning.boardingEnds + 4, duration: 6, intensity: 0.4)]
+        sim.start()
+        step(sim, seconds: Tuning.boardingEnds + 3.8)
+        step(sim, seconds: 6)
+        XCTAssertNotNil(sim.crews[1].seated, "the partner found a jump seat")
+    }
+
     func testEscalationThresholds() {
         XCTAssertEqual(Escalation.forFraction(0), .calm)
         XCTAssertEqual(Escalation.forFraction(0.449), .calm)

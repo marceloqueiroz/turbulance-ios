@@ -42,7 +42,14 @@ func botAct(_ sim: FlightSimulation) {
         }
     }
     if crew.tray.contains(where: \.isCold) { return trash() }
-    let live = sim.occurrences.filter { !$0.dead }
+    // what this attendant can act on: their own side (two attendants), and off-screen problems only once they've
+    // been there a moment (the follow camera's awareness cost, GDD §8a)
+    let half = CameraRig.visibleHalf(sim.layout)
+    func noticed(_ o: Occurrence) -> Bool {
+        let onScreen = abs(o.x - crew.x) <= half.w && abs(o.y - crew.y) <= half.h + 40
+        return onScreen || o.life >= BotSkill.offScreenDelay
+    }
+    let live = sim.occurrences.filter { !$0.dead && (!sim.twoCrew || sim.owner(of: $0) == sim.active) && noticed($0) }
         .sorted { ($0.failed ? -1 : $0.age / $0.fuse) > ($1.failed ? -1 : $1.age / $1.fuse) }
     for o in live {
         switch o.need {
@@ -66,6 +73,7 @@ enum BotSkill {
     static let expert = 0.0          // reacts at once and never wastes a step: a near-perfect run
     static let mid = 0.75            // a decent player: 2★ is fitted to this one
     static let novice = 1.5          // a newcomer: notices things late and thinks before each move
+    static let offScreenDelay = 1.0  // seconds before a problem off screen gets noticed (its edge marker)
 }
 
 /// Flies a whole flight with the bot. `onFrame` runs after every update (for measuring).
@@ -77,11 +85,24 @@ func flyWithBot(_ plan: FlightPlan, seed: UInt64, reaction: Double = BotSkill.ex
     var thinkingSince: Double?
     var n = 0
     while sim.phase != .ended && n < 40_000 {
-        let free = sim.crew.busy == nil && sim.crew.target == nil && sim.crew.queued == nil
-        if free {
+        // one decision at a time, like a player: with two attendants it acts for whichever is free (GDD §8a)
+        let free = sim.crews.indices.filter { i in
+            let c = sim.crews[i]
+            return c.busy == nil && c.target == nil && c.queued == nil
+        }
+        if !free.isEmpty {
             let since = thinkingSince ?? sim.t
             thinkingSince = since
-            if sim.t - since >= reaction { botAct(sim); thinkingSince = nil }
+            if sim.t - since >= reaction {
+                for i in free {
+                    if sim.active != i { sim.select(i) }
+                    botAct(sim)
+                    let c = sim.crews[i]
+                    let acted = c.busy != nil || c.target != nil || c.queued != nil
+                    if acted && reaction > 0 { break }   // an expert decides at once for both; anyone else, one at a time
+                }
+                thinkingSince = nil
+            }
         } else {
             thinkingSince = nil
         }

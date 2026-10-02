@@ -449,7 +449,16 @@ final class FlightSimulation {
     private(set) var machines: [Int: MachineState] = [:]
     private(set) var helper: Helper?
     private(set) var mealServiceOn = false
-    var crew = Crew()
+    /// One attendant per aisle on twin-aisle planes (GDD §8a Two attendants). `active` is the one the player
+    /// controls (and the camera follows); `crew` is whichever one the simulation is working on, normally the active one.
+    private(set) var crews = [Crew()]
+    private(set) var active = 0
+    private var cur = 0
+    var crew: Crew {
+        get { crews[cur] }
+        set { crews[cur] = newValue }
+    }
+    var twoCrew: Bool { crews.count > 1 }
     /// Set from the plan; tests switch them off to keep older scenarios deterministic.
     var turbulenceSchedule: [TurbulenceBump]
     var strollsEnabled: Bool
@@ -488,6 +497,12 @@ final class FlightSimulation {
         cartMode = plan.cart
         rng = SplitMix64(seed: seed)
         crew.y = layout.aisles[0]
+        if layout.aisles.count > 1 {
+            var partner = Crew()
+            partner.aisle = layout.aisles.count - 1
+            partner.y = layout.aisles[partner.aisle]
+            crews.append(partner)
+        }
         let bias = plan.story.bias
         let weights = Archetype.allCases.map { bias[$0] ?? 1 }
         var id = 0
@@ -557,13 +572,60 @@ final class FlightSimulation {
             hint("galleyClosed", "The forward galley is closed today. Supplies come from the middle and the back.")
         }
         let startX = plan.twist == .galleyClosed ? layout.firstRowX + 40 : 120
-        if crew.seated != nil {
-            // buckled in for the countdown: unbuckle on Go and walk to the start position (GDD §8b)
-            crew.busy = BusyAction(duration: Tuning.unbuckleDuration, task: .unbuckle)
-            crew.queued = CrewTarget(x: startX, aisle: 0, action: .none)
-        } else {
-            crew.x = startX
+        for i in crews.indices {
+            withCrew(i) {
+                if crew.seated != nil {
+                    // buckled in for the countdown: unbuckle on Go and walk to the start position (GDD §8b)
+                    crew.busy = BusyAction(duration: Tuning.unbuckleDuration, task: .unbuckle)
+                    crew.queued = CrewTarget(x: startX, aisle: homeAisle(i), action: .none)
+                } else {
+                    crew.x = startX
+                }
+            }
         }
+    }
+
+    // MARK: - Two attendants (GDD §8a)
+
+    /// Runs `body` with `crew` pointing at attendant `i`.
+    private func withCrew(_ i: Int, _ body: () -> Void) {
+        let saved = cur
+        cur = i
+        body()
+        cur = saved
+    }
+
+    /// The aisle an attendant serves: the first one takes the top aisle, the second the bottom one.
+    func homeAisle(_ i: Int) -> Int { i == 0 ? 0 : layout.aisles.count - 1 }
+
+    /// Which attendant serves a problem: the one whose aisle it's on.
+    func owner(of o: Occurrence) -> Int { crews.indices.first { homeAisle($0) == o.aisle } ?? active }
+
+    /// The other attendant has an urgent or critical problem waiting on their side (the switch button's dot).
+    var partnerNeedsYou: Bool {
+        guard twoCrew else { return false }
+        return occurrences.contains { !$0.dead && !$0.failed && $0.state != .calm && owner(of: $0) != active }
+    }
+
+    /// Switches which attendant the player controls (and the camera follows).
+    func switchCrew() {
+        guard twoCrew else { return }
+        let left = active
+        active = (active + 1) % crews.count
+        cur = active
+        if seatbeltOn { withCrew(left) { autoBuckle() } }       // the one you leave buckles in by themselves
+        hint("switchCrew", "Two aisles, two attendants. Tap a problem and the attendant on that side goes. Switch to follow the other one.")
+    }
+
+    /// Makes attendant `i` the active one (the test bot plays both).
+    func select(_ i: Int) { active = i; cur = i }
+
+    /// The attendant you're not controlling buckles in by themselves when the seatbelt sign comes on.
+    private func autoBuckle() {
+        guard crew.seated == nil, let j = nearestJumpSeat() else { return }
+        let js = layout.jumpSeats[j]
+        let t = CrewTarget(x: js.x, aisle: js.aisle, action: .jumpSeat(j))
+        if crew.busy != nil { crew.queued = t } else { crew.target = t }
     }
 
     func update(dt: Double) {
@@ -603,9 +665,13 @@ final class FlightSimulation {
         }
         occurrences.removeAll { $0.dead }
 
-        moveCrew(dt: dt)
+        for i in crews.indices {
+            withCrew(i) {
+                moveCrew(dt: dt)
+                coolTray(dt: dt)
+            }
+        }
         markSeen()
-        coolTray(dt: dt)
         moveHelper(dt: dt)
         occurrences.removeAll { $0.dead }
 
@@ -811,7 +877,7 @@ final class FlightSimulation {
         let taken = occurrences.filter { !$0.kind.atSeat && !$0.dead && $0.aisle == a }.map { $0.row }
         let x = layout.rows[r].x
         return !taken.contains { abs($0 - r) <= 1 }
-            && !(a == crew.aisle && abs(x - crew.x) < 60)
+            && !crews.contains { $0.aisle == a && abs(x - $0.x) < 60 }
             && !(cart.map { $0.aisle == a && abs($0.x - x) < 60 } ?? false)
     }
 
@@ -1069,7 +1135,8 @@ final class FlightSimulation {
     }
 
     /// How hot the k-th item on the tray still is, 0…1 (nil if it isn't a hot item).
-    func warmth(ofTraySlot k: Int) -> Double? {
+    func warmth(ofTraySlot k: Int, crew i: Int? = nil) -> Double? {
+        let crew = crews[i ?? cur]
         guard k < crew.tray.count else { return nil }
         let item = crew.tray[k]
         guard let full = item.keepsHotFor else { return nil }
@@ -1107,7 +1174,7 @@ final class FlightSimulation {
     /// the curtain hides it (GDD §4a N737-Swift). The icon appears once it gets urgent.
     func isBehindCurtain(_ o: Occurrence) -> Bool {
         guard !o.seen, let pi = o.passenger, passengers[pi].premium, o.state == .calm, let curtain = layout.curtainX else { return false }
-        return crew.x > curtain
+        return crews.allSatisfy { $0.x > curtain }
     }
 
     /// Once a request has been on screen it stays there, even if the crew walks back behind the curtain.
@@ -1206,8 +1273,10 @@ final class FlightSimulation {
                 target = layout.firstRowX - 40
             }
             // the crew in the way holds the cart up
-            let blocked = crew.aisle == c.aisle && abs(crew.y - layout.aisles[c.aisle]) < 1
-                && (crew.x - c.x) * c.dir > 0 && abs(crew.x - c.x) < 30
+            let blocked = crews.contains { crew in
+                crew.aisle == c.aisle && abs(crew.y - layout.aisles[c.aisle]) < 1
+                    && (crew.x - c.x) * c.dir > 0 && abs(crew.x - c.x) < 30
+            }
             if !blocked {
                 let d = target - c.x
                 if abs(d) <= Tuning.cartSpeed * dt {
@@ -1290,16 +1359,21 @@ final class FlightSimulation {
             events.append(.seatbelt(on: true))
             emitToast("Cabin crew, take your seats! Tap a jump seat (they light up) before the turbulence hits.")
             sendStrollersBack()
+            for i in crews.indices where i != active { withCrew(i) { autoBuckle() } }
         case .active(let intensity):
             if previous == .none { events.append(.seatbelt(on: true)) }
             events.append(.turbulence(intensity: intensity))
             stumbleStandingPassengers()
             sendStrollersBack()
             if crew.seated == nil && !isBuckling { crewStumble() }
+            for i in crews.indices where i != active { withCrew(i) { autoBuckle() } }
         case .none:
             events.append(.turbulence(intensity: 0))
             events.append(.seatbelt(on: false))
             if crew.seated != nil { emitToast("All clear. Tap anywhere to unbuckle and get back to work.") }
+            for i in crews.indices where i != active {
+                withCrew(i) { if crew.seated != nil { crew.busy = BusyAction(duration: Tuning.unbuckleDuration, task: .unbuckle) } }
+            }
             // the problems that waited arrive now
             for _ in 0..<deferredSpawns { spawn(rollKind()) }
             deferredSpawns = 0
@@ -1454,7 +1528,7 @@ final class FlightSimulation {
         let candidates = passengers.indices.filter { i in
             let p = passengers[i]
             return p.stroll == nil && !p.sick && !p.grumpy && !p.asleep && !p.hasKid && !p.vip
-                && !busy.contains(i) && !(p.aisle == crew.aisle && abs(p.x - crew.x) < 40)
+                && !busy.contains(i) && !crews.contains { p.aisle == $0.aisle && abs(p.x - $0.x) < 40 }
         }
         guard !candidates.isEmpty else { return }
         let i = candidates[pickWeighted(candidates.map { passengers[$0].archetype == .chatterbox ? 2.5 : 1 })]
@@ -1525,6 +1599,10 @@ final class FlightSimulation {
     func tap(x: Double, y: Double, choice: Item? = nil) {
         guard running else { return }
         let target = target(forTapAt: x, y)
+        // two attendants: a problem goes to the attendant on its side; anything else to the one you control
+        cur = active
+        if twoCrew, let o = occurrence(for: target) { cur = owner(of: o) }
+        defer { cur = active }
         crew.choice = choice
         if crew.target != nil, crew.busy == nil, crew.seated == nil, t - crew.lastTap < Tuning.hurryTapWindow {
             crew.hurry = min(Tuning.maxHurry, crew.hurry + Tuning.hurryStep)
@@ -1538,6 +1616,19 @@ final class FlightSimulation {
             return
         }
         if crew.busy != nil { crew.queued = target } else { crew.target = target }
+    }
+
+    /// The problem a tap target is about, if any.
+    private func occurrence(for target: CrewTarget) -> Occurrence? {
+        switch target.action {
+        case .clear(let id): return occurrences.first { $0.id == id }
+        case .seat(let row, let seat):
+            return occurrences.first { o in
+                guard !o.dead, let pi = o.passenger else { return false }
+                return passengers[pi].row == row && passengers[pi].seat == seat
+            }
+        case .none, .bin, .jumpSeat: return nil
+        }
     }
 
     /// Where a jump seat is drawn: at the edge of its aisle.
@@ -1646,7 +1737,7 @@ final class FlightSimulation {
             crew.bubbleTime -= dt
             if crew.bubbleTime <= 0 { crew.bubble = nil }
         }
-        if crew.seated == nil && turbulenceIntensity > 0 && !isBuckling {
+        if crew.seated == nil && turbulenceIntensity > 0 && !isBuckling && cur == active {
             crew.stumbleTimer -= dt                  // still standing: stumble every few seconds until seated
             if crew.stumbleTimer <= 0 && crew.busy?.task != .knockedDown { crewStumble() }
         }
@@ -1880,11 +1971,13 @@ final class FlightSimulation {
 
     /// The attendant ends the intro buckled into the forward jump seat, and waits there through the countdown.
     func seatCrewForCountdown() {
-        guard let i = layout.jumpSeats.indices.first(where: { layout.jumpSeats[$0].aisle == 0 }) else { return }
-        let j = layout.jumpSeats[i]
-        crew.x = j.x; crew.aisle = j.aisle; crew.y = layout.aisles[j.aisle]
-        crew.seated = i
-        crew.face = 1
+        for k in crews.indices {
+            guard let i = layout.jumpSeats.indices.first(where: { layout.jumpSeats[$0].aisle == homeAisle(k) }) else { continue }
+            let j = layout.jumpSeats[i]
+            crews[k].x = j.x; crews[k].aisle = j.aisle; crews[k].y = layout.aisles[j.aisle]
+            crews[k].seated = i
+            crews[k].face = 1
+        }
     }
 
     /// Puts a passenger in the aisle (tests and staged scenes).

@@ -25,6 +25,26 @@ enum Aircraft: String, CaseIterable, Equatable {
     }
 }
 
+extension Aircraft {
+    /// The follow camera's zoom (GDD §8a Follow camera); nil = fixed camera, the whole cabin fits on screen.
+    var followZoom: Double? { self == .comet ? nil : 0.83 }
+}
+
+/// What the follow camera shows, in cabin units, on a reference phone (iPhone 17 Pro in landscape, clear of the
+/// HUD and cutout). The renderer uses the real screen; the test bot uses this to know what's off screen.
+enum CameraRig {
+    static let referenceView = (w: 828.0, h: 350.0)
+    static let hullMargin = 22.0
+
+    /// Half the visible width and height around the camera's centre, in cabin units.
+    static func visibleHalf(_ layout: CabinLayout, view: (w: Double, h: Double) = referenceView) -> (w: Double, h: Double) {
+        let iw = layout.width - 2 * hullMargin, ih = layout.height - 2 * hullMargin
+        let fit = min(view.w / iw, view.h / ih)
+        let s = max(fit, layout.aircraft.followZoom ?? fit)
+        return (min(iw, view.w / s) / 2, min(ih, view.h / s) / 2)
+    }
+}
+
 struct SeatSpot: Equatable {
     let y: Double
     let aisle: Int            // which aisle the crew serves this seat from

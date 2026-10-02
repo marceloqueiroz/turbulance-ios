@@ -32,6 +32,10 @@ final class GameController {
     var muted = false
     var result: FlightResult?
     var seatbelt = false
+    /// Twin-aisle planes: two attendants and a switch button, with a dot when the other side needs you (GDD §8a).
+    var twoCrew = false
+    var partnerAlert = false
+    var activeCrew = 0
     /// The menu over a drinks machine or oven, in view coordinates (GDD §6a).
     var picker: MachinePicker?
     struct MachinePicker: Equatable {
@@ -220,6 +224,15 @@ final class GameController {
         sim.tap(x: x, y: y)
     }
 
+    /// The switch button: control (and the camera) moves to the other attendant.
+    func switchCrew() {
+        guard screen == .playing, sim.twoCrew else { return }
+        picker = nil
+        sim.switchCrew()
+        synth.play(.pick)
+        if haptics { bump.impactOccurred(intensity: 0.6) }
+    }
+
     /// The player picked something on a machine's menu: walk there and start it.
     func pick(_ item: Item) {
         guard let p = picker, screen == .playing else { picker = nil; return }
@@ -242,16 +255,25 @@ final class GameController {
         syncHUD()
     }
 
+    /// Shows a one-time tip (kept across launches), e.g. the first time the follow camera hides something.
+    func hintOnce(_ key: String, _ text: String) {
+        let k = "hint." + key
+        guard screen == .playing, !UserDefaults.standard.bool(forKey: k) else { return }
+        UserDefaults.standard.set(true, forKey: k)
+        toast = text
+        toastTimer = 6.5
+    }
+
     private func handle(_ e: SimEvent) {
         scene.play(e)
         switch e {
-        case .spawned(let kind, _, _): synth.play(kind == .sick ? .sick : .spill)
-        case .stepDone, .mopped: synth.play(.step)
-        case .resolved: synth.play(.ok)
-        case .failed: synth.play(.fail)
+        case .spawned(let kind, let x, _): synth.play(kind == .sick ? .sick : .spill, pan: scene.pan(forX: x))
+        case .stepDone(let x, _), .mopped(let x, _): synth.play(.step, pan: scene.pan(forX: x))
+        case .resolved(let x, _, _, _, _): synth.play(.ok, pan: scene.pan(forX: x))
+        case .failed(let x, _): synth.play(.fail, pan: scene.pan(forX: x))
         case .picked: synth.play(.pick)
         case .trashed: synth.play(.step)
-        case .machineReady: synth.play(.ok)
+        case .machineReady(let i): synth.play(.ok, pan: scene.pan(forX: sim.layout.bins[i].x))
         case .machineCold: synth.play(.nope)
         case .nope: synth.play(.nope)
         case .seatbelt(let on):
@@ -262,7 +284,7 @@ final class GameController {
                 synth.play(.rumble)
                 if haptics { jolt.impactOccurred(intensity: min(1, 0.5 + intensity)) }
             }
-        case .stumble: synth.play(.whoa)
+        case .stumble(let x, _): synth.play(.whoa, pan: scene.pan(forX: x))
         case .crewStumble:
             synth.play(.fail)
             if haptics { jolt.impactOccurred(intensity: 1) }
@@ -283,8 +305,8 @@ final class GameController {
         case .jumpSeatsAway: break
         case .wrongItem:
             if haptics { jolt.impactOccurred(intensity: 0.6) }
-        case .paxSlipped:
-            synth.play(.whoa)
+        case .paxSlipped(let x, _):
+            synth.play(.whoa, pan: scene.pan(forX: x))
             if haptics { jolt.impactOccurred(intensity: 0.5) }
         case .cart(let out): if out { synth.play(.chime) }
         case .toast(let text):
@@ -307,11 +329,12 @@ final class GameController {
     /// Repeating cues while something is ongoing: grumbles from the loudest waiting passenger,
     /// haptic bumps while the cabin shakes.
     private func playAmbience(_ dt: Double) {
-        let loudest = sim.occurrences.map(sim.noiseLevel).max() ?? 0
-        if loudest > 0 {
+        let loud = sim.occurrences.max { sim.noiseLevel($0) < sim.noiseLevel($1) }
+        let loudest = loud.map(sim.noiseLevel) ?? 0
+        if loudest > 0, let loud {
             grumbleTimer -= dt
             if grumbleTimer <= 0 {
-                synth.play(loudest >= 2 ? .grumbleLoud : .grumble)
+                synth.play(loudest >= 2 ? .grumbleLoud : .grumble, pan: scene.pan(forX: loud.x))
                 grumbleTimer = loudest >= 2 ? 1.6 : 3.2
             }
         } else {
@@ -348,5 +371,8 @@ final class GameController {
         if sat != satisfaction { satisfaction = sat }
         if sim.streak != streak { streak = sim.streak }
         if sim.plan.targets != starTargets { starTargets = sim.plan.targets }
+        if sim.twoCrew != twoCrew { twoCrew = sim.twoCrew }
+        if sim.partnerNeedsYou != partnerAlert { partnerAlert = sim.partnerNeedsYou }
+        if sim.active != activeCrew { activeCrew = sim.active }
     }
 }

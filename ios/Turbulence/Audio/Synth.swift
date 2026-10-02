@@ -129,17 +129,19 @@ final class Synth {
         do { try engine.start(); started = true } catch { started = false }
     }
 
-    func play(_ s: Sound) {
+    /// `pan` (-1 left … 1 right) places a sound where it happens in the cabin (GDD §8a Follow camera).
+    func play(_ s: Sound, pan: Float = 0) {
         guard let buffer = buffers[s] else { return }
-        play(buffer)
+        play(buffer, pan: pan)
     }
 
-    private func play(_ buffer: AVAudioPCMBuffer) {
+    private func play(_ buffer: AVAudioPCMBuffer, pan: Float) {
         guard !muted, started else { return }
         if !engine.isRunning { try? engine.start() }
         let p = players[nextPlayer]
         nextPlayer = (nextPlayer + 1) % players.count
         p.stop()
+        p.pan = max(-1, min(1, pan))
         p.scheduleBuffer(buffer, at: nil)
         p.play()
     }
