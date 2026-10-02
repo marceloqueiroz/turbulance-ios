@@ -1,6 +1,7 @@
 import Foundation
 import Observation
 import SpriteKit
+import SwiftUI
 import UIKit
 
 struct FlightResult: Equatable {
@@ -55,6 +56,8 @@ final class GameController {
     var intro3D: IntroScene3D?
     /// "3", "2", "1", "Go!" after the intro, before the flight clock starts.
     var countdownText: String?
+    /// The fade through black between the intro and the play view (GDD §8b), 0…1.
+    var blackout = 0.0
 
     /// Called once when a flight lands, before the scorecard shows.
     @ObservationIgnored var onEnded: ((FlightPlan, FlightResult) -> Void)?
@@ -113,6 +116,8 @@ final class GameController {
     func start(_ plan: FlightPlan, intro: Bool = true) {
         synth.warmUp()
         scene.removeAction(forKey: "countdown")
+        scene.removeAction(forKey: "fade")
+        blackout = 0
         countdownText = nil
         self.plan = plan
         sim = FlightSimulation(plan: plan)
@@ -160,9 +165,21 @@ final class GameController {
         synth.stopCaptain()
         introTitle = nil
         introSubtitle = nil
-        intro3D = nil
+        guard intro3D != nil else { enterCountdown(); return }
+        // out of the cutscene through black: fade out, swap to the play view framed on the attendant, fade in
+        withAnimation(.easeIn(duration: 0.35)) { blackout = 1 }
+        scene.run(.sequence([.wait(forDuration: 0.4), .run { [weak self] in
+            guard let self else { return }
+            self.intro3D = nil
+            self.enterCountdown()
+            withAnimation(.easeOut(duration: 0.5)) { self.blackout = 0 }
+        }]), withKey: "fade")
+    }
+
+    private func enterCountdown() {
         sim.seatCrewForCountdown()             // buckled into the forward jump seat until Go
         screen = .countdown
+        scene.snapCamera()
         var steps: [SKAction] = [.wait(forDuration: 0.35)]
         for (n, sound) in [("3", Synth.Sound.count3), ("2", .count2), ("1", .count1)] {
             steps += [.run { [weak self] in self?.countdownText = n; self?.synth.play(sound) }, .wait(forDuration: 1.0)]

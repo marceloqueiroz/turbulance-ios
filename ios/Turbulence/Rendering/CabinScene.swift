@@ -240,8 +240,8 @@ final class CabinScene: SKScene {
     private var following: Bool {
         guard let g = game, g.sim.plan.aircraft.followZoom != nil else { return false }
         switch g.screen {
-        case .playing, .paused, .ended: return true
-        case .idle, .intro, .countdown: return false
+        case .countdown, .playing, .paused, .ended: return true
+        case .idle, .intro: return false
         }
     }
 
@@ -525,8 +525,16 @@ final class CabinScene: SKScene {
         markers.values.forEach { $0.removeFromParent() }
         markers.removeAll()
         peekX = nil; peekTouch = nil
+        layoutWorld()                                    // the new plane's fit, before anything is drawn
         camS = fitS; focus = interiorCenter; goal = focus
         updateCamera(dt: 0, snap: !following)
+    }
+
+    /// Jumps the camera straight to its follow frame on the attendant (under the intro's fade to black).
+    func snapCamera() {
+        if following, let c = game?.sim.crew { goal = CGPoint(x: c.x, y: c.y) }
+        updateCamera(dt: 0, snap: true)
+        world.position = worldBase
     }
 
     override func update(_ currentTime: TimeInterval) {

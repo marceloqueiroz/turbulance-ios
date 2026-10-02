@@ -48,6 +48,7 @@ struct GameView: View {
                 }
                 overlay.ignoresSafeArea()
                 if game.screen == .intro { IntroLetterbox(game: game).transition(.opacity) }
+                Color.black.opacity(game.blackout).ignoresSafeArea().allowsHitTesting(false)
             }
             .onAppear { updateInsets(geo) }
             .onChange(of: geo.size) { _, _ in updateInsets(geo) }
