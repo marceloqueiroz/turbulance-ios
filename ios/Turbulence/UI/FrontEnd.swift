@@ -50,39 +50,56 @@ struct RootView: View {
     }
 }
 
-// MARK: - Splash (GDD §9a): a plane taxis in, the logo lands, then on to the map by itself
+// MARK: - Splash (GDD §9a): the cabin flies in through the clouds, the logo lands, then on to the map by itself
 
 struct SplashView: View {
     let done: () -> Void
-    @State private var taxied = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var start = Date.now
+    @State private var arrived = false
     @State private var logo = false
     @State private var finished = false
 
+    /// Cloud layers back to front: asset, height and vertical centre (fractions of the screen),
+    /// drift speed (screen widths per second), starting x (fraction), blur and opacity for depth.
+    private static let clouds: [(name: String, height: CGFloat, y: CGFloat, speed: CGFloat, x: CGFloat, blur: CGFloat, opacity: Double)] = [
+        ("TitleCloud5", 0.12, 0.16, 0.025, 0.08, 2, 0.45),
+        ("TitleCloud4", 0.15, 0.80, 0.030, 0.40, 2, 0.45),
+        ("TitleCloud3", 0.18, 0.30, 0.045, 0.62, 1, 0.65),
+        ("TitleCloud2", 0.24, 0.64, 0.060, 0.02, 0.5, 0.8),
+        ("TitleCloud1", 0.34, 0.95, 0.090, 0.70, 3, 0.9),   // foreground, cropped by the bottom edge
+    ]
+
     var body: some View {
         GeometryReader { geo in
-            ZStack {
-                LinearGradient(colors: [Color(red: 0.16, green: 0.27, blue: 0.47), .sky], startPoint: .topLeading, endPoint: .bottomTrailing)
-                    .ignoresSafeArea()
-                // runway: the coral livery stripe
-                Rectangle().fill(Color.coral).frame(height: 6).offset(y: 44)
-                HStack(spacing: 18) {
-                    ForEach(0..<14, id: \.self) { _ in Capsule().fill(Color.cream.opacity(0.5)).frame(width: 22, height: 3) }
+            let size = geo.size
+            TimelineView(.animation(paused: reduceMotion)) { timeline in
+                let t = timeline.date.timeIntervalSince(start)
+                ZStack {
+                    LinearGradient(colors: [Color(red: 0.16, green: 0.27, blue: 0.47), .sky], startPoint: .top, endPoint: .bottom)
+                    ForEach(Self.clouds.indices.dropLast(), id: \.self) { cloud(Self.clouds[$0], t: t, in: size) }
+                    // the cabin rides the bumps: a slow bob and a gentle roll, slightly out of step
+                    Image("TitleCabin")
+                        .resizable().scaledToFit()
+                        .frame(height: size.height * 0.74)
+                        .rotationEffect(.degrees(reduceMotion ? 0 : sin(t * 1.3) * 1.6 + sin(t * 3.1) * 0.4))
+                        .offset(y: reduceMotion ? 0 : sin(t * 2.0) * 6 + sin(t * 4.7) * 1.5)
+                        .position(x: size.width * 0.73, y: size.height * 0.53)
+                        .offset(x: arrived ? 0 : size.width * 0.6)
+                    cloud(Self.clouds[Self.clouds.count - 1], t: t, in: size)
+                    Logo(size: 52).scaleEffect(logo ? 1 : 0.6).opacity(logo ? 1 : 0)
+                        .shadow(color: .black.opacity(0.35), radius: 6, y: 4)
+                        .position(x: size.width * 0.29, y: size.height * 0.47)
                 }
-                .offset(y: 44)
-                Image(systemName: "airplane")
-                    .font(.system(size: 64, weight: .black))
-                    .foregroundStyle(Color.cream)
-                    .shadow(color: .black.opacity(0.4), radius: 8, y: 6)
-                    .offset(x: taxied ? 0 : -geo.size.width * 0.7, y: 10)
-                Logo(size: 56).scaleEffect(logo ? 1 : 0.6).opacity(logo ? 1 : 0)
-                    .offset(y: -80)
             }
             .contentShape(Rectangle())
             .onTapGesture { finish() }                 // a tap skips ahead
         }
+        .ignoresSafeArea()                             // measure the whole screen, not just the safe area
         .onAppear {
-            withAnimation(.easeOut(duration: 1.1)) { taxied = true }
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.9)) { logo = true }
+            start = .now
+            withAnimation(.spring(response: 0.9, dampingFraction: 0.75)) { arrived = true }
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.7)) { logo = true }
         }
         .task {
             try? await Task.sleep(for: .seconds(2.2))
@@ -90,6 +107,22 @@ struct SplashView: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Turbulence")
+    }
+
+    /// A cloud drifting right to left, wrapping round once it leaves the screen.
+    private func cloud(_ c: (name: String, height: CGFloat, y: CGFloat, speed: CGFloat, x: CGFloat, blur: CGFloat, opacity: Double),
+                       t: TimeInterval, in size: CGSize) -> some View {
+        let h = size.height * c.height
+        let w = h * 1.75
+        let span = size.width + w
+        let travelled = reduceMotion ? 0 : CGFloat(t) * c.speed * size.width
+        let x = (c.x * span - travelled).truncatingRemainder(dividingBy: span)
+        return Image(c.name)
+            .resizable().scaledToFit()
+            .frame(height: h)
+            .blur(radius: c.blur)
+            .opacity(c.opacity)
+            .position(x: (x < 0 ? x + span : x) - w / 2, y: size.height * c.y)
     }
 
     private func finish() {
