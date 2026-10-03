@@ -1,83 +1,126 @@
 import Foundation
 import Observation
 
-/// App navigation and the saved profiles (GDD §9a flow:
-/// launch → studio logo → title card (auto) → route map → briefing (only when loading a flight) → flight → scorecard → route map).
+/// App navigation, the saved profiles and the device settings (GDD §9a flow:
+/// launch → studio logo → title card → landing → Continue (pick a profile) or New Game → route map
+/// → briefing (only when loading a flight) → flight → scorecard → route map).
 @Observable
 final class AppModel {
-    enum Screen: Equatable { case studio, splash, map, game }
+    enum Screen: Equatable { case studio, splash, landing, map, game }
+
+    /// The card on top of the current screen; one at a time.
+    enum Sheet: Equatable {
+        case picker             // Continue: pick a profile
+        case replace            // New Game with all slots full: delete one to make room
+        case newCrew(Int)       // the name-and-look card filling this slot
+        case options
+        case about
+    }
 
     var screen: Screen = .studio
+    var sheet: Sheet?
     private(set) var slots: ProfileSlots
+    private(set) var device: DeviceSettings
     var briefing: FlightPlan?
-    var showOptions = false
-    var showProfiles = false
-    /// The slot the name-and-look card is filling (first run, or "+ New crew").
-    var newCrewSlot: Int?
     /// Set when the last flight beat the profile's best satisfaction.
     var newBest = false
     let game = GameController()
+    /// Off in tests, so they never touch the saves on disk.
+    private let persist: Bool
 
-    init() {
+    convenience init() {
         let args = ProcessInfo.processInfo.arguments
-        if args.contains("-resetProfile") { ProfileStore.delete() }
-        slots = ProfileStore.load()
+        if args.contains("-resetProfile") {
+            ProfileStore.delete()
+            DeviceSettingsStore.delete()
+        }
+        let device = DeviceSettingsStore.load()          // before the profiles: it reads sound and haptics from an old save
+        self.init(slots: ProfileStore.load(), device: device, persist: true, arguments: args)
+    }
+
+    init(slots: ProfileSlots, device: DeviceSettings, persist: Bool, arguments args: [String] = []) {
+        self.slots = slots
+        self.device = device
+        self.persist = persist
+        game.apply(device)
         if let p = slots.current { game.apply(p.options, avatar: p.avatar) }
         game.onEnded = { [weak self] plan, result in self?.record(plan, result) }
         if game.isDebugLaunch { screen = .game }
-        else if args.contains("-map") { finishSplash() }
-        else if args.contains("-profiles") { finishSplash(); showProfiles = profile != nil }
+        else if args.contains("-map") { screen = profile == nil ? .landing : .map }
+        else if args.contains("-landing") { screen = .landing }
+        else if args.contains("-profiles") { screen = .landing; continueGame() }
     }
 
-    /// The active profile; writes go straight to disk.
+    /// The active profile (the one flown last); writes go straight to disk.
     var profile: Profile? {
         get { slots.current }
-        set { slots.current = newValue; ProfileStore.save(slots) }
+        set { slots.current = newValue; saveSlots() }
     }
 
     var options: GameOptions { profile?.options ?? GameOptions() }
 
     func finishStudio() { screen = .splash }
 
-    /// The title card hands over to the map; the first run asks for a crew member on top of it.
+    /// The title card settles into the landing page.
     func finishSplash() {
-        guard screen != .map else { return }
-        briefing = nil
-        screen = .map
-        if profile == nil { newCrewSlot = slots.firstEmpty ?? 0 }
+        guard screen == .studio || screen == .splash else { return }
+        screen = .landing
     }
 
-    /// The name-and-look card: creates the profile in its slot and makes it active, then back to the map.
-    func createProfile(name: String, avatar: Int) {
-        guard let slot = newCrewSlot, let p = slots.create(in: slot, name: name, avatar: avatar) else { return }
-        ProfileStore.save(slots)
-        game.apply(p.options, avatar: p.avatar)
-        newCrewSlot = nil
-        showProfiles = false
+    // MARK: Landing
+
+    /// Continue opens the picker, even with a single profile.
+    func continueGame() {
+        guard !slots.isEmpty else { return }
+        sheet = .picker
     }
 
-    func startNewCrew(in slot: Int) { newCrewSlot = slot }
+    /// New Game fills the first empty slot; with all four full it asks to make room first.
+    func newGame() {
+        if let slot = slots.firstEmpty { sheet = .newCrew(slot) } else { sheet = .replace }
+    }
 
-    /// Closing the new-crew card is only possible when someone is already on the roster.
-    func cancelNewCrew() { if profile != nil { newCrewSlot = nil } }
+    func dismissSheet() { sheet = nil }
 
-    func switchProfile(to slot: Int) {
+    /// Picking a profile makes it active and opens its route map.
+    func continueAs(_ slot: Int) {
+        guard slots.slots.indices.contains(slot), slots.slots[slot] != nil else { return }
         slots.switchTo(slot)
-        ProfileStore.save(slots)
-        if let p = profile { game.apply(p.options, avatar: p.avatar) }
-        showProfiles = false
+        saveSlots()
+        applyProfile()
+        sheet = nil
+        openMap()
     }
 
+    /// An empty slot in the picker opens the name-and-look card for it.
+    func startNewCrew(in slot: Int) { sheet = .newCrew(slot) }
+
+    /// The name-and-look card: creates the profile in its slot, makes it active and opens the map on its first flight.
+    func createProfile(name: String, avatar: Int) {
+        guard case .newCrew(let slot) = sheet, slots.create(in: slot, name: name, avatar: avatar) != nil else { return }
+        saveSlots()
+        applyProfile()
+        sheet = nil
+        openMap()
+    }
+
+    /// Deleting from the replace picker goes straight on to the new crew member in the freed slot.
     func deleteProfile(_ slot: Int) {
         slots.delete(slot)
-        ProfileStore.save(slots)
-        if let p = profile {
-            game.apply(p.options, avatar: p.avatar)
-        } else {
-            showProfiles = false
-            newCrewSlot = slots.firstEmpty ?? 0
-        }
+        saveSlots()
+        applyProfile()
+        if sheet == .replace { sheet = .newCrew(slot) }
+        else if slots.isEmpty { sheet = nil }
     }
+
+    func goToLanding() {
+        game.idle()
+        briefing = nil
+        sheet = nil
+        screen = .landing
+    }
+
+    // MARK: Map and flights
 
     func openMap(brief plan: FlightPlan? = nil) {
         game.idle()
@@ -98,11 +141,27 @@ final class AppModel {
         return next
     }
 
+    // MARK: Options
+
     func update(_ options: GameOptions) {
         guard var p = profile else { return }
         p.options = options
         profile = p
         game.apply(options, avatar: p.avatar)
+    }
+
+    func update(_ device: DeviceSettings) {
+        self.device = device
+        if persist { DeviceSettingsStore.save(device) }
+        game.apply(device)
+    }
+
+    private func applyProfile() {
+        if let p = profile { game.apply(p.options, avatar: p.avatar) }
+    }
+
+    private func saveSlots() {
+        if persist { ProfileStore.save(slots) }
     }
 
     private func record(_ plan: FlightPlan, _ result: FlightResult) {

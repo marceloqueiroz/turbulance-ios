@@ -12,28 +12,12 @@ struct RootView: View {
             Color.sky.ignoresSafeArea()
             switch app.screen {
             case .studio: StudioSplash { app.finishStudio() }
-            case .splash: SplashView { app.finishSplash() }
+            case .splash, .landing: TitleView(app: app)          // one view, so the title card settles into the menu without a cut
             case .map: RouteMapView(app: app)
             case .game: GameView(app: app, game: app.game)
             }
-            if app.showProfiles {
-                Scrim {
-                    ProfileSwitcherCard(slots: app.slots, switchTo: app.switchProfile, create: app.startNewCrew,
-                                        delete: app.deleteProfile) { app.showProfiles = false }
-                }
-                .ignoresSafeArea()
-                .transition(.opacity)
-            }
-            if app.newCrewSlot != nil {
-                Scrim {
-                    OnboardingCard(firstRun: app.profile == nil, create: { app.createProfile(name: $0, avatar: $1) },
-                                   cancel: { app.cancelNewCrew() })
-                }
-                .ignoresSafeArea()
-                .transition(.opacity)
-            }
-            if app.showOptions {
-                Scrim { OptionsCard(options: app.options, update: app.update) { app.showOptions = false } }
+            if let sheet = app.sheet {
+                Scrim { card(for: sheet) }
                     .ignoresSafeArea()
                     .transition(.opacity)
             }
@@ -41,98 +25,31 @@ struct RootView: View {
         .statusBarHidden()
         .persistentSystemOverlays(.hidden)
         .animation(.easeInOut(duration: 0.25), value: app.screen)
-        .animation(.easeOut(duration: 0.2), value: app.showOptions)
-        .animation(.easeOut(duration: 0.2), value: app.showProfiles)
-        .animation(.easeOut(duration: 0.2), value: app.newCrewSlot)
+        .animation(.easeOut(duration: 0.2), value: app.sheet)
         .onChange(of: scenePhase) { _, phase in
             if phase != .active { app.game.setPaused(true) }
         }
     }
-}
 
-// MARK: - Splash (GDD §9a): the cabin flies in through the clouds, the logo lands, then on to the map by itself
-
-struct SplashView: View {
-    let done: () -> Void
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var start = Date.now
-    @State private var arrived = false
-    @State private var logo = false
-    @State private var finished = false
-
-    /// Cloud layers back to front: asset, height and vertical centre (fractions of the screen),
-    /// drift speed (screen widths per second), starting x (fraction), blur and opacity for depth.
-    private static let clouds: [(name: String, height: CGFloat, y: CGFloat, speed: CGFloat, x: CGFloat, blur: CGFloat, opacity: Double)] = [
-        ("TitleCloud5", 0.12, 0.16, 0.025, 0.08, 2, 0.45),
-        ("TitleCloud4", 0.15, 0.80, 0.030, 0.40, 2, 0.45),
-        ("TitleCloud3", 0.18, 0.30, 0.045, 0.62, 1, 0.65),
-        ("TitleCloud2", 0.24, 0.64, 0.060, 0.02, 0.5, 0.8),
-        ("TitleCloud1", 0.34, 0.95, 0.090, 0.70, 3, 0.9),   // foreground, cropped by the bottom edge
-    ]
-
-    var body: some View {
-        GeometryReader { geo in
-            let size = geo.size
-            TimelineView(.animation(paused: reduceMotion)) { timeline in
-                let t = timeline.date.timeIntervalSince(start)
-                ZStack {
-                    LinearGradient(colors: [Color(red: 0.16, green: 0.27, blue: 0.47), .sky], startPoint: .top, endPoint: .bottom)
-                    ForEach(Self.clouds.indices.dropLast(), id: \.self) { cloud(Self.clouds[$0], t: t, in: size) }
-                    // the cabin rides the bumps: a slow bob and a gentle roll, slightly out of step
-                    Image("TitleCabin")
-                        .resizable().scaledToFit()
-                        .frame(height: size.height * 0.74)
-                        .rotationEffect(.degrees(reduceMotion ? 0 : sin(t * 1.3) * 1.6 + sin(t * 3.1) * 0.4))
-                        .offset(y: reduceMotion ? 0 : sin(t * 2.0) * 6 + sin(t * 4.7) * 1.5)
-                        .position(x: size.width * 0.73, y: size.height * 0.53)
-                        .offset(x: arrived ? 0 : size.width * 0.6)
-                    cloud(Self.clouds[Self.clouds.count - 1], t: t, in: size)
-                    Logo(size: 52).scaleEffect(logo ? 1 : 0.6).opacity(logo ? 1 : 0)
-                        .shadow(color: .black.opacity(0.35), radius: 6, y: 4)
-                        .position(x: size.width * 0.29, y: size.height * 0.47)
-                }
-            }
-            .contentShape(Rectangle())
-            .onTapGesture { finish() }                 // a tap skips ahead
+    @ViewBuilder private func card(for sheet: AppModel.Sheet) -> some View {
+        switch sheet {
+        case .picker, .replace:
+            ProfileSwitcherCard(slots: app.slots, replacing: sheet == .replace, select: app.continueAs,
+                                create: app.startNewCrew, delete: app.deleteProfile, close: app.dismissSheet)
+        case .newCrew:
+            OnboardingCard(firstRun: app.slots.isEmpty, create: { app.createProfile(name: $0, avatar: $1) },
+                           cancel: app.dismissSheet)
+        case .options:
+            // From the landing page no one is picked yet, so only the device settings show.
+            OptionsCard(device: app.device, options: app.screen == .landing ? nil : app.profile.map { ($0.name, $0.options) },
+                        updateDevice: app.update, updateOptions: app.update, done: app.dismissSheet)
+        case .about:
+            AboutCard(close: app.dismissSheet)
         }
-        .ignoresSafeArea()                             // measure the whole screen, not just the safe area
-        .onAppear {
-            start = .now
-            withAnimation(.spring(response: 0.9, dampingFraction: 0.75)) { arrived = true }
-            withAnimation(.spring(response: 0.5, dampingFraction: 0.6).delay(0.7)) { logo = true }
-        }
-        .task {
-            try? await Task.sleep(for: .seconds(2.2))
-            finish()
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Turbulence")
-    }
-
-    /// A cloud drifting right to left, wrapping round once it leaves the screen.
-    private func cloud(_ c: (name: String, height: CGFloat, y: CGFloat, speed: CGFloat, x: CGFloat, blur: CGFloat, opacity: Double),
-                       t: TimeInterval, in size: CGSize) -> some View {
-        let h = size.height * c.height
-        let w = h * 1.75
-        let span = size.width + w
-        let travelled = reduceMotion ? 0 : CGFloat(t) * c.speed * size.width
-        let x = (c.x * span - travelled).truncatingRemainder(dividingBy: span)
-        return Image(c.name)
-            .resizable().scaledToFit()
-            .frame(height: h)
-            .blur(radius: c.blur)
-            .opacity(c.opacity)
-            .position(x: (x < 0 ? x + span : x) - w / 2, y: size.height * c.y)
-    }
-
-    private func finish() {
-        guard !finished else { return }
-        finished = true
-        done()
     }
 }
 
-// MARK: - First run: name + avatar
+// MARK: - New Game: name + avatar
 
 struct OnboardingCard: View {
     var firstRun = true
@@ -147,10 +64,8 @@ struct OnboardingCard: View {
             HStack {
                 Eyebrow(text: firstRun ? "Welcome aboard" : "New crew member")
                 Spacer()
-                if !firstRun {
-                    Button(action: cancel) { Image(systemName: "xmark").font(.system(size: 14, weight: .bold)) }
-                        .buttonStyle(.plain).accessibilityLabel("Cancel")
-                }
+                Button(action: cancel) { Image(systemName: "xmark").font(.system(size: 14, weight: .bold)) }
+                    .buttonStyle(.plain).accessibilityLabel("Cancel")
             }
             Text("Who's working this flight?").font(rounded(26, .bold))
             TextField("Your name", text: $name)
@@ -182,10 +97,10 @@ struct OnboardingCard: View {
     }
 }
 
-// MARK: - Profiles (GDD §9a): the chip on the map and the four-slot switcher
+// MARK: - Profiles (GDD §9a): the map's Menu button and the four-slot picker
 
-/// The active crew member in the map's top bar; tapping it opens the switcher.
-struct ProfileChip: View {
+/// The active crew member in the map's top bar; tapping it goes back to the landing page.
+struct MenuChip: View {
     let profile: Profile?
     let tap: () -> Void
     var body: some View {
@@ -194,22 +109,24 @@ struct ProfileChip: View {
                 AvatarView(index: profile?.avatar ?? 0, size: 34)
                 VStack(alignment: .leading, spacing: 0) {
                     Text(profile?.name ?? "Crew").font(rounded(15, .bold)).foregroundStyle(Color.text).lineLimit(1)
-                    Text("Switch crew").font(rounded(10, .heavy)).foregroundStyle(Color.muted)
+                    Text("Main menu").font(rounded(10, .heavy)).foregroundStyle(Color.muted)
                 }
-                Image(systemName: "chevron.down").font(.system(size: 11, weight: .heavy)).foregroundStyle(Color.muted)
+                Image(systemName: "house.fill").font(.system(size: 12, weight: .heavy)).foregroundStyle(Color.muted)
             }
             .padding(.leading, 4).padding(.trailing, 12).padding(.vertical, 3)
             .background(Color.panel, in: Capsule())
             .overlay(Capsule().stroke(Color.panelLine, lineWidth: 1))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(profile?.name ?? "Crew"), switch crew member")
+        .accessibilityLabel("\(profile?.name ?? "Crew"), main menu")
     }
 }
 
+/// Continue's picker. In replace mode (New Game with all four slots full) the only action is deleting one.
 struct ProfileSwitcherCard: View {
     let slots: ProfileSlots
-    let switchTo: (Int) -> Void
+    var replacing = false
+    let select: (Int) -> Void
     let create: (Int) -> Void
     let delete: (Int) -> Void
     let close: () -> Void
@@ -217,17 +134,17 @@ struct ProfileSwitcherCard: View {
     var body: some View {
         Card {
             HStack {
-                Eyebrow(text: "Crew on this device")
+                Eyebrow(text: replacing ? "The crew is full" : "Continue")
                 Spacer()
                 Button(action: close) { Image(systemName: "xmark").font(.system(size: 14, weight: .bold)) }
                     .buttonStyle(.plain).accessibilityLabel("Close")
             }
-            Text("Who's flying?").font(rounded(26, .bold))
+            Text(replacing ? "Make room for someone new" : "Who's flying?").font(rounded(26, .bold))
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                 ForEach(0..<ProfileSlots.count, id: \.self) { i in
                     if let p = slots.slots[i] {
-                        ProfileSlotView(profile: p, active: i == slots.active,
-                                        select: { switchTo(i) }, delete: { delete(i) })
+                        ProfileSlotView(profile: p, lastFlown: i == slots.active && !replacing, selectable: !replacing,
+                                        select: { select(i) }, delete: { delete(i) })
                     } else {
                         Button { create(i) } label: {
                             HStack(spacing: 8) {
@@ -244,17 +161,19 @@ struct ProfileSwitcherCard: View {
                     }
                 }
             }
-            Text("Each crew member keeps their own stars, unlocks and options. Hold the bin to delete one.")
+            Text(replacing ? "Hold the bin to delete a crew member and their progress. This can't be undone."
+                           : "Each crew member keeps their own stars, unlocks and options. Hold the bin to delete one.")
                 .font(rounded(11, .medium)).foregroundStyle(Color.finePrint)
                 .padding(.bottom, 4)
         }
     }
 }
 
-/// A filled slot: tap to switch; hold the bin for 1.2 s to delete (it can't be undone).
+/// A filled slot: tap to fly as them; hold the bin for 1.2 s to delete (it can't be undone).
 struct ProfileSlotView: View {
     let profile: Profile
-    let active: Bool
+    let lastFlown: Bool
+    var selectable = true
     let select: () -> Void
     let delete: () -> Void
     @State private var hold: CGFloat = 0
@@ -269,7 +188,7 @@ struct ProfileSlotView: View {
                         HStack(spacing: 3) {
                             Image(systemName: "star.fill").foregroundStyle(Color.calm)
                             Text("\(profile.totalStars)").monospacedDigit()
-                            if active { Text("· flying").foregroundStyle(Color.teal) }
+                            Text("· next \(profile.nextFlight.id)").foregroundStyle(Color.teal)
                         }
                         .font(rounded(12, .heavy))
                     }
@@ -278,7 +197,8 @@ struct ProfileSlotView: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("\(profile.name), \(profile.totalStars) stars\(active ? ", active" : "")")
+            .disabled(!selectable)
+            .accessibilityLabel("\(profile.name), \(profile.totalStars) stars, next flight \(profile.nextFlight.id)\(lastFlown ? ", flown last" : "")")
             ZStack {
                 Circle().fill(Color.white)
                 Circle().trim(from: 0, to: hold).stroke(Color.critical, style: StrokeStyle(lineWidth: 3, lineCap: .round))
@@ -298,8 +218,8 @@ struct ProfileSlotView: View {
             .accessibilityAction(named: "Delete") { delete() }
         }
         .padding(.horizontal, 10).frame(minHeight: 58)
-        .background(active ? Color(red: 1, green: 0.97, blue: 0.93) : Color.white.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
-        .overlay(RoundedRectangle(cornerRadius: 14).stroke(active ? Color.coral : Color.navy.opacity(0.3), lineWidth: active ? 3 : 1.5))
+        .background(lastFlown ? Color(red: 1, green: 0.97, blue: 0.93) : Color.white.opacity(0.6), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(lastFlown ? Color.coral : Color.navy.opacity(0.3), lineWidth: lastFlown ? 3 : 1.5))
     }
 }
 
@@ -368,7 +288,7 @@ struct RouteMapView: View {
                 // top bar
                 VStack {
                     HStack(spacing: 12) {
-                        ProfileChip(profile: app.profile) { app.showProfiles = true }
+                        MenuChip(profile: app.profile) { app.goToLanding() }
                         VStack(alignment: .leading, spacing: 0) {
                             Eyebrow(text: "Route \(route.id) · \(route.aircraftNames)")
                             Text(route.name).font(rounded(22, .bold)).foregroundStyle(Color.text)
@@ -399,7 +319,7 @@ struct RouteMapView: View {
                         .padding(.horizontal, 14).padding(.vertical, 6)
                         .background(Color.panel, in: Capsule())
                         .overlay(Capsule().stroke(Color.panelLine, lineWidth: 1))
-                        RoundButton(system: "gearshape.fill", label: "Options") { app.showOptions = true }
+                        RoundButton(system: "gearshape.fill", label: "Options") { app.sheet = .options }
                     }
                     .padding(.horizontal, 20).padding(.top, 8)
                     Spacer()
@@ -570,44 +490,60 @@ struct BriefingCard: View {
 
 // MARK: - Options (GDD §9a)
 
+/// Device settings always; the profile's own settings only once someone is flying (GDD §9a).
 struct OptionsCard: View {
+    @State var device: DeviceSettings
     @State var options: GameOptions
-    let update: (GameOptions) -> Void
+    let profileName: String?
+    let updateDevice: (DeviceSettings) -> Void
+    let updateOptions: (GameOptions) -> Void
     let done: () -> Void
 
-    init(options: GameOptions, update: @escaping (GameOptions) -> Void, done: @escaping () -> Void) {
-        _options = State(initialValue: options)
-        self.update = update
+    init(device: DeviceSettings, options: (name: String, options: GameOptions)?, updateDevice: @escaping (DeviceSettings) -> Void,
+         updateOptions: @escaping (GameOptions) -> Void, done: @escaping () -> Void) {
+        _device = State(initialValue: device)
+        _options = State(initialValue: options?.options ?? GameOptions())
+        profileName = options?.name
+        self.updateDevice = updateDevice
+        self.updateOptions = updateOptions
         self.done = done
     }
 
     var body: some View {
         Card {
             Text("Options").font(rounded(26, .bold))
+            if profileName != nil { Eyebrow(text: "This device") }
             row("Sound") {
                 HStack(spacing: 8) {
                     Image(systemName: "speaker.fill")
-                    Slider(value: $options.volume, in: 0...1).tint(.teal).frame(maxWidth: 220)
+                    Slider(value: $device.volume, in: 0...1).tint(.teal).frame(maxWidth: 220)
                     Image(systemName: "speaker.wave.3.fill")
                 }
             }
-            row("Haptics") { Toggle("Haptics", isOn: $options.haptics).labelsHidden().tint(.teal) }
-            row("Screen shake") {
-                Picker("Screen shake", selection: $options.shake) {
-                    ForEach(ShakeLevel.allCases, id: \.self) { Text($0.label).tag($0) }
+            row("Haptics") { Toggle("Haptics", isOn: $device.haptics).labelsHidden().tint(.teal) }
+            if let name = profileName {
+                Eyebrow(text: "\(name)'s settings").padding(.top, 6)
+                row("Screen shake") {
+                    Picker("Screen shake", selection: $options.shake) {
+                        ForEach(ShakeLevel.allCases, id: \.self) { Text($0.label).tag($0) }
+                    }
+                    .pickerStyle(.segmented).frame(maxWidth: 260)
                 }
-                .pickerStyle(.segmented).frame(maxWidth: 260)
-            }
-            row("Notification text") {
-                Picker("Notification text", selection: $options.largeText) {
-                    Text("Standard").tag(false)
-                    Text("Large").tag(true)
+                row("Notification text") {
+                    Picker("Notification text", selection: $options.largeText) {
+                        Text("Standard").tag(false)
+                        Text("Large").tag(true)
+                    }
+                    .pickerStyle(.segmented).frame(maxWidth: 260)
                 }
-                .pickerStyle(.segmented).frame(maxWidth: 260)
+            } else {
+                Text("Screen shake and text size are set per crew member, from the route map once you're flying.")
+                    .font(rounded(11, .medium)).foregroundStyle(Color.finePrint)
             }
             CTA(title: "Done", action: done).padding(.bottom, 4)
         }
-        .onChange(of: options) { _, new in update(new) }
+        .onChange(of: device) { _, new in updateDevice(new) }
+        .onChange(of: options) { _, new in updateOptions(new) }
     }
 
     private func row<C: View>(_ label: String, @ViewBuilder _ control: () -> C) -> some View {

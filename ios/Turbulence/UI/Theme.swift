@@ -72,11 +72,3 @@ struct StarRow: View {
         .accessibilityLabel("\(stars) of 3 stars")
     }
 }
-
-struct Logo: View {
-    var size: CGFloat = 40
-    var body: some View {
-        (Text("Turbu").foregroundColor(.text) + Text("lence").foregroundColor(.coral))
-            .font(rounded(size, .heavy))
-    }
-}

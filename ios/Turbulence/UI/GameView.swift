@@ -83,7 +83,7 @@ struct GameView: View {
         case .paused:
             Scrim {
                 PauseCard(resume: { game.setPaused(false) }, restart: { app.board(game.plan) },
-                          options: { app.showOptions = true }, map: { app.openMap() })
+                          options: { app.sheet = .options }, map: { app.openMap() }, menu: { app.goToLanding() })
             }
         case .ended:
             Scrim {
@@ -347,6 +347,7 @@ struct PauseCard: View {
     let restart: () -> Void
     let options: () -> Void
     let map: () -> Void
+    let menu: () -> Void
     var body: some View {
         Card {
             Text("Paused").font(rounded(26, .bold))
@@ -355,9 +356,12 @@ struct PauseCard: View {
                 CTA(title: "Resume", action: resume)
                 CTA(title: "Restart", color: .teal, action: restart)
                 CTA(title: "Options", color: .teal, action: options)
-                CTA(title: "Route map", color: .navy, action: map)
             }
-            .padding(.bottom, 4)
+            HStack(spacing: 12) {
+                CTA(title: "Route map", color: .navy, action: map)
+                CTA(title: "Main menu", color: .navy, action: menu)
+            }
+            .padding(.top, 4).padding(.bottom, 4)
         }
     }
 }

@@ -224,9 +224,12 @@ final class GameController {
         scene.reset()
     }
 
+    func apply(_ device: DeviceSettings) {
+        synth.volume = Float(device.volume)
+        haptics = device.haptics
+    }
+
     func apply(_ options: GameOptions, avatar: Int) {
-        synth.volume = Float(options.volume)
-        haptics = options.haptics
         scene.shakeScale = CGFloat(options.shake.scale)
         largeText = options.largeText
         let look = Avatar.look(avatar)

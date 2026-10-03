@@ -6,10 +6,14 @@ enum ShakeLevel: String, Codable, CaseIterable {
     var label: String { rawValue.capitalized }
 }
 
-/// Per-profile options (GDD §9a), so accessibility settings follow the person.
-struct GameOptions: Codable, Equatable {
+/// Settings that belong to the device, not the person (GDD §9a), so the landing page can set them before a profile is picked.
+struct DeviceSettings: Codable, Equatable {
     var volume = 0.8
     var haptics = true
+}
+
+/// Per-profile options (GDD §9a), so accessibility settings follow the person.
+struct GameOptions: Codable, Equatable {
     var shake = ShakeLevel.full
     var largeText = false
 }
@@ -89,7 +93,7 @@ struct ProfileSlots: Codable, Equatable {
 
 /// Saves the profile slots as JSON in Application Support. iCloud sync comes in build step 2.
 enum ProfileStore {
-    private static var dir: URL {
+    static var dir: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         return dir
@@ -120,4 +124,38 @@ enum ProfileStore {
         try? FileManager.default.removeItem(at: url)
         try? FileManager.default.removeItem(at: legacyURL)
     }
+}
+
+/// Saves the device settings as JSON next to the profiles.
+enum DeviceSettingsStore {
+    static var url: URL { ProfileStore.dir.appendingPathComponent("settings.json") }
+
+    /// Before the split, sound and haptics lived in each profile's options; the first load takes the active profile's.
+    static func load() -> DeviceSettings {
+        if let data = try? Data(contentsOf: url), let s = try? JSONDecoder().decode(DeviceSettings.self, from: data) {
+            return s
+        }
+        let s = legacy(slots: try? Data(contentsOf: ProfileStore.url), profile: try? Data(contentsOf: ProfileStore.legacyURL)) ?? DeviceSettings()
+        save(s)
+        return s
+    }
+
+    /// Reads volume and haptics out of a save from before the split: the slots file, or the older single-profile file.
+    static func legacy(slots: Data?, profile: Data?) -> DeviceSettings? {
+        struct Old: Decodable { var options: DeviceSettings? }
+        struct OldSlots: Decodable { var slots: [Old?]; var active: Int }
+        let decoder = JSONDecoder()
+        if let slots, let s = try? decoder.decode(OldSlots.self, from: slots), s.slots.indices.contains(s.active) {
+            return s.slots[s.active]?.options
+        }
+        if let profile, let p = try? decoder.decode(Old.self, from: profile) { return p.options }
+        return nil
+    }
+
+    static func save(_ s: DeviceSettings) {
+        guard let data = try? JSONEncoder().encode(s) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    static func delete() { try? FileManager.default.removeItem(at: url) }
 }
