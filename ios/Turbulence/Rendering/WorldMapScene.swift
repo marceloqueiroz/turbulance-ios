@@ -14,6 +14,7 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
 
     var onTap: (Tap) -> Void = { _ in }
     var reduceMotion = false
+    var haptics = true
 
     let layout: MapLayout
     private(set) var profile = Profile(name: "", avatar: 0)
@@ -21,6 +22,18 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
     private let cam = SKCameraNode()
     private let regionLayer = SKNode(), pathLayer = SKNode(), airportLayer = SKNode()
     private let pinLayer = SKNode(), coverLayer = SKNode(), badgeLayer = SKNode()
+    private let life = MapLifeLayer()
+    private let plane = SKSpriteNode(imageNamed: "Map/ToyPlane"), planeShadow = SKShapeNode(ellipseOf: CGSize(width: 34, height: 12))
+    private var cloudNodes: [String: [SKNode]] = [:], badgeNodes: [String: SKNode] = [:]
+    private var hiding: Set<Int> = []
+
+    // MARK: Developer path editor (debug builds, -mapEditor)
+    var editing = false { didSet { drawEditor() } }
+    var editorKind: MapLayout.Life.Kind = .walk
+    /// Life per region as being edited, starting from MapLayout.json.
+    private(set) var editorLife: [String: [MapLayout.Life]] = [:]
+    private var editorRegion: String?
+    private let editorLayer = SKNode()
     /// Nodes drawn at a constant size on screen, whatever the zoom.
     private var screenSized: [SKNode] = []
     private var pathNodes: [(node: SKShapeNode, width: CGFloat)] = []
@@ -45,13 +58,17 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
         backgroundColor = UIColor(hex: 0x2C7A96)
         camera = cam
         addChild(cam)
-        for (layer, z) in [(regionLayer, 1), (pathLayer, 2), (airportLayer, 3), (pinLayer, 5), (coverLayer, 6), (badgeLayer, 20)] as [(SKNode, CGFloat)] {
+        for (layer, z) in [(regionLayer, 1), (pathLayer, 2), (airportLayer, 3), (life, 4), (pinLayer, 5), (coverLayer, 6), (badgeLayer, 20)] as [(SKNode, CGFloat)] {
             layer.zPosition = z
             addChild(layer)
         }
         buildSea()
         buildRegions()
         buildAirports()
+        buildPlane()
+        editorLayer.zPosition = 30
+        addChild(editorLayer)
+        for r in layout.regions { editorLife[r.id] = r.life ?? [] }
         cam.position = CGPoint(x: layout.world.width / 2, y: layout.world.height / 2)
         cam.setScale(1 / 0.4)
     }
@@ -121,41 +138,66 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
 
     // MARK: Profile-driven layers
 
-    /// Rebuilds pins, paths, clouds and badges for this profile's progress.
-    func configure(profile: Profile) {
+    /// Rebuilds pins, paths, clouds, badges and city life for this profile's progress. Routes in `hiding` still show
+    /// as locked (their reveal hasn't played yet); `drawIn` animates that route's paths and pins appearing.
+    func configure(profile: Profile, hiding: Set<Int> = [], drawIn: Int? = nil) {
         self.profile = profile
+        self.hiding = hiding
         for layer in [pathLayer, pinLayer, coverLayer, badgeLayer] { layer.removeAllChildren() }
         screenSized.removeAll(); pathNodes.removeAll(); pins.removeAll(); badges.removeAll(); covered.removeAll(); cityLabels.removeAll()
+        cloudNodes.removeAll(); badgeNodes.removeAll()
         let state = MapState(profile: profile)
+        let isOpen = { (r: Route) in state.access(r) == .open && !hiding.contains(r.id) }
 
-        for route in Campaign.routes where state.access(route) == .open {
+        for route in Campaign.routes where isOpen(route) {
             for (i, plan) in route.flights.enumerated() {
                 guard let a = scenePoint(city: route.cities[i]), let b = scenePoint(city: route.cities[i + 1]) else { continue }
-                addPath(from: a, to: b, open: state.access(plan) != .locked)
-                addPin(plan, number: i + 1, at: b, access: state.access(plan), city: route.cities[i + 1])
+                let delay = route.id == drawIn ? 0.25 * Double(i) : nil
+                addPath(from: a, to: b, open: state.access(plan) != .locked, drawInAfter: delay)
+                addPin(plan, number: i + 1, at: b, access: state.access(plan), city: route.cities[i + 1], popAfter: delay.map { $0 + 0.4 })
             }
         }
         if let home = Campaign.route1.cities.first, let p = scenePoint(city: home) { addHome(at: p, city: home) }
 
+        var lifeEntries: [(entries: [MapLayout.Life], toScene: (CGPoint) -> CGPoint)] = []
         for region in layout.regions {
             let frame = sceneFrame(region)
-            switch state.cover(region) {
-            case .none: break
+            let routeID = region.route
+            let cover: MapState.Cover = routeID.map(hiding.contains) == true ? .clouds : state.cover(region)
+            switch cover {
+            case .none:
+                if let entries = region.life {
+                    lifeEntries.append((entries, { p in CGPoint(x: frame.minX + p.x * frame.width, y: frame.maxY - p.y * frame.height) }))
+                }
             case .clouds:
-                guard let id = region.route, let route = Campaign.routes.first(where: { $0.id == id }),
-                      case let .locked(needs, have) = state.access(route) else { continue }
+                guard let id = routeID, let route = Campaign.routes.first(where: { $0.id == id }) else { continue }
+                let needs = route.unlockStars, have = profile.totalStars
                 let tap = Tap.lockedRoute(route, needs: needs, have: have)
-                addClouds(over: frame, storm: false)
-                addBadge(lines: ["Route \(route.id) · \(route.name)", "\(needs) ★ to unlock"], symbol: "lock.fill", at: CGPoint(x: frame.midX, y: frame.midY), tap: tap)
+                addClouds(over: frame, storm: false, region: region.id)
+                addBadge(lines: ["Route \(route.id) · \(route.name)", "\(needs) ★ to unlock"], symbol: "lock.fill",
+                         at: CGPoint(x: frame.midX, y: frame.midY), tap: tap, region: region.id)
                 covered.append((frame, tap))
             case .storm:
-                let name = region.name ?? region.route.flatMap { id in Campaign.routes.first { $0.id == id }?.name } ?? "New route"
+                let name = region.name ?? routeID.flatMap { id in Campaign.routes.first { $0.id == id }?.name } ?? "New route"
                 let tap = Tap.comingSoon(name)
-                addClouds(over: frame, storm: true)
-                addBadge(lines: [name, "Coming soon"], symbol: "cloud.bolt.fill", at: CGPoint(x: frame.midX, y: frame.midY), tap: tap)
+                addClouds(over: frame, storm: true, region: region.id)
+                addBadge(lines: [name, "Coming soon"], symbol: "cloud.bolt.fill", at: CGPoint(x: frame.midX, y: frame.midY), tap: tap, region: region.id)
                 covered.append((frame, tap))
             }
         }
+
+        // busy airports: every open city gets a parked plane, the next flight's departure gets a boarding queue
+        let next = profile.nextFlight
+        let nextFrom = Campaign.route(containing: next.id).flatMap { r in r.flights.firstIndex(of: next).map { r.cities[$0] } }
+        var airportLife: [(at: CGPoint, style: MapLayout.Airport.Style, isNext: Bool)] = []
+        for route in Campaign.routes where isOpen(route) {
+            for (i, city) in route.cities.enumerated() where i == 0 || state.access(route.flights[i - 1]) != .locked {
+                guard let a = layout.airport(city), let p = scenePoint(city: city) else { continue }
+                airportLife.append((p, a.style, city == nextFrom))
+            }
+        }
+        life.build(life: lifeEntries, airports: airportLife, reduceMotion: reduceMotion)
+        if let from = nextFrom { park(at: from) }
         applyZoom()
     }
 
@@ -165,21 +207,41 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
     }
 
     /// A leg as a gentle upward arc; open legs are solid coral, locked ones dashed grey.
-    private func addPath(from a: CGPoint, to b: CGPoint, open: Bool) {
+    /// The same gentle upward arc for paths and the toy plane.
+    private func legControl(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
         let bulge = min(120, 0.15 * hypot(b.x - a.x, b.y - a.y))
-        let control = CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 + bulge)
-        let path = CGMutablePath()
-        path.move(to: a)
-        path.addQuadCurve(to: b, control: control)
-        let node = SKShapeNode(path: open ? path : path.copy(dashingWithPhase: 0, lengths: [14, 16]))
+        return CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 + bulge)
+    }
+
+    private func quad(_ a: CGPoint, _ c: CGPoint, _ b: CGPoint, _ t: CGFloat) -> CGPoint {
+        let u = 1 - t
+        return CGPoint(x: u * u * a.x + 2 * u * t * c.x + t * t * b.x, y: u * u * a.y + 2 * u * t * c.y + t * t * b.y)
+    }
+
+    /// A leg as a gentle upward arc; open legs are solid coral, locked ones dashed grey. `drawInAfter` grows it from its start.
+    private func addPath(from a: CGPoint, to b: CGPoint, open: Bool, drawInAfter delay: Double? = nil) {
+        let control = legControl(a, b)
+        func shape(upTo t: CGFloat) -> CGPath {
+            let path = CGMutablePath()
+            path.move(to: a)
+            for k in 1...24 { path.addLine(to: quad(a, control, b, t * CGFloat(k) / 24)) }
+            return open ? path : path.copy(dashingWithPhase: 0, lengths: [14, 16])
+        }
+        let node = SKShapeNode(path: shape(upTo: 1))
         node.strokeColor = open ? Palette.coral : Palette.steel.withAlphaComponent(0.8)
         node.lineCap = .round
         node.isAntialiased = true
         pathLayer.addChild(node)
         pathNodes.append((node, open ? 4 : 3))
+        if let delay, !reduceMotion {
+            node.path = shape(upTo: 0.001)
+            node.run(.sequence([.wait(forDuration: delay), .customAction(withDuration: 0.5) { n, e in
+                (n as? SKShapeNode)?.path = shape(upTo: max(0.001, e / 0.5))
+            }]))
+        }
     }
 
-    private func addPin(_ plan: FlightPlan, number: Int, at p: CGPoint, access: MapState.FlightAccess, city: String) {
+    private func addPin(_ plan: FlightPlan, number: Int, at p: CGPoint, access: MapState.FlightAccess, city: String, popAfter: Double? = nil) {
         let anchor = SKNode()
         anchor.position = p
         let pin = SKNode()
@@ -225,6 +287,10 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
         pinLayer.addChild(anchor)
         screenSized.append(anchor)
         pins.append((anchor, plan))
+        if let popAfter, !reduceMotion {
+            pin.setScale(0)
+            pin.run(.sequence([.wait(forDuration: popAfter), .scale(to: 1.15, duration: 0.18), .scale(to: 1, duration: 0.12)]))
+        }
     }
 
     private func addHome(at p: CGPoint, city: String) {
@@ -258,7 +324,7 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
     }
 
     /// Soft clouds (or a storm) scattered over a covered region, drifting gently.
-    private func addClouds(over frame: CGRect, storm: Bool) {
+    private func addClouds(over frame: CGRect, storm: Bool, region: String) {
         // locked routes get a dense, staggered blanket (a little peeks through at the edges); storms sit as a few big clouds
         let step: CGFloat = storm ? 330 : 270
         let cols = max(1, Int((frame.width / step).rounded(.up))) + (storm ? 0 : 1)
@@ -279,6 +345,7 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
                 cloud.position = CGPoint(x: x + jx * step * 0.3, y: y + jy * step * 0.25)
                 cloud.zPosition = CGFloat(k % 3)
                 coverLayer.addChild(cloud)
+                cloudNodes[region, default: []].append(cloud)
                 if !reduceMotion {
                     let dx = CGFloat([18, -24, 30, -16][k % 4]), t = Double([5.5, 7, 6.2, 8][k % 4])
                     cloud.run(.repeatForever(.sequence([.moveBy(x: dx, y: 0, duration: t), .moveBy(x: -dx, y: 0, duration: t)])))
@@ -289,7 +356,7 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
     }
 
     /// A rounded navy label on top of a covered region: lock + star target, or storm + "Coming soon".
-    private func addBadge(lines: [String], symbol name: String, at p: CGPoint, tap: Tap) {
+    private func addBadge(lines: [String], symbol name: String, at p: CGPoint, tap: Tap, region: String) {
         let node = SKNode()
         node.position = p
         let title = SKLabelNode(text: lines[0])
@@ -309,6 +376,7 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
         badgeLayer.addChild(node)
         screenSized.append(node)
         badges.append((node, tap))
+        badgeNodes[region] = node
     }
 
     private func symbol(_ name: String, size: CGFloat, color: UIColor) -> SKSpriteNode {
@@ -317,6 +385,158 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
         let node = SKSpriteNode(texture: SKTexture(image: image))
         node.size = CGSize(width: image.size.width / 2, height: image.size.height / 2)
         return node
+    }
+
+    // MARK: Toy plane
+
+    private func buildPlane() {
+        let w: CGFloat = 70
+        plane.size = CGSize(width: w, height: w * plane.size.height / max(plane.size.width, 1))
+        plane.zPosition = 4.6
+        planeShadow.fillColor = UIColor.black.withAlphaComponent(0.18)
+        planeShadow.strokeColor = .clear
+        planeShadow.zPosition = 4.5
+        addChild(planeShadow)
+        addChild(plane)
+        plane.isHidden = true; planeShadow.isHidden = true
+    }
+
+    /// Between flights the hero plane is hidden: the departure airport's parked plane and boarding queue mark the next leg.
+    func park(at city: String) {
+        guard plane.action(forKey: "fly") == nil else { return }
+        plane.isHidden = true; planeShadow.isHidden = true
+    }
+
+    /// Flies the leg a finished flight covered, climbing and descending along the path's arc.
+    func flyLeg(_ plan: FlightPlan, completion: @escaping () -> Void) {
+        guard let r = Campaign.route(containing: plan.id), let i = r.flights.firstIndex(of: plan),
+              let a = scenePoint(city: r.cities[i]), let b = scenePoint(city: r.cities[i + 1]) else { completion(); return }
+        let c = legControl(a, b)
+        plane.isHidden = false; planeShadow.isHidden = false
+        move(to: CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2), zoom: min(0.7, max(0.3, size.width / (abs(b.x - a.x) * 1.8 + 1))), duration: 0.5)
+        guard !reduceMotion else {
+            plane.position = CGPoint(x: b.x - 30, y: b.y + 24); completion(); return
+        }
+        let duration = min(3.2, max(1.6, Double(hypot(b.x - a.x, b.y - a.y)) / 260))
+        plane.xScale = b.x >= a.x ? -1 : 1                                           // the piece faces left
+        let fly = SKAction.customAction(withDuration: duration) { [weak self] node, e in
+            guard let self else { return }
+            let t = CGFloat(e / duration), k = t * t * (3 - 2 * t)
+            let p = self.quad(a, c, b, k), ahead = self.quad(a, c, b, min(1, k + 0.02))
+            let lift = sin(k * .pi)                                                  // climb, cruise, descend
+            node.position = CGPoint(x: p.x, y: p.y + 24 + lift * 30)
+            let tilt = atan2(ahead.y - p.y, abs(ahead.x - p.x) + 0.001)
+            node.zRotation = max(-0.35, min(0.35, tilt)) * (b.x >= a.x ? 1 : -1)
+            let s = 1 + 0.25 * lift
+            node.yScale = s; node.xScale = (b.x >= a.x ? -1 : 1) * s
+            self.planeShadow.position = CGPoint(x: p.x + 4 + lift * 10, y: p.y - 4)
+            self.planeShadow.setScale(1 - 0.35 * lift)
+        }
+        plane.position = CGPoint(x: a.x, y: a.y + 24); plane.zRotation = 0
+        plane.run(.sequence([.wait(forDuration: 0.5), fly, .run { [weak self] in
+            guard let self else { return }
+            if self.haptics { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
+            self.plane.run(.fadeOut(withDuration: 0.4)) { self.plane.isHidden = true; self.plane.alpha = 1; self.plane.zRotation = 0 }
+            self.planeShadow.run(.fadeOut(withDuration: 0.4)) { self.planeShadow.isHidden = true; self.planeShadow.alpha = 1 }
+            completion()
+        }]), withKey: "fly")
+    }
+
+    // MARK: Unlock reveal
+
+    /// The camera flies to a newly opened route, its clouds part, and the route's paths and pins draw in.
+    func reveal(route id: Int, completion: @escaping () -> Void) {
+        guard let region = layout.region(forRoute: id) else { completion(); return }
+        let center = CGPoint(x: sceneFrame(region).midX, y: sceneFrame(region).midY)
+        focus(route: id)
+        let part = SKAction.run { [weak self] in
+            guard let self else { return }
+            if self.haptics { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
+            self.badgeNodes[region.id]?.run(.fadeOut(withDuration: 0.3))
+            for cloud in self.cloudNodes[region.id] ?? [] {
+                cloud.removeAllActions()
+                let away = CGVector(dx: cloud.position.x - center.x, dy: cloud.position.y - center.y)
+                let len = max(1, hypot(away.dx, away.dy))
+                let push = CGVector(dx: away.dx / len * 700, dy: away.dy / len * 500)
+                cloud.run(.group([.move(by: push, duration: 1.2), .fadeOut(withDuration: 1.2), .scale(by: 1.3, duration: 1.2)]))
+            }
+        }
+        let open = SKAction.run { [weak self] in
+            guard let self else { return }
+            self.configure(profile: self.profile, hiding: self.hiding.subtracting([id]), drawIn: id)
+        }
+        let steps = reduceMotion ? [open, .run(completion)] : [.wait(forDuration: 0.9), part, .wait(forDuration: 1.0), open, .wait(forDuration: 1.8), .run(completion)]
+        run(.sequence(steps), withKey: "reveal")
+    }
+
+    // MARK: Path editor
+
+    /// Starts a new path of the current kind in whichever region the next tap lands in.
+    func editorNewPath() { editorRegion = nil; drawEditor() }
+
+    func editorUndo() {
+        guard let id = editorRegion, var list = editorLife[id], var last = list.popLast() else { return }
+        last.points.removeLast()
+        if !last.points.isEmpty { list.append(last) } else { editorRegion = nil }
+        editorLife[id] = list
+        drawEditor()
+    }
+
+    func editorDeleteLast() {
+        guard let id = editorRegion ?? layout.regions.first(where: { !(editorLife[$0.id] ?? []).isEmpty })?.id else { return }
+        _ = editorLife[id]?.popLast()
+        editorRegion = nil
+        drawEditor()
+    }
+
+    /// The edited life of every region that has any, as JSON keyed by region id.
+    func editorExport() -> String {
+        let out = editorLife.filter { !$0.value.isEmpty }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
+        return (try? encoder.encode(out)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+    }
+
+    private func editorAdd(_ p: CGPoint) {
+        guard let region = layout.regions.first(where: { sceneFrame($0).contains(p) }) else { return }
+        let f = sceneFrame(region)
+        let point = [((p.x - f.minX) / f.width * 1000).rounded() / 1000, ((f.maxY - p.y) / f.height * 1000).rounded() / 1000].map(Double.init)
+        var list = editorLife[region.id] ?? []
+        if editorRegion == region.id, var last = list.popLast(), last.kind == editorKind {
+            last.points.append(point); list.append(last)
+        } else {
+            list.append(MapLayout.Life(kind: editorKind, points: [point], loop: editorKind == .air ? true : nil))
+        }
+        editorLife[region.id] = list
+        editorRegion = region.id
+        drawEditor()
+    }
+
+    private func drawEditor() {
+        editorLayer.removeAllChildren()
+        guard editing else { return }
+        let colours: [MapLayout.Life.Kind: UIColor] = [.road: Palette.coral, .walk: Palette.calm, .water: .cyan, .moored: .white,
+                                                       .air: .magenta, .smoke: .lightGray, .glow: .yellow]
+        for region in layout.regions {
+            let f = sceneFrame(region)
+            for (i, entry) in (editorLife[region.id] ?? []).enumerated() {
+                let pts = entry.points.map { CGPoint(x: f.minX + $0[0] * f.width, y: f.maxY - $0[1] * f.height) }
+                let current = region.id == editorRegion && i == (editorLife[region.id]?.count ?? 0) - 1
+                let colour = colours[entry.kind] ?? .white
+                if pts.count > 1, ![.smoke, .glow, .moored].contains(entry.kind) {          // anchors are separate spots
+                    let path = CGMutablePath(); path.addLines(between: pts)
+                    let line = SKShapeNode(path: path)
+                    line.strokeColor = colour; line.lineWidth = (current ? 3 : 1.5) / zoom
+                    editorLayer.addChild(line)
+                }
+                for p in pts {
+                    let dot = SKShapeNode(circleOfRadius: (current ? 5 : 3.5) / zoom)
+                    dot.fillColor = colour; dot.strokeColor = Palette.navy; dot.lineWidth = 1 / zoom
+                    dot.position = p
+                    editorLayer.addChild(dot)
+                }
+            }
+        }
     }
 
     // MARK: Camera
@@ -409,6 +629,7 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
 
     private func handleTap(at viewPoint: CGPoint) {
         let p = convertPoint(fromView: viewPoint)
+        if editing { editorAdd(p); return }
         // pins and badges are hit in screen points, so they are as easy to tap at any zoom
         func screenDistance(_ node: SKNode, offset: CGFloat) -> CGFloat {
             let v = convertPoint(toView: CGPoint(x: node.position.x, y: node.position.y + offset / zoom))
@@ -478,6 +699,13 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
     override func update(_ currentTime: TimeInterval) {
         let dt = lastUpdate == 0 ? 1.0 / 60 : min(0.05, currentTime - lastUpdate)
         lastUpdate = currentTime
+        // city life only moves on screen, and fades away when zoomed out too far to see it
+        life.alpha = min(1, max(0, (zoom - 0.24) / 0.1))
+        if life.alpha > 0, !reduceMotion {
+            let half = CGSize(width: size.width / 2 / zoom + 60, height: size.height / 2 / zoom + 60)
+            life.update(dt: dt, visible: CGRect(x: cam.position.x - half.width, y: cam.position.y - half.height,
+                                                width: half.width * 2, height: half.height * 2), reduceMotion: false)
+        }
         guard !panning, abs(velocity.dx) + abs(velocity.dy) > 4 else { return }
         cam.position.x += velocity.dx * dt
         cam.position.y += velocity.dy * dt

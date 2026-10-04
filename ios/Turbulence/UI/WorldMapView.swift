@@ -7,6 +7,8 @@ struct WorldMapView: View {
     let app: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var notice: Notice?
+    /// A briefing waiting for the plane and any reveals to finish.
+    @State private var heldBriefing: FlightPlan?
 
     struct Notice: Equatable {
         let title: String
@@ -25,6 +27,7 @@ struct WorldMapView: View {
             VStack {
                 topBar(profile)
                 Spacer()
+                if app.mapEditor { editorBar }
                 if let notice {
                     NoticeCard(notice: notice) { self.notice = nil }
                         .padding(.bottom, 14)
@@ -43,15 +46,76 @@ struct WorldMapView: View {
         }
         .animation(.easeOut(duration: 0.2), value: app.briefing)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: notice)
-        .onAppear {
-            scene.reduceMotion = reduceMotion
-            scene.onTap = handle
-            scene.configure(profile: profile)
-            app.markMapVisited()
-            let plan = app.briefing ?? profile.nextFlight
-            if let city = Campaign.destination(of: plan) { scene.focus(city: city, animated: false) }
+        .onAppear(perform: arrive)
+        .onChange(of: app.profile) { _, p in if let p, heldBriefing == nil, app.pendingLeg == nil { scene.configure(profile: p) } }
+    }
+
+    /// Arriving on the map: the toy plane flies the leg just finished, newly opened routes reveal themselves one by one,
+    /// and only then does a waiting briefing card open.
+    private func arrive() {
+        scene.reduceMotion = reduceMotion
+        scene.haptics = app.device.haptics
+        scene.onTap = handle
+        scene.editing = app.mapEditor
+        app.markMapVisited()
+        guard let profile = app.profile else { return }
+        let reveals = MapState(profile: profile).pendingReveals
+        let leg = app.pendingLeg
+        scene.configure(profile: profile, hiding: Set(reveals))
+        if leg == nil && reveals.isEmpty {
+            if let city = Campaign.destination(of: app.briefing ?? profile.nextFlight) { scene.focus(city: city, animated: false) }
+            return
         }
-        .onChange(of: app.profile) { _, p in if let p { scene.configure(profile: p) } }
+        heldBriefing = app.briefing
+        app.briefing = nil
+        app.pendingLeg = nil
+        func revealNext(_ remaining: [Int]) {
+            guard let id = remaining.first else {
+                app.markRevealsSeen()
+                if let held = heldBriefing {
+                    if let city = Campaign.destination(of: held) { scene.focus(city: city) }
+                    app.briefing = held
+                }
+                heldBriefing = nil
+                return
+            }
+            scene.reveal(route: id) { revealNext(Array(remaining.dropFirst())) }
+        }
+        if let leg {
+            if let from = Campaign.route(containing: leg.id).flatMap({ r in r.flights.firstIndex(of: leg).map { r.cities[$0] } }) {
+                scene.focus(city: from, animated: false)
+            }
+            scene.flyLeg(leg) { revealNext(reveals) }
+        } else {
+            revealNext(reveals)
+        }
+    }
+
+    /// Debug-only toolbar for drawing city-life paths; Export copies JSON for MapLayout.json.
+    private var editorBar: some View {
+        HStack(spacing: 8) {
+            Picker("Kind", selection: Binding(get: { scene.editorKind }, set: { scene.editorKind = $0 })) {
+                ForEach(MapLayout.Life.Kind.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .frame(maxWidth: 420)
+            Button("New") { scene.editorNewPath() }
+            Button("Undo") { scene.editorUndo() }
+            Button("Delete") { scene.editorDeleteLast() }
+            Button("Export") {
+                let json = scene.editorExport()
+                UIPasteboard.general.string = json
+                let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("MapLife.json")
+                try? json.write(to: url, atomically: true, encoding: .utf8)
+                show(Notice(title: "Life paths exported", detail: "Copied to the clipboard and saved as Documents/MapLife.json.", symbol: "doc.on.clipboard"))
+            }
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(.teal)
+        .font(rounded(13, .bold))
+        .padding(10)
+        .background(Color.panel.opacity(0.95), in: RoundedRectangle(cornerRadius: 14))
+        .padding(.bottom, 10)
     }
 
     private func topBar(_ profile: Profile) -> some View {

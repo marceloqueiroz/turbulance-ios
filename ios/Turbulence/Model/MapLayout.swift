@@ -20,10 +20,29 @@ struct MapLayout: Decodable {
         var name: String?               // for specials and regions not built yet
         let center: [Double]
         let size: [Double]
+        var life: [Life]?               // moving city life, authored after the art (Route Map Plan, City life)
 
         var frame: CGRect {
             CGRect(x: center[0] - size[0] / 2, y: center[1] - size[1] / 2, width: size[0], height: size[1])
         }
+    }
+
+    /// One strand of city life: a path actors travel, or an anchor for an effect. Points are 0…1 inside the region image.
+    struct Life: Codable, Equatable {
+        enum Kind: String, Codable, CaseIterable {
+            case road       // cars and vans drive it back and forth
+            case walk       // people hop along it back and forth
+            case water      // boats sail it (a loop when `loop` is true)
+            case moored     // boats bob in place at each point
+            case air        // gulls circle it as a loop
+            case smoke      // chimney puffs rise from each point
+            case glow       // a lamp pulses at each point (lighthouses)
+        }
+        var kind: Kind
+        var points: [[Double]]
+        var actors: [String]?           // asset names under Map/, e.g. "CarCoral"; defaults per kind
+        var count: Int?                 // how many actors share the path (default 1)
+        var loop: Bool?
     }
 
     struct Airport: Decodable {

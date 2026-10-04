@@ -1,13 +1,31 @@
 {
-  "world": { "width": 4900, "height": 2800, "sea": "#2C7A96" },
+  "world": {"width": 4900, "height": 2800, "sea": "#2C7A96"},
   "regions": [
-    { "id": "R1", "image": "Map/RegionR1", "kind": "route", "route": 1, "center": [900, 1850], "size": [1600, 550] },
-    { "id": "R2", "image": "Map/RegionR2", "kind": "route", "route": 2, "center": [2750, 1900], "size": [2000, 645] },
-    { "id": "R3", "image": "Map/RegionR3", "kind": "route", "route": 3, "center": [2450, 800], "size": [2500, 1153] },
-    { "id": "S1", "image": "Map/RegionS1", "kind": "special", "name": "Red-Eye", "center": [500, 900], "size": [480, 382] },
-    { "id": "S2", "image": "Map/RegionS2", "kind": "special", "name": "Storm Season", "center": [2700, 2500], "size": [480, 286] },
-    { "id": "R4", "image": "Map/RegionR4", "kind": "comingSoon", "name": "Long Haul", "center": [4400, 1800], "size": [650, 435] },
-    { "id": "R5", "image": "Map/RegionR5", "kind": "comingSoon", "name": "Flagship", "center": [4300, 650], "size": [600, 408] }
+    {"id": "R1", "image": "Map/RegionR1", "kind": "route", "route": 1, "center": [900, 1850], "size": [1600, 550],
+      "life": [
+        {"kind": "road", "points": [[0.1, 0.58], [0.15, 0.57], [0.2, 0.57], [0.24, 0.55]], "actors": ["CarCoral", "Van"], "count": 2},
+        {"kind": "walk", "points": [[0.21, 0.31], [0.23, 0.35], [0.26, 0.34], [0.25, 0.3]], "count": 2},
+        {"kind": "moored", "points": [[0.13, 0.66], [0.17, 0.63], [0.19, 0.69]], "actors": ["Rowboat", "Sailboat", "FishingBoat"]},
+        {"kind": "walk", "points": [[0.39, 0.2], [0.43, 0.23], [0.47, 0.21]], "actors": ["PersonCoral", "PersonTeal"], "count": 2},
+        {"kind": "walk", "points": [[0.5, 0.4], [0.53, 0.47], [0.52, 0.53]]},
+        {"kind": "walk", "points": [[0.7, 0.12], [0.74, 0.14]]},
+        {"kind": "glow", "points": [[0.715, 0.06]]},
+        {"kind": "walk", "points": [[0.77, 0.55], [0.8, 0.58], [0.84, 0.6]], "actors": ["PersonSuitcase", "PersonTeal"], "count": 2},
+        {"kind": "road", "points": [[0.82, 0.32], [0.88, 0.3], [0.93, 0.34]], "actors": ["Bus", "CarTeal"], "count": 2},
+        {"kind": "moored", "points": [[0.79, 0.61], [0.82, 0.63]], "actors": ["Speedboat", "FishingBoat"]},
+        {"kind": "water", "points": [[0.35, 0.56], [0.4, 0.66], [0.46, 0.7]], "actors": ["Ferry"]},
+        {"kind": "water", "points": [[0.55, 0.12], [0.62, 0.17], [0.58, 0.23], [0.53, 0.18]], "actors": ["Sailboat"], "loop": true},
+        {"kind": "water", "points": [[0.58, 0.92], [0.66, 0.94], [0.72, 0.91]], "actors": ["Whale"]},
+        {"kind": "air", "points": [[0.23, 0.52], [0.212, 0.577], [0.17, 0.6], [0.128, 0.577], [0.11, 0.52], [0.128, 0.463], [0.17, 0.44], [0.212, 0.463]], "actors": ["Gull"], "count": 2, "loop": true},
+        {"kind": "smoke", "points": [[0.14, 0.46], [0.83, 0.27]]}
+      ]
+    },
+    {"id": "R2", "image": "Map/RegionR2", "kind": "route", "route": 2, "center": [2750, 1900], "size": [2000, 645]},
+    {"id": "R3", "image": "Map/RegionR3", "kind": "route", "route": 3, "center": [2450, 800], "size": [2500, 1153]},
+    {"id": "S1", "image": "Map/RegionS1", "kind": "special", "name": "Red-Eye", "center": [500, 900], "size": [480, 382]},
+    {"id": "S2", "image": "Map/RegionS2", "kind": "special", "name": "Storm Season", "center": [2700, 2500], "size": [480, 286]},
+    {"id": "R4", "image": "Map/RegionR4", "kind": "comingSoon", "name": "Long Haul", "center": [4400, 1800], "size": [650, 435]},
+    {"id": "R5", "image": "Map/RegionR5", "kind": "comingSoon", "name": "Flagship", "center": [4300, 650], "size": [600, 408]}
   ],
   "airports": [
     { "city": "Port Wren",     "region": "R1", "at": [0.32, 0.62], "style": "town" },

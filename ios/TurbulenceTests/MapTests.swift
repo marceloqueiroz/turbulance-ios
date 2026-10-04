@@ -43,6 +43,20 @@ final class MapTests: XCTestCase {
         for r in layout.regions { XCTAssertNotNil(UIImage(named: r.image), "\(r.image) is missing from the asset catalog") }
     }
 
+    func testCityLifePointsSitInTheirRegionAndActorsShip() {
+        for r in layout.regions {
+            for entry in r.life ?? [] {
+                XCTAssertFalse(entry.points.isEmpty, "an empty \(entry.kind) path in \(r.id)")
+                for p in entry.points {
+                    XCTAssertTrue(p.count == 2 && (0...1).contains(p[0]) && (0...1).contains(p[1]), "\(r.id) life point \(p) is outside the region")
+                }
+                for name in entry.actors ?? [] {
+                    XCTAssertNotNil(UIImage(named: "Map/\(name)"), "\(r.id) uses a missing actor \(name)")
+                }
+            }
+        }
+    }
+
     // MARK: States
 
     private func profile(stars: [String: Int] = [:], seen: Set<Int>? = nil) -> Profile {

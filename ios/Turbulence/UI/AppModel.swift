@@ -24,9 +24,13 @@ final class AppModel {
     var briefing: FlightPlan?
     /// Set when the last flight beat the profile's best satisfaction.
     var newBest = false
+    /// A flight just finished with at least one star: the route map flies the toy plane along its leg once.
+    var pendingLeg: FlightPlan?
     let game = GameController()
     /// Off in tests, so they never touch the saves on disk.
     private let persist: Bool
+    /// The developer path editor on the route map (debug builds, -mapEditor).
+    private(set) var mapEditor = false
 
     convenience init() {
         let args = ProcessInfo.processInfo.arguments
@@ -35,6 +39,18 @@ final class AppModel {
             DeviceSettingsStore.delete()
         }
         let device = DeviceSettingsStore.load()          // before the profiles: it reads sound and haptics from an old save
+        #if DEBUG
+        // -demoMap: in memory only, two stars on every Route 1 flight, so the map flies the last leg and reveals Route 2
+        if args.contains("-demoMap"), var slots = Optional(ProfileStore.load()), var p = slots.current {
+            for f in Campaign.route1.flights { p.stars[f.id] = 2 }
+            p.seenRoutes = [1]
+            slots.current = p
+            self.init(slots: slots, device: device, persist: false, arguments: args)
+            pendingLeg = Campaign.route1.flights.last
+            screen = .map
+            return
+        }
+        #endif
         self.init(slots: ProfileStore.load(), device: device, persist: true, arguments: args)
     }
 
@@ -45,6 +61,9 @@ final class AppModel {
         game.apply(device)
         if let p = slots.current { game.apply(p.options, avatar: p.avatar) }
         game.onEnded = { [weak self] plan, result in self?.record(plan, result) }
+        #if DEBUG
+        mapEditor = args.contains("-mapEditor")
+        #endif
         if game.isDebugLaunch { screen = .game }
         else if args.contains("-map") { screen = profile == nil ? .landing : .map }
         else if args.contains("-landing") { screen = .landing }
@@ -143,6 +162,13 @@ final class AppModel {
         profile = p
     }
 
+    /// After the map has played its unlock reveals.
+    func markRevealsSeen() {
+        guard var p = profile else { return }
+        p.seenRoutes = MapState(profile: p).seenAfterVisit
+        profile = p
+    }
+
     func nextFlight(after plan: FlightPlan) -> FlightPlan? {
         guard let next = Campaign.flight(after: plan), profile?.isUnlocked(next) == true else { return nil }
         return next
@@ -175,5 +201,6 @@ final class AppModel {
         guard var p = profile, plan != .prototype else { return }       // debug flights don't count
         newBest = p.record(plan, stars: result.stars, satisfaction: result.satisfaction, goalMet: result.goalMet)
         profile = p
+        if result.stars > 0 { pendingLeg = plan }
     }
 }
