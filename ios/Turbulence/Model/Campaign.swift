@@ -453,6 +453,12 @@ enum Campaign {
 
     static func route(containing id: String) -> Route? { routes.first { $0.flights.contains { $0.id == id } } }
 
+    /// The city a flight lands in (each flight is a leg between two cities on its route).
+    static func destination(of plan: FlightPlan) -> String? {
+        guard let r = route(containing: plan.id), let i = r.flights.firstIndex(of: plan) else { return nil }
+        return r.cities[i + 1]
+    }
+
     static func flight(before plan: FlightPlan) -> FlightPlan? {
         let all = routes.flatMap(\.flights)
         guard let i = all.firstIndex(of: plan), i > 0 else { return nil }

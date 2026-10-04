@@ -136,6 +136,13 @@ final class AppModel {
         screen = .game
     }
 
+    /// The first visit to the route map starts tracking unlock reveals; routes already open count as seen.
+    func markMapVisited() {
+        guard var p = profile, p.seenRoutes == nil else { return }
+        p.seenRoutes = MapState(profile: p).seenAfterVisit
+        profile = p
+    }
+
     func nextFlight(after plan: FlightPlan) -> FlightPlan? {
         guard let next = Campaign.flight(after: plan), profile?.isUnlocked(next) == true else { return nil }
         return next
