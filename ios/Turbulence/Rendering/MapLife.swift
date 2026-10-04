@@ -1,8 +1,9 @@
 import SpriteKit
 import UIKit
 
-/// City life on the route map (Route Map Plan, City life): a few toy cars, people, boats and gulls sliding, hopping and
-/// bobbing along short authored paths, plus chimney smoke, lighthouse lamps and the next departure's airport. It is kept
+/// City life on the route map (Route Map Plan, City life): a few ferries, sailboats, whales and gulls gliding and bobbing
+/// along short authored paths, plus chimney smoke, lighthouse lamps and parked planes. People, cars and buses were taken
+/// out on 2026-10-04 to keep the towns calm; the walk and road kinds still work if they come back. It is kept
 /// calm on purpose: one actor per back-and-forth path (only loops carry more, all moving the same way at the same speed,
 /// so nobody collides), people and cars pause, and quiet airports stay quiet. Paths are checked against the art by
 /// ios/tools/check_life.py. Pieces are static cut-outs; all motion is code. Only actors on screen move, and nothing
@@ -135,8 +136,7 @@ final class MapLifeLayer: SKNode {
         if !still { glow.run(.repeatForever(.sequence([.fadeAlpha(to: 0.15, duration: 0.9), .fadeAlpha(to: 1, duration: 0.9)]))) }
     }
 
-    /// Quiet airports stay quiet: town and city airports keep a parked plane, and only the next departure is busy, with
-    /// a blinking plane, two passengers walking out to it and (at bigger airports) a baggage tractor.
+    /// Town and city airports keep a parked plane; the next departure's plane also blinks.
     private func addAirportLife(_ at: CGPoint, style: MapLayout.Airport.Style, busy: Bool, still: Bool, seed: inout Int) {
         guard busy || style != .airstrip else { return }
         let (plane, _) = sprite("ToyPlane")
@@ -150,14 +150,6 @@ final class MapLifeLayer: SKNode {
             light.zPosition = 2
             addChild(light)
             if !still { light.run(.repeatForever(.sequence([.fadeOut(withDuration: 0.4), .fadeIn(withDuration: 0.4)]))) }
-            // two passengers on separate short walks to the plane, so they never bump into each other
-            addActor("PersonSuitcase", kind: .walk, path: [CGPoint(x: at.x - 20, y: at.y - 18), CGPoint(x: at.x + 10, y: at.y - 12)], loop: false, offset: 0, seed: &seed)
-            addActor("PersonTeal", kind: .walk, path: [CGPoint(x: at.x - 14, y: at.y - 26), CGPoint(x: at.x + 14, y: at.y - 20)], loop: false, offset: 0.6, seed: &seed)
-        }
-        if busy && style != .airstrip {
-            let lap = [CGPoint(x: at.x - 30, y: at.y + 8), CGPoint(x: at.x - 6, y: at.y + 16), CGPoint(x: at.x + 18, y: at.y + 10),
-                       CGPoint(x: at.x - 4, y: at.y + 2)]
-            addActor("BaggageTractor", kind: .road, path: lap, loop: true, offset: 0, seed: &seed)
         }
     }
 

@@ -3,10 +3,6 @@
   "regions": [
     {"id": "R1", "image": "Map/RegionR1", "kind": "route", "route": 1, "center": [900, 1850], "size": [1600, 550],
       "life": [
-        {"kind": "walk", "points": [[0.12, 0.6], [0.15, 0.585], [0.186, 0.584], [0.21, 0.62]], "actors": ["PersonCoral"]},
-        {"kind": "walk", "points": [[0.219, 0.336], [0.235, 0.351], [0.256, 0.343], [0.237, 0.323]], "actors": ["PersonTeal"], "loop": true},
-        {"kind": "walk", "points": [[0.4, 0.215], [0.435, 0.203], [0.47, 0.185]], "actors": ["PersonSuitcase"]},
-        {"kind": "road", "points": [[0.851, 0.365], [0.886, 0.375], [0.93, 0.432]], "actors": ["CarTeal"]},
         {"kind": "water", "points": [[0.4, 0.42], [0.43, 0.55], [0.44, 0.7]], "actors": ["Ferry"]},
         {"kind": "water", "points": [[0.565, 0.12], [0.63, 0.165], [0.595, 0.225], [0.556, 0.172]], "actors": ["Sailboat"], "loop": true},
         {"kind": "air", "points": [[0.218, 0.532], [0.203, 0.581], [0.168, 0.602], [0.133, 0.581], [0.118, 0.532], [0.133, 0.483], [0.168, 0.462], [0.203, 0.483]], "actors": ["Gull"], "loop": true},
@@ -16,12 +12,6 @@
     },
     {"id": "R2", "image": "Map/RegionR2", "kind": "route", "route": 2, "center": [2750, 1900], "size": [2000, 645],
       "life": [
-        {"kind": "walk", "points": [[0.06, 0.28], [0.111, 0.322], [0.133, 0.368]], "actors": ["PersonCoral"]},
-        {"kind": "walk", "points": [[0.259, 0.155], [0.315, 0.19]], "actors": ["PersonSuitcase"]},
-        {"kind": "water", "points": [[0.28, 0.381], [0.326, 0.372], [0.278, 0.427]], "actors": ["Rowboat"]},
-        {"kind": "walk", "points": [[0.407, 0.092], [0.444, 0.126], [0.47, 0.105]], "actors": ["PersonTeal"]},
-        {"kind": "walk", "points": [[0.604, 0.563], [0.641, 0.609], [0.681, 0.552]], "actors": ["PersonCoral"]},
-        {"kind": "road", "points": [[0.693, 0.38], [0.734, 0.384], [0.756, 0.425]], "actors": ["CarCoral"]},
         {"kind": "water", "points": [[0.837, 0.582], [0.845, 0.492]], "actors": ["Ferry"]},
         {"kind": "water", "points": [[0.26, 0.88], [0.23, 0.923], [0.173, 0.963], [0.136, 0.882], [0.164, 0.802], [0.237, 0.851]], "actors": ["Sailboat"], "loop": true},
         {"kind": "water", "points": [[0.58, 0.9], [0.66, 0.93], [0.72, 0.9]], "actors": ["Whale"]},
@@ -32,12 +22,7 @@
     },
     {"id": "R3", "image": "Map/RegionR3", "kind": "route", "route": 3, "center": [2450, 800], "size": [2500, 1153],
       "life": [
-        {"kind": "walk", "points": [[0.347, 0.286], [0.399, 0.265], [0.443, 0.297]], "actors": ["PersonTeal"]},
         {"kind": "water", "points": [[0.336, 0.341], [0.383, 0.328], [0.433, 0.364], [0.381, 0.401]], "actors": ["Sailboat"], "loop": true},
-        {"kind": "walk", "points": [[0.107, 0.5], [0.152, 0.513], [0.176, 0.483]], "actors": ["PersonCoral"]},
-        {"kind": "walk", "points": [[0.426, 0.67], [0.467, 0.64], [0.484, 0.693]], "actors": ["PersonSuitcase"]},
-        {"kind": "road", "points": [[0.643, 0.406], [0.692, 0.429], [0.748, 0.406]], "actors": ["Bus"]},
-        {"kind": "walk", "points": [[0.794, 0.217], [0.816, 0.2], [0.862, 0.232]], "actors": ["PersonTeal"]},
         {"kind": "water", "points": [[0.83, 0.269], [0.759, 0.236], [0.719, 0.187]], "actors": ["Ferry"]},
         {"kind": "air", "points": [[0.86, 0.22], [0.848, 0.255], [0.82, 0.27], [0.792, 0.255], [0.78, 0.22], [0.792, 0.185], [0.82, 0.17], [0.848, 0.185]], "actors": ["Gull"], "loop": true},
         {"kind": "smoke", "points": [[0.334, 0.581]]}
