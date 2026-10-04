@@ -89,6 +89,9 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
 
     var zoom: CGFloat { 1 / cam.xScale }
 
+    /// Bigger screens get bigger pins and a closer opening view: 1× on iPhone (about 402 pt tall), up to 1.5× on iPad.
+    var uiScale: CGFloat { min(1.5, max(1, size.height / 402)) }
+
     // MARK: Static layers
 
     /// The sea: one flat colour with a sprinkle of soft wave dashes, drawn once into a texture.
@@ -269,7 +272,7 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
         }
         if !locked {
             for k in 0..<3 {
-                let star = symbol(k < stars ? "star.fill" : "star", size: 9, color: k < stars ? Palette.calm : Palette.cream)
+                let star = symbol(k < stars ? "star.fill" : "star", size: 9, color: Palette.calm)
                 star.position = CGPoint(x: CGFloat(k - 1) * 11, y: -24)
                 pin.addChild(star)
             }
@@ -385,11 +388,16 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
         badgeNodes[region] = node
     }
 
+    /// An SF Symbol as a sprite in its colour. The symbol is drawn into a bitmap first: SKTexture(image:) on a symbol
+    /// drops the tint and renders it black (filled stars came out dark instead of the HUD's yellow).
     private func symbol(_ name: String, size: CGFloat, color: UIColor) -> SKSpriteNode {
         let config = UIImage.SymbolConfiguration(pointSize: size * 2, weight: .heavy)
-        let image = UIImage(systemName: name, withConfiguration: config)?.withTintColor(color, renderingMode: .alwaysOriginal) ?? UIImage()
+        let tinted = UIImage(systemName: name, withConfiguration: config)?.withTintColor(color, renderingMode: .alwaysOriginal) ?? UIImage()
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        let image = UIGraphicsImageRenderer(size: tinted.size, format: format).image { _ in tinted.draw(at: .zero) }
         let node = SKSpriteNode(texture: SKTexture(image: image))
-        node.size = CGSize(width: image.size.width / 2, height: image.size.height / 2)
+        node.size = CGSize(width: tinted.size.width / 2, height: tinted.size.height / 2)
         return node
     }
 
@@ -482,7 +490,11 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
             guard let self else { return }
             self.configure(profile: self.profile, hiding: self.hiding.subtracting([id]), drawIn: id)
         }
-        let steps = reduceMotion ? [open, .run(completion)] : [.wait(forDuration: 0.9), part, .wait(forDuration: 1.0), open, .wait(forDuration: 1.8), .run(completion)]
+        // hold until the last pin has popped (paths draw 0.25 s apart, each pin pops 0.4 s after its path and takes 0.3 s);
+        // finishing earlier rebuilds the map and the remaining pins would appear all at once
+        let flights = Campaign.routes.first { $0.id == id }?.flights.count ?? 1
+        let drawIn = 0.25 * Double(flights - 1) + 0.4 + 0.3 + 0.4
+        let steps = reduceMotion ? [open, .run(completion)] : [.wait(forDuration: 0.9), part, .wait(forDuration: 1.0), open, .wait(forDuration: drawIn), .run(completion)]
         run(.sequence(steps), withKey: "reveal")
     }
 
@@ -578,6 +590,8 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
 
     override func didChangeSize(_ oldSize: CGSize) {
         guard cam.parent != nil else { return }
+        // the first focus often lands before SpriteView sizes the scene; redo it until the player touches the map
+        if let city = settleFocus, size != oldSize { focus(city: city, animated: false) }
         clampCamera()
         applyZoom()
     }
@@ -593,6 +607,7 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
 
     @objc private func handlePan(_ g: UIPanGestureRecognizer) {
         guard let view = g.view else { return }
+        settleFocus = nil
         let t = g.translation(in: view)
         g.setTranslation(.zero, in: view)
         cam.position.x -= t.x / zoom
@@ -610,6 +625,7 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
 
     @objc private func handlePinch(_ g: UIPinchGestureRecognizer) {
         guard let view = g.view else { return }
+        settleFocus = nil
         cam.removeAction(forKey: "move")
         let focus = convertPoint(fromView: g.location(in: view))
         let before = focus
@@ -652,10 +668,10 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
             let v = convertPoint(toView: CGPoint(x: node.position.x, y: node.position.y + offset / zoom))
             return hypot(v.x - viewPoint.x, v.y - viewPoint.y)
         }
-        if let hit = pins.map({ ($0, screenDistance($0.node, offset: 36)) }).filter({ $0.1 < 30 }).min(by: { $0.1 < $1.1 }) {
+        if let hit = pins.map({ ($0, screenDistance($0.node, offset: 36 * uiScale)) }).filter({ $0.1 < 30 * uiScale }).min(by: { $0.1 < $1.1 }) {
             onTap(.flight(hit.0.plan)); return
         }
-        if let b = badges.first(where: { screenDistance($0.node, offset: 0) < 60 }) { onTap(b.tap); return }
+        if let b = badges.first(where: { screenDistance($0.node, offset: 0) < 60 * uiScale }) { onTap(b.tap); return }
         if let c = covered.first(where: { $0.frame.contains(p) }) { onTap(c.tap) }
     }
 
@@ -674,7 +690,7 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
 
     /// Pins, badges and lines keep their on-screen size; city names fade out when zoomed far out.
     private func applyZoom() {
-        let s = 1 / zoom
+        let s = uiScale / zoom
         for n in screenSized { n.setScale(s) }
         for p in pathNodes { p.node.lineWidth = p.width * s }
         let labelAlpha = min(1, max(0, (zoom - 0.3) / 0.12))
@@ -700,9 +716,13 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
         cam.run(action, withKey: "move")
     }
 
+    /// The opening focus, kept until the player pans or pinches so a late resize can reframe it.
+    private var settleFocus: String?
+
     func focus(city: String, zoom z: CGFloat = 0.55, animated: Bool = true) {
         guard let p = scenePoint(city: city) else { return }
-        move(to: p, zoom: z, duration: animated ? 0.6 : 0)
+        settleFocus = animated ? nil : city
+        move(to: p, zoom: z * uiScale, duration: animated ? 0.6 : 0)
     }
 
     /// Frames a whole route's region.

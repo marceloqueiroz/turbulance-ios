@@ -50,18 +50,23 @@ struct TitleView: View {
                 .accessibilityHidden(true)
 
                 // the crew-wings badge (branding/gemini/logo/round2/W1): big on the title card, tucked above the menu on the landing page
+                // the logo and menu are one block, centred on the left and scaled with the screen (iPhone 1×, iPad up to 1.8×)
+                let s = min(1.8, max(1, size.height / 402))
+                let logoW = 260 * s, logoH = logoW * 558 / 1025, menuH = 198 * s, gap = 18 * s
+                let top = (size.height - logoH - gap - menuH) / 2
                 Image("LogoMenu")
                     .resizable().scaledToFit()
-                    .frame(width: menu ? 260 : min(size.width * 0.4, 360))
+                    .frame(width: menu ? logoW : min(size.width * 0.4, 360 * s))
                     .scaleEffect(logo ? 1 : 0.6).opacity(logo ? 1 : 0)
                     .shadow(color: .black.opacity(0.3), radius: 8, y: 5)
-                    .position(x: size.width * 0.29, y: size.height * (menu ? 0.21 : 0.47))
+                    .position(x: size.width * 0.29, y: menu ? top + logoH / 2 : size.height * 0.47)
                     .allowsHitTesting(false)
                     .accessibilityLabel("Turbulence")
 
                 LandingMenu(app: app)
                     .frame(width: 240)
-                    .position(x: size.width * 0.29, y: size.height * 0.68)
+                    .scaleEffect(s)
+                    .position(x: size.width * 0.29, y: top + logoH + gap + menuH / 2)
                     .opacity(menu ? 1 : 0)
                     .offset(y: menu ? 0 : 16)
                     .allowsHitTesting(menu)

@@ -123,23 +123,6 @@ struct WorldMapView: View {
             MenuChip(profile: app.profile) { app.goToLanding() }
             Spacer()
             HStack(spacing: 6) {
-                ForEach(Campaign.routes) { r in
-                    let open = profile.isUnlocked(r)
-                    Button { scene.focus(route: r.id) } label: {
-                        HStack(spacing: 4) {
-                            if !open { Image(systemName: "lock.fill").font(.system(size: 10, weight: .bold)) }
-                            Text("\(r.id)").font(rounded(15, .heavy))
-                        }
-                        .foregroundStyle(Color.text)
-                        .frame(minWidth: 40, minHeight: 32)
-                        .background(Color.panel, in: Capsule())
-                        .overlay(Capsule().stroke(Color.panelLine, lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("Show route \(r.id), \(r.name)\(open ? "" : ", locked")")
-                }
-            }
-            HStack(spacing: 6) {
                 Image(systemName: "star.fill").foregroundStyle(Color.calm)
                 Text("\(profile.totalStars)").monospacedDigit().foregroundStyle(Color.text)
             }
