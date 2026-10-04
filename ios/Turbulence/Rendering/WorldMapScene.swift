@@ -346,6 +346,12 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
                 cloud.zPosition = CGFloat(k % 3)
                 coverLayer.addChild(cloud)
                 cloudNodes[region, default: []].append(cloud)
+                if storm && !reduceMotion {                      // lightning: now and then the cloud flashes white, twice
+                    let flash = SKAction.sequence([.colorize(with: .white, colorBlendFactor: 0.75, duration: 0.05),
+                                                   .colorize(withColorBlendFactor: 0, duration: 0.12)])
+                    cloud.run(.repeatForever(.sequence([.wait(forDuration: 3.5 + Double(k % 4) * 1.3, withRange: 3), flash,
+                                                        .wait(forDuration: 0.09), flash])), withKey: "lightning")
+                }
                 if !reduceMotion {
                     let dx = CGFloat([18, -24, 30, -16][k % 4]), t = Double([5.5, 7, 6.2, 8][k % 4])
                     cloud.run(.repeatForever(.sequence([.moveBy(x: dx, y: 0, duration: t), .moveBy(x: -dx, y: 0, duration: t)])))
@@ -433,6 +439,17 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
             self.planeShadow.setScale(1 - 0.35 * lift)
         }
         plane.position = CGPoint(x: a.x, y: a.y + 24); plane.zRotation = 0
+        // contrail: soft puffs left behind the tail while it flies
+        let puff = SKAction.run { [weak self] in
+            guard let self else { return }
+            let tail = CGPoint(x: self.plane.position.x + (b.x >= a.x ? -26 : 26), y: self.plane.position.y - 4)
+            let p = SKShapeNode(circleOfRadius: 4)
+            p.fillColor = UIColor.white.withAlphaComponent(0.7); p.strokeColor = .clear
+            p.position = tail; p.zPosition = 4.55
+            self.addChild(p)
+            p.run(.sequence([.group([.scale(to: 2.4, duration: 0.9), .fadeOut(withDuration: 0.9)]), .removeFromParent()]))
+        }
+        run(.sequence([.wait(forDuration: 0.5), .repeat(.sequence([puff, .wait(forDuration: 0.06)]), count: Int(duration / 0.06))]), withKey: "contrail")
         plane.run(.sequence([.wait(forDuration: 0.5), fly, .run { [weak self] in
             guard let self else { return }
             if self.haptics { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
