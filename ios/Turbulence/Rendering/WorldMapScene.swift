@@ -271,9 +271,15 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
         default: stars = 0
         }
         if !locked {
+            // above the disc on a navy pill, clear of the airport art and the next-flight ring
+            let tray = SKShapeNode(rectOf: CGSize(width: 52, height: 20), cornerRadius: 10)
+            tray.fillColor = Palette.navy.withAlphaComponent(0.9)
+            tray.strokeColor = .clear
+            tray.position = CGPoint(x: 0, y: 36)
+            pin.addChild(tray)
             for k in 0..<3 {
-                let star = symbol(k < stars ? "star.fill" : "star", size: 9, color: Palette.calm)
-                star.position = CGPoint(x: CGFloat(k - 1) * 11, y: -24)
+                let star = symbol(k < stars ? "star.fill" : "star", size: 13, color: Palette.calm)
+                star.position = CGPoint(x: CGFloat(k - 1) * 16, y: 36)
                 pin.addChild(star)
             }
         }
