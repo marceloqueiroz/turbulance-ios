@@ -1,0 +1,47 @@
+{
+  "world": { "width": 4900, "height": 2800, "sea": "#2C7A96" },
+  "regions": [
+    { "id": "R1", "image": "Map/RegionR1", "kind": "route", "route": 1, "center": [900, 1850], "size": [1600, 550] },
+    { "id": "R2", "image": "Map/RegionR2", "kind": "route", "route": 2, "center": [2750, 1900], "size": [2000, 645] },
+    { "id": "R3", "image": "Map/RegionR3", "kind": "route", "route": 3, "center": [2450, 800], "size": [2500, 1153] },
+    { "id": "S1", "image": "Map/RegionS1", "kind": "special", "name": "Red-Eye", "center": [500, 900], "size": [480, 382] },
+    { "id": "S2", "image": "Map/RegionS2", "kind": "special", "name": "Storm Season", "center": [2700, 2500], "size": [480, 286] },
+    { "id": "R4", "image": "Map/RegionR4", "kind": "comingSoon", "name": "Long Haul", "center": [4400, 1800], "size": [650, 435] },
+    { "id": "R5", "image": "Map/RegionR5", "kind": "comingSoon", "name": "Flagship", "center": [4300, 650], "size": [600, 408] }
+  ],
+  "airports": [
+    { "city": "Port Wren",     "region": "R1", "at": [0.32, 0.62], "style": "town" },
+    { "city": "Halden",        "region": "R1", "at": [0.29, 0.43], "style": "airstrip" },
+    { "city": "Marisol Bay",   "region": "R1", "at": [0.45, 0.22], "style": "airstrip" },
+    { "city": "Kestrel Falls", "region": "R1", "at": [0.57, 0.63], "style": "airstrip" },
+    { "city": "Ashby Cross",   "region": "R1", "at": [0.73, 0.20], "style": "airstrip" },
+    { "city": "Lumen Harbour", "region": "R1", "at": [0.78, 0.38], "style": "airstrip" },
+    { "city": "Vale City",     "region": "R1", "at": [0.86, 0.42], "style": "town" },
+
+    { "city": "Seabright",     "region": "R2", "at": [0.12, 0.30], "style": "airstrip" },
+    { "city": "Corran Point",  "region": "R2", "at": [0.12, 0.10], "style": "airstrip" },
+    { "city": "Gullhaven",     "region": "R2", "at": [0.25, 0.12], "style": "airstrip" },
+    { "city": "Tidewell",      "region": "R2", "at": [0.30, 0.40], "style": "airstrip" },
+    { "city": "Saltmere",      "region": "R2", "at": [0.38, 0.58], "style": "airstrip" },
+    { "city": "Brightcliff",   "region": "R2", "at": [0.43, 0.08], "style": "airstrip" },
+    { "city": "Pelican Reach", "region": "R2", "at": [0.51, 0.45], "style": "airstrip" },
+    { "city": "Harrow Sands",  "region": "R2", "at": [0.61, 0.24], "style": "airstrip" },
+    { "city": "Coralline",     "region": "R2", "at": [0.63, 0.50], "style": "airstrip" },
+    { "city": "Westwater",     "region": "R2", "at": [0.72, 0.42], "style": "town" },
+    { "city": "Driftmoor",     "region": "R2", "at": [0.77, 0.28], "style": "airstrip" },
+    { "city": "Beacon Isle",   "region": "R2", "at": [0.91, 0.42], "style": "town" },
+
+    { "city": "Amberlyn",       "region": "R3", "at": [0.70, 0.66], "style": "airstrip" },
+    { "city": "Redrock",        "region": "R3", "at": [0.51, 0.74], "style": "airstrip" },
+    { "city": "Cinder Flats",   "region": "R3", "at": [0.28, 0.74], "style": "town" },
+    { "city": "Estrella",       "region": "R3", "at": [0.13, 0.56], "style": "town" },
+    { "city": "Highmoor",       "region": "R3", "at": [0.23, 0.31], "style": "airstrip" },
+    { "city": "Northgate",      "region": "R3", "at": [0.38, 0.20], "style": "airstrip" },
+    { "city": "Silvermere",     "region": "R3", "at": [0.36, 0.52], "style": "airstrip" },
+    { "city": "Cobalt Ridge",   "region": "R3", "at": [0.51, 0.43], "style": "airstrip" },
+    { "city": "Frostholm",      "region": "R3", "at": [0.64, 0.22], "style": "airstrip" },
+    { "city": "Meridian",       "region": "R3", "at": [0.74, 0.46], "style": "city" },
+    { "city": "Larkspur",       "region": "R3", "at": [0.90, 0.46], "style": "airstrip" },
+    { "city": "Aurora Bay",     "region": "R3", "at": [0.86, 0.32], "style": "town" }
+  ]
+}

@@ -383,8 +383,8 @@ enum Campaign {
 
     static let route3 = Route(
         id: 3, name: "Transcontinental", aircraftNames: "B757-Longhaul · A330-Voyager",
-        cities: ["Beacon Isle", "Highmoor", "Estrella", "Cinder Flats", "Northgate", "Redrock", "Silvermere",
-                 "Cobalt Ridge", "Amberlyn", "Frostholm", "Meridian", "Larkspur", "Aurora Bay"],
+        cities: ["Beacon Isle", "Amberlyn", "Redrock", "Cinder Flats", "Estrella", "Highmoor", "Northgate",
+                 "Silvermere", "Cobalt Ridge", "Frostholm", "Meridian", "Larkspur", "Aurora Bay"],
         flights: [
             FlightPlan(id: "TB301", name: "Long Body", aircraft: .longhaul, duration: 150,
                        kinds: full, script: [.drink], maxCap: 3, menu: cafe, strolls: true,

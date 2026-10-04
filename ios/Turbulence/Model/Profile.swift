@@ -26,6 +26,8 @@ struct Profile: Codable, Equatable {
     var best: [String: Int] = [:]       // best satisfaction per flight id
     var medals: Set<String> = []        // flights whose bonus goal was met (GDD §6a)
     var options = GameOptions()
+    /// Routes whose unlock reveal has played on the route map; nil until the map is first opened (older saves too).
+    var seenRoutes: Set<Int>?
 
     var totalStars: Int { stars.values.reduce(0, +) }
 
