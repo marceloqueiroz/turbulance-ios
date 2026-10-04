@@ -38,12 +38,13 @@ final class MapLifeLayer: SKNode {
 
     private var actors: [Actor] = []
     private var time: Double = 0
+    private var stillLife = false
 
     /// Width in world units for each piece (buildings are about 40 wide).
     static let widths: [String: CGFloat] = [
         "CarCoral": 26, "CarTeal": 26, "Van": 28, "Bus": 36, "BaggageTractor": 36, "FuelTruck": 32, "PushbackTug": 24,
         "PersonCoral": 11, "PersonTeal": 11, "PersonSuitcase": 12, "Attendant": 11, "Gull": 20,
-        "Rowboat": 26, "Sailboat": 30, "FishingBoat": 36, "Speedboat": 30, "Ferry": 56, "Whale": 60, "Dolphin": 30, "Buoy": 14,
+        "Rowboat": 26, "Sailboat": 30, "FishingBoat": 36, "Speedboat": 30, "Ferry": 56, "Whale": 66, "Dolphin": 30, "Buoy": 14,
         "ToyPlane": 40,
     ]
 
@@ -62,6 +63,8 @@ final class MapLifeLayer: SKNode {
                airports: [(at: CGPoint, style: MapLayout.Airport.Style, isNext: Bool)], reduceMotion: Bool) {
         removeAllChildren()
         actors.removeAll()
+        whaleTail.removeAll()
+        stillLife = reduceMotion
         var seed = 0
         for region in life {
             for entry in region.entries {
@@ -96,7 +99,14 @@ final class MapLifeLayer: SKNode {
     }
 
     private func addActor(_ name: String, kind: MapLayout.Life.Kind, path: [CGPoint], loop: Bool, offset: CGFloat, seed: inout Int) {
-        let (node, w) = sprite(name)
+        var (node, w) = sprite(name)
+        if name == "Whale" {                            // a puppet in a holder, so it can dive and blow while it travels
+            let (puppet, width) = whalePuppet()
+            w = width
+            node = SKSpriteNode(color: .clear, size: .zero)
+            node.addChild(puppet)
+            if !stillLife { runWhaleCycle(puppet, in: node, width: w) }
+        }
         var lengths: [CGFloat] = [0]
         let pts = loop && path.count > 2 ? path + [path[0]] : path
         for i in 1..<max(1, pts.count) { lengths.append(lengths[i - 1] + hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y)) }
@@ -108,6 +118,136 @@ final class MapLifeLayer: SKNode {
         node.position = pts.first ?? .zero
         addChild(node)
         actors.append(actor)
+    }
+
+    // MARK: Whale
+
+    private var whaleTail: [ObjectIdentifier: SKSpriteNode] = [:]
+
+    /// The whale as a cut-out puppet: body, tail and flipper share one 512 × 420 canvas (branding/map/cut/piece-whale-*),
+    /// and each part turns around its own joint. The tail beats, the flipper paddles and the body rocks.
+    private func whalePuppet() -> (SKSpriteNode, CGFloat) {
+        let w = Self.widths["Whale"] ?? 66
+        let canvas = CGSize(width: 512, height: 420)
+        let size = CGSize(width: w, height: w * canvas.height / canvas.width)
+        let puppet = SKSpriteNode(color: .clear, size: size)
+        func part(_ name: String, pivot: CGPoint?, z: CGFloat) -> SKSpriteNode {
+            let n = SKSpriteNode(imageNamed: "Map/\(name)")
+            n.size = size
+            if let pivot {                              // turn around the joint: anchor there, then put the joint back in place
+                n.anchorPoint = CGPoint(x: pivot.x / canvas.width, y: 1 - pivot.y / canvas.height)
+                n.position = CGPoint(x: (n.anchorPoint.x - 0.5) * size.width, y: (n.anchorPoint.y - 0.5) * size.height)
+            }
+            n.zPosition = z
+            puppet.addChild(n)
+            return n
+        }
+        let body = part("WhaleBody", pivot: nil, z: 0)
+        let flipper = part("WhaleFlipper", pivot: CGPoint(x: 300, y: 305), z: 1)
+        let tail = part("WhaleTail", pivot: CGPoint(x: 368, y: 147), z: 1)
+        whaleTail[ObjectIdentifier(puppet)] = tail
+        guard !stillLife else { return (puppet, w) }
+        let beat = SKAction.sequence([.rotate(toAngle: 0.16, duration: 0.75), .rotate(toAngle: -0.12, duration: 0.75)])
+        beat.timingMode = .easeInEaseOut
+        tail.run(.repeatForever(beat), withKey: "beat")
+        let paddle = SKAction.sequence([.rotate(toAngle: -0.2, duration: 0.9), .rotate(toAngle: 0.12, duration: 0.9)])
+        paddle.timingMode = .easeInEaseOut
+        flipper.run(.repeatForever(paddle))
+        let rock = SKAction.sequence([.group([.rotate(toAngle: 0.03, duration: 1.5), .scaleY(to: 1.025, duration: 1.5)]),
+                                      .group([.rotate(toAngle: -0.03, duration: 1.5), .scaleY(to: 1, duration: 1.5)])])
+        rock.timingMode = .easeInEaseOut
+        body.run(.repeatForever(rock))
+        return (puppet, w)
+    }
+
+    /// The tail's own move for a dive (fluke up, held) and for surfacing (back to its beat).
+    private func tailDive(_ puppet: SKNode) -> SKAction {
+        .run { [weak self] in
+            guard let tail = self?.whaleTail[ObjectIdentifier(puppet)] else { return }
+            tail.removeAction(forKey: "beat")
+            tail.run(.rotate(toAngle: 0.34, duration: 0.6, shortestUnitArc: true))
+        }
+    }
+
+    private func tailResume(_ puppet: SKNode) -> SKAction {
+        .run { [weak self] in
+            guard let tail = self?.whaleTail[ObjectIdentifier(puppet)] else { return }
+            let beat = SKAction.sequence([.rotate(toAngle: 0.16, duration: 0.75), .rotate(toAngle: -0.12, duration: 0.75)])
+            beat.timingMode = .easeInEaseOut
+            tail.run(.sequence([.rotate(toAngle: 0, duration: 0.4), .repeatForever(beat)]), withKey: "beat")
+        }
+    }
+
+    /// Swims at the surface, blows, dives with a splash, glides under water as a faint shadow, then surfaces again.
+    private func runWhaleCycle(_ whale: SKSpriteNode, in holder: SKNode, width w: CGFloat) {
+        // the fluke rises as the body tips nose-down; dive tilt is kept moderate so the tail joint never opens
+        let h = whale.size.height
+        let blowhole = CGPoint(x: -0.2 * w, y: 0.2 * h)          // the piece faces left; the holder flips with the travel
+        let shadow = SKShapeNode(ellipseOf: CGSize(width: w * 0.8, height: h * 0.3))
+        shadow.fillColor = Palette.navy.withAlphaComponent(0.28); shadow.strokeColor = .clear
+        shadow.position = CGPoint(x: 0, y: -h * 0.18); shadow.alpha = 0; shadow.zPosition = -1
+        holder.addChild(shadow)
+
+        let blow = SKAction.run { [weak self] in self?.spout(from: blowhole, in: holder) }
+        let surfaceSwim = SKAction.sequence([.wait(forDuration: 1.6), blow, .wait(forDuration: 0.9), blow, .wait(forDuration: 3.2)])
+        let dive = SKAction.group([
+            tailDive(whale),
+            .run { [weak self] in self?.splash(at: CGPoint(x: 0, y: -h * 0.2), in: holder, width: w) },
+            .rotate(toAngle: 0.38, duration: 1.1, shortestUnitArc: true),
+            .moveTo(y: -h * 0.25, duration: 1.1),
+            .scale(to: 0.85, duration: 1.1),
+            .sequence([.wait(forDuration: 0.35), .fadeOut(withDuration: 0.75)]),
+        ])
+        let underwater = SKAction.sequence([
+            .run { shadow.run(.fadeAlpha(to: 1, duration: 0.6)) },
+            .wait(forDuration: Double.random(in: 4.5...7)),
+            .run { shadow.run(.fadeOut(withDuration: 0.4)) },
+        ])
+        let surface = SKAction.group([
+            tailResume(whale),
+            .run { [weak self] in self?.splash(at: CGPoint(x: 0, y: -h * 0.2), in: holder, width: w)
+                                  self?.spout(from: blowhole, in: holder, small: true) },
+            .sequence([.rotate(toAngle: -0.25, duration: 0), .rotate(toAngle: 0, duration: 1.0, shortestUnitArc: true)]),
+            .moveTo(y: 0, duration: 0.9),
+            .scale(to: 1, duration: 0.9),
+            .fadeIn(withDuration: 0.5),
+        ])
+        whale.run(.sequence([.wait(forDuration: Double.random(in: 0...3)), .repeatForever(.sequence([surfaceSwim, dive, underwater, surface]))]))
+    }
+
+    /// A puff of droplets from the blowhole: they burst up, fan out, fall back and fade, with a little mist.
+    private func spout(from p: CGPoint, in parent: SKNode, small: Bool = false) {
+        let count = small ? 6 : 14
+        for i in 0..<count {
+            let drop = SKShapeNode(circleOfRadius: CGFloat.random(in: 1.8...3.4))
+            drop.fillColor = UIColor.white.withAlphaComponent(0.95); drop.strokeColor = .clear
+            drop.position = p; drop.zPosition = 2; drop.setScale(0.6)
+            parent.addChild(drop)
+            let rise = CGFloat.random(in: small ? 10...16 : 24...38), spread = CGFloat.random(in: -11...11)
+            let up = SKAction.moveBy(x: spread * 0.4, y: rise, duration: 0.42); up.timingMode = .easeOut
+            let down = SKAction.moveBy(x: spread, y: -rise * 0.7, duration: 0.5); down.timingMode = .easeIn
+            drop.run(.sequence([.wait(forDuration: Double(i) * 0.025), .group([.sequence([up, down]), .scale(to: 1.4, duration: 0.92),
+                                .sequence([.wait(forDuration: 0.5), .fadeOut(withDuration: 0.42)])]), .removeFromParent()]))
+        }
+        guard !small else { return }
+        let mist = SKSpriteNode(imageNamed: "Map/Cloud5")
+        mist.size = CGSize(width: 16, height: 10); mist.alpha = 0.6; mist.zPosition = 2
+        mist.color = .white; mist.colorBlendFactor = 0.7                // spray is white, not cloud-shaded grey
+        mist.position = CGPoint(x: p.x, y: p.y + 22)
+        parent.addChild(mist)
+        mist.run(.sequence([.group([.scale(to: 2.2, duration: 1.2), .moveBy(x: 0, y: 8, duration: 1.2), .fadeOut(withDuration: 1.2)]), .removeFromParent()]))
+    }
+
+    /// Two widening rings of foam where the whale breaks the surface.
+    private func splash(at p: CGPoint, in parent: SKNode, width w: CGFloat) {
+        for (i, delay) in [0.0, 0.25].enumerated() {
+            let ring = SKShapeNode(ellipseOf: CGSize(width: w * 0.55, height: w * 0.18))
+            ring.strokeColor = UIColor.white.withAlphaComponent(0.85); ring.lineWidth = i == 0 ? 2 : 1.4; ring.fillColor = .clear
+            ring.position = p; ring.zPosition = -0.5; ring.alpha = 0
+            parent.addChild(ring)
+            ring.run(.sequence([.wait(forDuration: delay), .fadeIn(withDuration: 0.05),
+                                .group([.scale(to: 2.1, duration: 1.1), .fadeOut(withDuration: 1.1)]), .removeFromParent()]))
+        }
     }
 
     private func addSmoke(at p: CGPoint, still: Bool) {
@@ -182,7 +322,7 @@ final class MapLifeLayer: SKNode {
             case .walk: if a.pause <= 0 { pos.y += abs(sin(t * 6)) * 2 }      // a little hop while walking, still when standing
             case .moored, .water:
                 pos.y += sin(t * 1.6) * 1.2
-                a.node.zRotation = CGFloat(sin(t * 1.3) * 0.05)
+                if a.node.children.isEmpty { a.node.zRotation = CGFloat(sin(t * 1.3) * 0.05) }   // the whale rolls on its own
             case .air: a.node.yScale = 0.8 + 0.2 * abs(sin(t * 6))
             default: break
             }
