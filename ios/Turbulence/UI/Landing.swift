@@ -10,6 +10,8 @@ struct TitleView: View {
     @State private var start = Date.now
     @State private var arrived = false
     @State private var logo = false
+    /// Counts the bumps on the landing page; each one plays the jolt below.
+    @State private var bumps = 0
 
     private var menu: Bool { app.screen == .landing }
 
@@ -26,11 +28,11 @@ struct TitleView: View {
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
+            let shake = reduceMotion ? 0 : app.options.shake.scale     // follows the last crew member's Screen shake option
             ZStack {
                 TimelineView(.animation(paused: reduceMotion)) { timeline in
                     let t = timeline.date.timeIntervalSince(start)
                     ZStack {
-                        LinearGradient(colors: [Color(red: 0.16, green: 0.27, blue: 0.47), .sky], startPoint: .top, endPoint: .bottom)
                         ForEach(Self.clouds.indices.dropLast(), id: \.self) { cloud(Self.clouds[$0], t: t, in: size) }
                         // the cabin rides the bumps: a slow bob and a gentle roll, slightly out of step
                         Image("TitleCabin")
@@ -50,7 +52,7 @@ struct TitleView: View {
                 // the crew-wings badge (branding/gemini/logo/round2/W1): big on the title card, tucked above the menu on the landing page
                 Image("LogoMenu")
                     .resizable().scaledToFit()
-                    .frame(width: menu ? 290 : min(size.width * 0.44, 400))
+                    .frame(width: menu ? 260 : min(size.width * 0.4, 360))
                     .scaleEffect(logo ? 1 : 0.6).opacity(logo ? 1 : 0)
                     .shadow(color: .black.opacity(0.3), radius: 8, y: 5)
                     .position(x: size.width * 0.29, y: size.height * (menu ? 0.21 : 0.47))
@@ -66,7 +68,12 @@ struct TitleView: View {
                     .accessibilityHidden(!menu)
             }
             .animation(.spring(response: 0.6, dampingFraction: 0.8), value: menu)
+            .keyframeAnimator(initialValue: Jolt(), trigger: bumps) { content, j in
+                content.offset(x: j.x * shake, y: j.y * shake).rotationEffect(.degrees(j.angle * shake))
+            } keyframes: { _ in Jolt.keyframes }
         }
+        // the sky stays put while everything in front of it jolts, so the screen edges never show a gap
+        .background(LinearGradient(colors: [Color(red: 0.16, green: 0.27, blue: 0.47), .sky], startPoint: .top, endPoint: .bottom))
         .ignoresSafeArea()                             // measure the whole screen, not just the safe area
         .onAppear {
             start = .now
@@ -82,6 +89,17 @@ struct TitleView: View {
             guard !menu else { return }
             try? await Task.sleep(for: .seconds(2.2))
             app.finishSplash()
+        }
+        .task(id: menu) {
+            // a patch of rough air every few seconds while the menu is up
+            guard menu else { return }
+            let haptic = UIImpactFeedbackGenerator(style: .medium)
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(Double.random(in: 5...9)))
+                guard !Task.isCancelled, app.sheet == nil else { continue }    // no bumps under an open card
+                bumps += 1
+                if app.device.haptics { haptic.impactOccurred(intensity: 0.7) }
+            }
         }
     }
 
@@ -99,6 +117,35 @@ struct TitleView: View {
             .blur(radius: c.blur)
             .opacity(c.opacity)
             .position(x: (x < 0 ? x + span : x) - w / 2, y: size.height * c.y)
+    }
+}
+
+/// One bump of turbulence: two hard jolts, then a wobble that settles (about 1 s).
+struct Jolt {
+    var x = 0.0, y = 0.0, angle = 0.0
+
+    @KeyframesBuilder<Jolt> static var keyframes: some Keyframes<Jolt> {
+        KeyframeTrack(\Jolt.y) {
+            LinearKeyframe(-9, duration: 0.06)
+            SpringKeyframe(6, duration: 0.12)
+            LinearKeyframe(-5, duration: 0.08)
+            SpringKeyframe(3, duration: 0.14)
+            SpringKeyframe(-1.5, duration: 0.2)
+            SpringKeyframe(0, duration: 0.4)
+        }
+        KeyframeTrack(\Jolt.x) {
+            LinearKeyframe(4, duration: 0.07)
+            LinearKeyframe(-5, duration: 0.1)
+            LinearKeyframe(3, duration: 0.1)
+            LinearKeyframe(-1.5, duration: 0.15)
+            SpringKeyframe(0, duration: 0.5)
+        }
+        KeyframeTrack(\Jolt.angle) {
+            LinearKeyframe(-0.8, duration: 0.08)
+            SpringKeyframe(0.6, duration: 0.15)
+            SpringKeyframe(-0.3, duration: 0.2)
+            SpringKeyframe(0, duration: 0.5)
+        }
     }
 }
 
