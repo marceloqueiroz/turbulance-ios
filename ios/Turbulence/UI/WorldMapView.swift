@@ -135,7 +135,8 @@ struct WorldMapView: View {
             }
             RoundButton(system: "gearshape.fill", label: "Options") { app.sheet = .options }
         }
-        .padding(.horizontal, 20).padding(.top, 8)
+        .padding(.horizontal, 24).padding(.top, 8)
+        .ignoresSafeArea(edges: .horizontal)     // 24 pt from the screen edge, not from the notch inset
     }
 
     private func handle(_ tap: WorldMapScene.Tap) {
