@@ -35,13 +35,27 @@ extension Aircraft {
 enum CameraRig {
     static let referenceView = (w: 828.0, h: 350.0)
     static let hullMargin = 22.0
+    /// Screen points between each end of the crew's work area and the screen edge (GDD §8a).
+    static let endPad = 32.0
+    /// Cabin units of wall the camera may crop above and below: the window strip, never the seats.
+    static let wallCrop = 36.0
+
+    /// The whole-cabin camera scale: the work area plus `endPad` fills the width, unless the cabin is too tall.
+    static func fitScale(availW: Double, availH: Double, layout: CabinLayout) -> Double {
+        min((availW - 2 * endPad) / (layout.endX - layout.startX), availH / (layout.height - 2 * wallCrop))
+    }
+
+    /// The x range the camera may show at a scale: the work area and its margin, no further.
+    static func xRange(_ layout: CabinLayout, scale s: Double) -> ClosedRange<Double> {
+        (layout.startX - endPad / s)...(layout.endX + endPad / s)
+    }
 
     /// Half the visible width and height around the camera's centre, in cabin units.
     static func visibleHalf(_ layout: CabinLayout, view: (w: Double, h: Double) = referenceView) -> (w: Double, h: Double) {
-        let iw = layout.width - 2 * hullMargin, ih = layout.height - 2 * hullMargin
-        let fit = min(view.w / iw, view.h / ih)
+        let fit = fitScale(availW: view.w, availH: view.h, layout: layout)
         let s = max(fit, layout.aircraft.followZoom ?? fit)
-        return (min(iw, view.w / s) / 2, min(ih, view.h / s) / 2)
+        let r = xRange(layout, scale: s), ih = layout.height - 2 * hullMargin
+        return (min(r.upperBound - r.lowerBound, view.w / s) / 2, min(ih, view.h / s) / 2)
     }
 }
 
@@ -69,11 +83,13 @@ struct JumpSeat: Equatable {
 struct Lavatory: Equatable {
     let doorX: Double
     let aisle: Int
+    /// Which side of its aisle it stands: problems over a lavatory show on that side.
+    var above = true
 }
 
 /// A fixed fixture drawn in the static cabin art.
 struct CabinBlock: Equatable {
-    enum Kind: Equatable { case counter, lavatory, closet }
+    enum Kind: Equatable { case counter, lavatory, closet, wardrobe }
     let kind: Kind
     let x: Double, y: Double, w: Double, h: Double
     var label = ""
@@ -160,6 +176,11 @@ struct CabinLayout: Equatable {
         return copy
     }
 
+    /// The crew's work area from the forward galley to the end of the aft service blocks (or the last row
+    /// when nothing is fitted aft): the camera keeps this in view with a fixed margin, and the end walls close it.
+    var startX: Double { blocks.map(\.x).min() ?? 60 }
+    var endX: Double { max(blocks.map { $0.x + $0.w }.max() ?? 0, lastRowX + 20) }
+
     var minX: Double { 70 }
     var maxX: Double { min(aftX + 96, width - 30) }
     var firstRowX: Double { rows.first?.x ?? 235 }
@@ -184,7 +205,7 @@ struct CabinLayout: Equatable {
     struct MidGap { let afterRow: Int; let galley: Bool }
 
     static func build(_ aircraft: Aircraft, seatBlocks: [Int], premiumRows: Int, economyRows: Int,
-                      fwdLav: Bool, midGap: MidGap? = nil) -> CabinLayout {
+                      fwdLav: Bool, midGap: MidGap? = nil, premiumSeats: [Int]? = nil) -> CabinLayout {
         // Vertical: seat blocks separated by aisles; 44 between seats, 72 from an aisle to its seats.
         var y = 64.0
         var blockYs: [[Double]] = []
@@ -214,10 +235,20 @@ struct CabinLayout: Equatable {
                 economy.append(SeatSpot(y: sy, aisle: aisle, window: window, reach: reach, letter: letters[letter]))
                 letter += 1
             }
-            // premium: one wide seat per block, centred
-            let mid = ys.reduce(0, +) / Double(n)
-            let aisle = bi == 0 ? 0 : min(bi, aisles.count - 1)
-            premium.append(SeatSpot(y: mid, aisle: aisle, window: true, reach: 0, letter: letters[bi * 3]))
+            // premium: one wide seat per block, centred, or two (2-2 / 1-2-1), each next to its own aisle
+            let lastBlock = blockYs.count - 1
+            if (premiumSeats?[bi] ?? 1) == 2 {
+                let inset = n >= 4 ? 22.0 : 10.0
+                let upper = bi == 0 ? 0 : bi - 1, lower = bi == lastBlock ? aisles.count - 1 : (bi == 0 ? 0 : bi)
+                premium.append(SeatSpot(y: ys.first! + inset, aisle: upper, window: bi == 0, reach: bi == 0 ? 1 : 0,
+                                        letter: letters[min(bi * 3, 9)]))
+                premium.append(SeatSpot(y: ys.last! - inset, aisle: lower, window: bi == lastBlock, reach: bi == lastBlock ? 1 : 0,
+                                        letter: letters[min(bi * 3 + 2, 9)]))
+            } else {
+                let mid = ys.reduce(0, +) / Double(n)
+                let aisle = bi == 0 ? 0 : min(bi, aisles.count - 1)
+                premium.append(SeatSpot(y: mid, aisle: aisle, window: true, reach: 0, letter: letters[min(bi * 3, 9)]))
+            }
         }
 
         var blocks: [CabinBlock] = []
@@ -248,7 +279,9 @@ struct CabinLayout: Equatable {
         var x0 = 235.0
         if fwdLav {
             blocks.append(CabinBlock(kind: .lavatory, x: 222, y: bottomAisle + 62, w: 66, h: height - 30 - (bottomAisle + 62), label: "LAV"))
-            lavs.append(Lavatory(doorX: 255, aisle: last))
+            lavs.append(Lavatory(doorX: 255, aisle: last, above: false))
+            // a wardrobe opposite, so the first premium row isn't fronted by empty floor
+            blocks.append(CabinBlock(kind: .wardrobe, x: 222, y: 30, w: 66, h: topAisle - 72))
             x0 = 322
         }
 
@@ -268,7 +301,7 @@ struct CabinLayout: Equatable {
             if let gap = midGap, i == gap.afterRow {
                 let gx = x - 18
                 if gap.galley {
-                    blocks.append(CabinBlock(kind: .counter, x: gx + 10, y: 30, w: 76, h: topAisle - 86, label: "MID GALLEY"))
+                    blocks.append(CabinBlock(kind: .counter, x: gx + 10, y: 30, w: 76, h: topAisle - 86, label: ""))
                     blocks.append(CabinBlock(kind: .counter, x: gx + 10, y: bottomAisle + 56, w: 76, h: height - 50 - (bottomAisle + 56)))
                     bins += [SupplyBin(.drinks, x: gx + 48, y: topAisle - 102, aisle: 0),
                              SupplyBin(item: .snack, x: gx + 30, y: bottomAisle + 102, aisle: last),
@@ -284,7 +317,10 @@ struct CabinLayout: Equatable {
                     galleyFloors.append((gx + 4)...(gx + 92))
                 } else {
                     blocks.append(CabinBlock(kind: .lavatory, x: gx + 14, y: 30, w: 68, h: topAisle - 72, label: "LAV"))
-                    blocks.append(CabinBlock(kind: .closet, x: gx + 14, y: bottomAisle + 62, w: 68, h: height - 30 - (bottomAisle + 62)))
+                    // a small galley under it: drinks and snacks for the back half of the cabin
+                    blocks.append(CabinBlock(kind: .counter, x: gx + 6, y: bottomAisle + 56, w: 88, h: height - 50 - (bottomAisle + 56)))
+                    bins += [SupplyBin(.drinks, x: gx + 33, y: bottomAisle + 102, aisle: last),
+                             SupplyBin(item: .snack, x: gx + 76, y: bottomAisle + 102, aisle: last)]
                     lavs.append(Lavatory(doorX: gx + 34, aisle: 0))
                     jumpXs.append(gx + 62)
                 }
@@ -295,22 +331,17 @@ struct CabinLayout: Equatable {
             x += 36
         }
 
-        // Aft: lavatory on top; trash and the plunger in the closet (two-aisle: lavs both sides).
+        // Aft: two equal service blocks, a lavatory and one station each: the plunger above the top aisle,
+        // the trash below the bottom one.
         let aftX = rows.last!.x + 31
-        blocks.append(CabinBlock(kind: .lavatory, x: aftX, y: 30, w: 66, h: topAisle - 72, label: "LAV"))
-        lavs.append(Lavatory(doorX: aftX + 18, aisle: 0))
-        let closetTop: Double, closetBottom: Double, closetAisle: Int
-        if aisles.count > 1 {
-            blocks.append(CabinBlock(kind: .lavatory, x: aftX, y: bottomAisle + 62, w: 66, h: height - 30 - (bottomAisle + 62), label: "LAV"))
-            lavs.append(Lavatory(doorX: aftX + 18, aisle: last))
-            closetTop = topAisle + 62; closetBottom = aisles[1] - 62; closetAisle = 0
-        } else {
-            closetTop = bottomAisle + 62; closetBottom = height - 30; closetAisle = last
-        }
-        blocks.append(CabinBlock(kind: .closet, x: aftX, y: closetTop, w: 110, h: closetBottom - closetTop, label: "AFT"))
-        let by = aisles.count > 1 ? (closetTop + closetBottom) / 2 + 10 : bottomAisle + 110
-        bins += [SupplyBin(.trash, x: aftX + 38, y: by, aisle: closetAisle),
-                 SupplyBin(item: .plunger, x: aftX + 78, y: by, aisle: closetAisle)]
+        let topH = topAisle - 72, bottomTop = bottomAisle + 62, bottomH = height - 30 - (bottomAisle + 62)
+        blocks += [CabinBlock(kind: .lavatory, x: aftX, y: 30, w: 66, h: topH, label: "LAV"),
+                   CabinBlock(kind: .closet, x: aftX + 66, y: 30, w: 44, h: topH),
+                   CabinBlock(kind: .lavatory, x: aftX, y: bottomTop, w: 66, h: bottomH, label: "LAV"),
+                   CabinBlock(kind: .closet, x: aftX + 66, y: bottomTop, w: 44, h: bottomH)]
+        lavs += [Lavatory(doorX: aftX + 18, aisle: 0), Lavatory(doorX: aftX + 18, aisle: last, above: false)]
+        bins += [SupplyBin(item: .plunger, x: aftX + 88, y: topAisle - 102, aisle: 0),
+                 SupplyBin(.trash, x: aftX + 88, y: bottomAisle + 102, aisle: last)]
 
         jumpXs.append(aftX + 80)                    // aft, past the lavatory
         let jumps = jumpXs.flatMap { x in aisles.indices.map { JumpSeat(x: x, aisle: $0) } }
@@ -321,10 +352,10 @@ struct CabinLayout: Equatable {
     }
 
     static let comet = build(.comet, seatBlocks: [2, 2], premiumRows: 0, economyRows: 12, fwdLav: false)
-    static let swift = build(.swift, seatBlocks: [3, 3], premiumRows: 3, economyRows: 20, fwdLav: true)
-    static let current = build(.current, seatBlocks: [3, 3], premiumRows: 3, economyRows: 20, fwdLav: true)
-    static let longhaul = build(.longhaul, seatBlocks: [3, 3], premiumRows: 0, economyRows: 24, fwdLav: true,
-                                midGap: MidGap(afterRow: 12, galley: false))
-    static let voyager = build(.voyager, seatBlocks: [2, 4, 2], premiumRows: 0, economyRows: 16, fwdLav: false,
-                               midGap: MidGap(afterRow: 8, galley: true))
+    static let swift = build(.swift, seatBlocks: [3, 3], premiumRows: 3, economyRows: 20, fwdLav: true, premiumSeats: [2, 2])
+    static let current = build(.current, seatBlocks: [3, 3], premiumRows: 3, economyRows: 20, fwdLav: true, premiumSeats: [2, 2])
+    static let longhaul = build(.longhaul, seatBlocks: [3, 3], premiumRows: 5, economyRows: 24, fwdLav: true,
+                                midGap: MidGap(afterRow: 12, galley: false), premiumSeats: [2, 2])
+    static let voyager = build(.voyager, seatBlocks: [2, 4, 2], premiumRows: 5, economyRows: 16, fwdLav: false,
+                               midGap: MidGap(afterRow: 8, galley: true), premiumSeats: [1, 2, 1])
 }

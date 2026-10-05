@@ -82,6 +82,8 @@ final class CabinScene: SKScene {
     }
 
     private var worldW = 1000.0
+    /// The cabin on show (fitted for this flight): the camera frames its work area.
+    private var shownLayout = Aircraft.comet.layout
     private var worldH = 380.0
     private var builtFor: String?
     private var freshNodes: [Int: SKSpriteNode] = [:]      // stations new on this flight, popped in at Go
@@ -201,9 +203,10 @@ final class CabinScene: SKScene {
     /// inside (seats, galleys, lavatories), not the fuselage, and the wall colour fills the rest (GDD §8a).
     static let hullMargin = 22.0
 
-    /// The camera scale that fits a cabin's interior into the clear area; shared with the intro's final shot.
-    static func fitScale(availW: Double, availH: Double, width: Double, height: Double) -> Double {
-        min(availW / (width - 2 * hullMargin), availH / (height - 2 * hullMargin))
+    /// The camera scale that fits the crew's work area (plus a fixed margin) into the clear area; shared with
+    /// the intro's final shot.
+    static func fitScale(availW: Double, availH: Double, layout: CabinLayout) -> Double {
+        CameraRig.fitScale(availW: availW, availH: availH, layout: layout)
     }
 
     /// Where the world's bottom edge sits (scene y, up): the interior centred in the clear area.
@@ -218,7 +221,7 @@ final class CabinScene: SKScene {
         // fit the cabin into the clear area (no clipping under the cutout), centred in it
         let i = contentInsets
         let availW = size.width - i.left - i.right, availH = size.height - i.top - i.bottom
-        fitS = CGFloat(Self.fitScale(availW: Double(availW), availH: Double(availH), width: worldW, height: worldH))
+        fitS = CGFloat(Self.fitScale(availW: Double(availW), availH: Double(availH), layout: shownLayout))
         // model y runs down while the scene's y runs up: the top inset lowers the cabin, the bottom inset raises it
         clear = CGRect(x: i.left, y: i.bottom, width: availW, height: availH)
         updateCamera(dt: 0, snap: !following)
@@ -245,15 +248,24 @@ final class CabinScene: SKScene {
         }
     }
 
-    private var interiorCenter: CGPoint { CGPoint(x: worldW / 2, y: worldH / 2) }
+    private var interiorCenter: CGPoint { CGPoint(x: (shownLayout.startX + shownLayout.endX) / 2, y: worldH / 2) }
 
     /// The visible half-size around the camera's centre, in cabin units.
     private var visibleHalf: (w: Double, h: Double) { (Double(clear.width / 2 / camS), Double(clear.height / 2 / camS)) }
 
     /// Keeps a camera centre inside the cabin's interior (end stops): centred when the view is bigger than the cabin.
     private func clampAxis(_ v: Double, half: Double, size: Double) -> Double {
-        let lo = Self.hullMargin, hi = size - Self.hullMargin
+        clampAxis(v, half: half, range: Self.hullMargin...(size - Self.hullMargin))
+    }
+
+    private func clampAxis(_ v: Double, half: Double, range r: ClosedRange<Double>) -> Double {
+        let lo = r.lowerBound, hi = r.upperBound
         return hi - lo <= 2 * half ? (lo + hi) / 2 : min(max(v, lo + half), hi - half)
+    }
+
+    /// Along the cabin the camera stops at the work area's ends plus the fixed margin (GDD §8a).
+    private func clampX(_ v: Double, half: Double) -> Double {
+        clampAxis(v, half: half, range: CameraRig.xRange(shownLayout, scale: Double(camS)))
     }
 
     /// Moves the camera: a dead zone over the middle 40% of the screen, a little look-ahead in the walking
@@ -274,9 +286,9 @@ final class CabinScene: SKScene {
         } else {
             goal = interiorCenter
         }
-        goal.x = clampAxis(goal.x, half: half.w, size: worldW)
+        goal.x = clampX(goal.x, half: half.w)
         goal.y = clampAxis(goal.y, half: half.h, size: worldH)
-        let aim = CGPoint(x: peekX.map { clampAxis($0, half: half.w, size: worldW) } ?? goal.x, y: goal.y)
+        let aim = CGPoint(x: peekX.map { clampX($0, half: half.w) } ?? goal.x, y: goal.y)
         let k = snap ? 1 : CGFloat(1 - exp(-dt / 0.075))
         focus.x += (aim.x - focus.x) * k
         focus.y += (aim.y - focus.y) * k
@@ -382,6 +394,7 @@ final class CabinScene: SKScene {
         binHighlights.removeAll()
         worldW = layout.width
         worldH = layout.height
+        shownLayout = layout
         builtFor = staticKey(layout, hiding)
 
         // no wings: the camera frames the inside of the cabin only (GDD §8a)
@@ -589,7 +602,10 @@ final class CabinScene: SKScene {
                     n.position = pt(c.x, c.y)
                     n.pointTail(c.y > o.y ? -1 : 1)
                 } else {
-                    n.position = pt(o.x, o.y - (o.kind.isCart ? 22 : o.kind.atLavatory ? 30 : 2))
+                    // a lavatory's problem sits over its door, on its side of the aisle
+                    let lavBelow = o.lavatory.map { sim.layout.lavatories[$0].above == false } ?? false
+                    let lift: Double = o.kind.isCart ? 22 : o.kind.atLavatory ? (lavBelow ? -30 : 30) : 2
+                    n.position = pt(o.x, o.y - lift)
                 }
                 iconLayer.addChild(n); iconNodes[o.id] = n; return n
             }()

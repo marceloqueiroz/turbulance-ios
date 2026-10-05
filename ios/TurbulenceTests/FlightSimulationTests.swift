@@ -690,9 +690,29 @@ final class FlightSimulationTests: XCTestCase {
             XCTAssertEqual(L.aisles.count > 1, !L.crossovers.isEmpty, "\(a) two aisles need crossovers")
             XCTAssertTrue(L.bins.contains { $0.kind == .trash }, "\(a) has a trash bin")
         }
-        XCTAssertEqual(CabinLayout.swift.rows.filter(\.premium).flatMap(\.seats).count, 6)
-        XCTAssertEqual(CabinLayout.longhaul.lavatories.count, 3)
+        XCTAssertEqual(CabinLayout.swift.rows.filter(\.premium).flatMap(\.seats).count, 12)        // 3 rows of 2-2
+        XCTAssertEqual(CabinLayout.voyager.rows.filter(\.premium).flatMap(\.seats).count, 20)      // 5 rows of 1-2-1
+        XCTAssertEqual(CabinLayout.longhaul.lavatories.count, 4)                                     // forward, mid, two aft
         XCTAssertEqual(CabinLayout.voyager.aisles.count, 2)
+    }
+
+    func testAftServiceBlocksAndEndWallsFrameTheWorkArea() {
+        for a in Aircraft.allCases {
+            let L = a.layout
+            // two equal aft blocks: a lavatory and one station each, on both sides of the cabin
+            let aft = L.blocks.filter { $0.x >= L.aftX }
+            XCTAssertEqual(aft.filter { $0.kind == .lavatory }.count, 2, "\(a) has two aft lavatories")
+            XCTAssertEqual(Set(aft.map { $0.w }).count, 2, "\(a) aft blocks: one lavatory width and one station width")
+            XCTAssertTrue(L.bins.contains { $0.item == .plunger && $0.x > L.aftX }, "\(a) plunger aft")
+            XCTAssertLessThanOrEqual(L.bins.map(\.x).max()!, L.maxX, "\(a) every station is in reach")
+            // the camera keeps 32 pt between the work area and the screen edges
+            let s = CameraRig.fitScale(availW: CameraRig.referenceView.w, availH: CameraRig.referenceView.h, layout: L)
+            let r = CameraRig.xRange(L, scale: s)
+            XCTAssertEqual((L.startX - r.lowerBound) * s, CameraRig.endPad, accuracy: 0.001)
+            XCTAssertEqual((r.upperBound - L.endX) * s, CameraRig.endPad, accuracy: 0.001)
+        }
+        XCTAssertTrue(CabinLayout.swift.blocks.contains { $0.kind == .wardrobe }, "a wardrobe faces the forward lavatory")
+        XCTAssertTrue(CabinLayout.longhaul.bins.filter { $0.kind == .drinks }.count == 2, "the B757 mid galley pours drinks")
     }
 
     func testCrewChangesAisleOnlyAtAGalley() {
@@ -716,11 +736,13 @@ final class FlightSimulationTests: XCTestCase {
     func testCartSlowsTheCrewAndAStuckCartNeedsAFreeHand() {
         let sim = runningSim(plan: flight("TB208"))
         step(sim, seconds: 7)
-        sim.rollOutCart(at: 600)
-        sim.crew.x = 580
-        sim.crew.target = CrewTarget(x: 1000, action: .none)
+        // roll the cart where no stray bag lies within reach, so the tap below can only mean the cart
+        let at = [600.0, 700, 800, 900, 1000].first { x in !sim.occurrences.contains { abs($0.x - x) < 80 } } ?? 600
+        sim.rollOutCart(at: at)
+        sim.crew.x = at - 20
+        sim.crew.target = CrewTarget(x: at + 400, action: .none)
         sim.update(dt: 0.1)
-        XCTAssertEqual(sim.crew.x - 580, Tuning.crewSpeed * Tuning.cartFactor * 0.1, accuracy: 0.5)
+        XCTAssertEqual(sim.crew.x - (at - 20), Tuning.crewSpeed * Tuning.cartFactor * 0.1, accuracy: 0.5)
 
         XCTAssertTrue(sim.spawn(.stuckCart))
         let o = sim.occurrences.first { $0.kind == .stuckCart }!

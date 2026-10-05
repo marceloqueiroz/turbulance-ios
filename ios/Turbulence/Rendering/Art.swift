@@ -220,21 +220,9 @@ enum Art {
             c.saveGState()
             c.addPath(CGPath(rect: CGRect(x: -pad, y: 22, width: W + 2 * pad, height: H - 44), transform: nil)); c.clip()
 
-            // floor, then galley tiles past both ends of the cabin
+            // floor: plain cream, end to end (GDD §8a)
             linear(c, CGPath(rect: CGRect(x: -pad, y: 0, width: W + 2 * pad, height: H), transform: nil),
                    [UIColor(hex: 0xD6CEC1), Palette.cream, Palette.cream, UIColor(hex: 0xD6CEC1)], [0, 0.1, 0.9, 1], from: P(0, 22), to: P(0, H - 22))
-            for (x0, x1) in [(-pad, CGFloat(56)), (W - 22, W + pad)] {
-                var i = 0, tx = x0
-                while tx < x1 {
-                    var j = 0, ty: CGFloat = 22
-                    while ty < H - 22 {
-                        c.setFillColor(((i + j) % 2 == 1 ? navy(0.07) : white(0.25)).cgColor)
-                        c.fill(CGRect(x: tx, y: ty, width: min(11, x1 - tx), height: min(11, H - 22 - ty)))
-                        ty += 11; j += 1
-                    }
-                    tx += 11; i += 1
-                }
-            }
 
             // aisle carpet with woven diamonds, one per aisle
             for a in aisles {
@@ -253,23 +241,10 @@ enum Art {
                 c.setFillColor(navy(0.14).cgColor); c.fill(CGRect(x: 172, y: a - 38, width: aftX - 174, height: 1.5)); c.fill(CGRect(x: 172, y: a + 36.5, width: aftX - 174, height: 1.5))
             }
 
-            // galley floors: tiles spanning every aisle (crew can cross here)
-            for range in L.galleyFloors {
+            // galley floors: plain floor over the carpet where a galley spans the aisles (crew can cross here)
+            for range in L.galleyFloors where range.lowerBound > 100 {
                 let x0 = CGFloat(range.lowerBound), x1 = CGFloat(range.upperBound)
-                let y0 = top - 54, y1 = bottom + 56
-                if x0 > 100 { c.setFillColor(Palette.cream.cgColor); c.fill(CGRect(x: x0, y: y0, width: x1 - x0, height: y1 - y0)) }
-                var i = 0
-                var tx = x0
-                while tx < x1 {
-                    var j = 0
-                    var ty = y0
-                    while ty < y1 {
-                        c.setFillColor(((i + j) % 2 == 1 ? navy(0.07) : white(0.25)).cgColor)
-                        c.fill(CGRect(x: tx, y: ty, width: min(11, x1 - tx), height: min(11, y1 - ty)))
-                        ty += 11; j += 1
-                    }
-                    tx += 11; i += 1
-                }
+                c.setFillColor(Palette.cream.cgColor); c.fill(CGRect(x: x0, y: top - 54, width: x1 - x0, height: bottom + 56 - (top - 54)))
             }
 
             // coral runner down each aisle (GDD §8a)
@@ -306,15 +281,6 @@ enum Art {
                 }
             }
 
-            // flight deck door with keypad
-            let mid = (top + bottom) / 2
-            let door = rr(28, mid - 34, 26, 68, 5)
-            linear(c, door, [UIColor(hex: 0xA7AEB9), Palette.steel], [0, 1], from: P(28, 0), to: P(54, 0))
-            stroke(c, door, UIColor(hex: 0x8A919C), 1.5)
-            fill(c, rr(44, mid - 10, 6, 9, 1.5), Palette.navy)
-            dot(c, 47, mid - 13, 1.2, UIColor(hex: 0x6FD08C))
-            fill(c, rr(33, mid + 8, 4, 14, 2), UIColor(hex: 0x56606F))
-
             // fixtures: galley counters, lavatories, closets
             for b in L.blocks {
                 let x = CGFloat(b.x), y = CGFloat(b.y), w = CGFloat(b.w), h = CGFloat(b.h)
@@ -326,18 +292,8 @@ enum Art {
                 linear(c, box, [UIColor(hex: 0xE1E4E8), UIColor(hex: 0xB8BEC7)], [0, 1], from: P(0, y), to: P(0, y + h))
                 stroke(c, box, UIColor(hex: 0x9AA2AE), 1)
                 switch b.kind {
-                case .counter:
-                    let facesAisle = above || y > bottom
-                    if facesAisle {
-                        let bayY = above ? y + h - 24 : y + 4
-                        for i in 0..<Int((w - 6) / 27) {
-                            let bx = x + 6 + CGFloat(i) * 27
-                            fill(c, rr(bx, bayY, 23, 18, 2), UIColor(hex: 0xA5ACB6))
-                            c.setFillColor(UIColor(hex: 0x7E8693).cgColor)
-                            c.fill(CGRect(x: bx + 6, y: bayY + (above ? 14 : 2), width: 11, height: 2))
-                        }
-                    }
-                    if !b.label.isEmpty { text(b.label, x + w / 2, y + h + 12, size: 8, color: navy(0.5)) }
+                case .counter, .closet:
+                    break
                 case .lavatory:
                     let doorY = above ? y + h - 40 : y + 2
                     let lavDoor = rr(x + 2, doorY, 32, 38, 4)
@@ -346,8 +302,20 @@ enum Art {
                     dot(c, x + 33, py, 4, Palette.navy); fill(c, rr(x + 28, py + 5, 10, 13, 3), Palette.navy)
                     fill(c, rr(x + 20, py + 24, 26, 6, 3), UIColor(hex: 0x6FD08C))
                     text("VACANT", x + 33, py + 27, size: 5.5, color: Palette.navy)
-                case .closet:
-                    if !b.label.isEmpty { text(b.label, x + w / 2, y + 12, size: 8, color: navy(0.5)) }
+                case .wardrobe:
+                    // a tall door with a handle and a coat hanger: reads as a wardrobe without words
+                    let cx = x + w / 2, cy = y + h / 2
+                    let wDoor = rr(x + 6, y + 6, w - 12, h - 12, 5)
+                    fill(c, wDoor, UIColor(hex: 0xD5D9DE)); stroke(c, wDoor, UIColor(hex: 0x9AA2AE), 1)
+                    fill(c, rr(cx - 1.5, above ? y + 14 : y + h - 32, 3, 18, 1.5), UIColor(hex: 0x9AA2AE))
+                    dot(c, cx, cy, 20, white(0.55))
+                    c.saveGState()
+                    c.setStrokeColor(Palette.navy.cgColor); c.setLineWidth(2.6); c.setLineCap(.round); c.setLineJoin(.round)
+                    c.addArc(center: P(cx, cy - 9), radius: 4.5, startAngle: .pi, endAngle: .pi * 2.35, clockwise: false)
+                    c.move(to: P(cx, cy - 4.5)); c.addLine(to: P(cx, cy - 2))
+                    c.addLine(to: P(cx - 14, cy + 9)); c.addLine(to: P(cx + 14, cy + 9)); c.closePath()
+                    c.strokePath()
+                    c.restoreGState()
                 }
             }
 
@@ -406,9 +374,23 @@ enum Art {
                         fill(c, rr(x - 12, y + 17, 21, 3, 1.5), UIColor(hex: 0x8C93A0))
                     }
                 }
-                for a in aisles { text(String(row.number), x, a - 29, size: 8, color: navy(0.45)) }
             }
             c.restoreGState()
+
+            // end walls: full height at the nose and tail, flush with the work area, like the side walls
+            for (inner, dir) in [(CGFloat(L.startX) - 3, CGFloat(-1)), (CGFloat(L.endX) + 3, CGFloat(1))] {
+                func band(_ from: CGFloat, _ w: CGFloat) -> CGRect {
+                    dir < 0 ? CGRect(x: inner - from - w, y: 0, width: w, height: H) : CGRect(x: inner + from, y: 0, width: w, height: H)
+                }
+                c.setFillColor(wallTop.cgColor)
+                c.fill(dir < 0 ? CGRect(x: -pad, y: 0, width: inner + pad, height: H) : CGRect(x: inner, y: 0, width: W + pad - inner, height: H))
+                linear(c, CGPath(rect: band(0, 30).insetBy(dx: 0, dy: 12), transform: nil),
+                       [UIColor(hex: 0xEEF0F2), UIColor(hex: 0xD3D8DE), UIColor(hex: 0x8F98A6)], [0, 0.6, 1], from: P(inner, 0), to: P(inner + dir * 30, 0))
+                c.setFillColor(Palette.coral.cgColor); c.fill(band(6, 8).insetBy(dx: 0, dy: 13))
+                c.setFillColor(Palette.navy.cgColor); c.fill(band(2, 2.5).insetBy(dx: 0, dy: 18)); c.fill(band(14, 2).insetBy(dx: 0, dy: 13))
+                let shade = dir < 0 ? CGRect(x: inner, y: 22, width: 16, height: H - 44) : CGRect(x: inner - 16, y: 22, width: 16, height: H - 44)
+                linear(c, CGPath(rect: shade, transform: nil), [navy(0.25), navy(0)], [0, 1], from: P(inner, 0), to: P(inner - dir * 16, 0))
+            }
         }
     }
 

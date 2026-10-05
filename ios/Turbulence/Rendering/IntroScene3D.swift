@@ -135,8 +135,8 @@ final class IntroScene3D {
         let wall = UIColor(hex: 0xE6E1D8)
         box(CGFloat(W - 60), 120, 8, at: v(W / 2, 60, 22), wall)
         box(CGFloat(W - 60), 120, 8, at: v(W / 2, 60, H - 22), wall)
-        box(10, 120, CGFloat(H - 40), at: v(34, 60, H / 2), UIColor(hex: 0xC9CDD3))
-        box(10, 120, CGFloat(H - 40), at: v(W - 26, 60, H / 2), UIColor(hex: 0xC9CDD3))
+        box(10, 120, CGFloat(H - 40), at: v(L.startX - 8, 60, H / 2), UIColor(hex: 0xC9CDD3))     // the end walls of the 2D art
+        box(10, 120, CGFloat(H - 40), at: v(L.endX + 8, 60, H / 2), UIColor(hex: 0xC9CDD3))
         let glass = mat(UIColor(hex: 0x9CC8EA), rough: 0.2, emissive: true)
         for row in L.rows {
             for (z, turn) in [(26.5, 0.0), (H - 26.5, Double.pi)] {
@@ -153,7 +153,7 @@ final class IntroScene3D {
 
         // galleys, lavatories, closets
         for b in L.blocks {
-            let h: Double = b.kind == .counter ? 46 : b.kind == .lavatory ? 112 : 84
+            let h: Double = b.kind == .counter ? 46 : b.kind == .lavatory || b.kind == .wardrobe ? 112 : 84
             let color = b.kind == .counter ? UIColor(hex: 0xC8CDD4) : UIColor(hex: 0xDADDE2)
             box(CGFloat(b.w), CGFloat(h), CGFloat(b.h), at: v(b.x + b.w / 2, h / 2, b.y + b.h / 2), color, chamfer: 3)
         }
@@ -346,7 +346,7 @@ final class IntroScene3D {
         let (viewSize, insets) = frame()
         let availW = Double(viewSize.width - insets.left - insets.right)
         let availH = Double(viewSize.height - insets.top - insets.bottom)
-        let s = CabinScene.fitScale(availW: availW, availH: availH, width: layout.width, height: layout.height)
+        let s = CabinScene.fitScale(availW: availW, availH: availH, layout: layout)
         let visibleH = Double(viewSize.height) / s
         let d = visibleH / (2 * tan(Double(fov) * .pi / 360))
         // the 2D world is centred in the inset rect; shift the camera to match
@@ -354,7 +354,8 @@ final class IntroScene3D {
         let baseY = CabinScene.worldBaseY(viewH: Double(viewSize.height), insetTop: Double(insets.top),
                                           insetBottom: Double(insets.bottom), worldH: layout.height, scale: s)
         let dz = (baseY + layout.height * s / 2 - Double(viewSize.height) / 2) / s
-        return Key(t: Self.duration, pos: v(layout.width / 2 + dx, d, layout.height / 2 + dz), pitch: -.pi / 2, yaw: 0, fov: fov)
+        let midX = (layout.startX + layout.endX) / 2           // the 2D camera centres on the work area
+        return Key(t: Self.duration, pos: v(midX + dx, d, layout.height / 2 + dz), pitch: -.pi / 2, yaw: 0, fov: fov)
     }
 
     private func keys() -> [Key] {
