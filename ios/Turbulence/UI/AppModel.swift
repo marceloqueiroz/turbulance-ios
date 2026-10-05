@@ -151,6 +151,9 @@ final class AppModel {
     func board(_ plan: FlightPlan, intro: Bool = true) {
         briefing = nil
         newBest = false
+        #if DEBUG
+        let intro = intro && !DevSettings.skipFlightIntro
+        #endif
         game.start(plan, intro: intro)
         screen = .game
     }
@@ -175,6 +178,17 @@ final class AppModel {
     }
 
     // MARK: Options
+
+    #if DEBUG
+    /// Developer section: the Dev crew member with two stars everywhere, opened on the route map.
+    func makeDevProfile() {
+        guard slots.makeDev() else { return }
+        saveSlots()
+        applyProfile()
+        sheet = nil
+        openMap()
+    }
+    #endif
 
     func update(_ options: GameOptions) {
         guard var p = profile else { return }

@@ -40,12 +40,20 @@ struct RootView: View {
             OnboardingCard(firstRun: app.slots.isEmpty, create: { app.createProfile(name: $0, avatar: $1) },
                            cancel: app.dismissSheet)
         case .options:
-            // From the landing page no one is picked yet, so only the device settings show.
-            OptionsCard(device: app.device, options: app.screen == .landing ? nil : app.profile.map { ($0.name, $0.options) },
-                        updateDevice: app.update, updateOptions: app.update, done: app.dismissSheet)
+            optionsCard
         case .about:
             AboutCard(close: app.dismissSheet)
         }
+    }
+
+    private var optionsCard: OptionsCard {
+        // From the landing page no one is picked yet, so only the device settings show.
+        var card = OptionsCard(device: app.device, options: app.screen == .landing ? nil : app.profile.map { ($0.name, $0.options) },
+                               updateDevice: app.update, updateOptions: app.update, done: app.dismissSheet)
+        #if DEBUG
+        card.developer = DevSection(canMakeDev: app.slots.devSlot != nil, makeDev: app.makeDevProfile)
+        #endif
+        return card
     }
 }
 
@@ -294,6 +302,9 @@ struct OptionsCard: View {
     let updateDevice: (DeviceSettings) -> Void
     let updateOptions: (GameOptions) -> Void
     let done: () -> Void
+    #if DEBUG
+    var developer: DevSection?
+    #endif
 
     init(device: DeviceSettings, options: (name: String, options: GameOptions)?, updateDevice: @escaping (DeviceSettings) -> Void,
          updateOptions: @escaping (GameOptions) -> Void, done: @escaping () -> Void) {
@@ -336,6 +347,9 @@ struct OptionsCard: View {
                 Text("Screen shake and text size are set per crew member, from the route map once you're flying.")
                     .font(rounded(11, .medium)).foregroundStyle(Color.finePrint)
             }
+            #if DEBUG
+            developer
+            #endif
             CTA(title: "Done", action: done).padding(.bottom, 4)
         }
         .onChange(of: device) { _, new in updateDevice(new) }
@@ -350,3 +364,30 @@ struct OptionsCard: View {
         }
     }
 }
+
+#if DEBUG
+/// Debug builds only: the Options card's Developer section.
+struct DevSection: View {
+    let canMakeDev: Bool
+    let makeDev: () -> Void
+    @State private var skipIntro = DevSettings.skipFlightIntro
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Eyebrow(text: "Developer").padding(.top, 6)
+            HStack {
+                Text("Skip flight intro").font(rounded(15, .bold))
+                Spacer()
+                Toggle("Skip flight intro", isOn: $skipIntro).labelsHidden().tint(.teal)
+            }
+            HStack {
+                Text("Dev crew, 2★ everywhere").font(rounded(15, .bold))
+                Spacer()
+                Button(canMakeDev ? "Create" : "Crew is full", action: makeDev)
+                    .font(rounded(15, .bold)).disabled(!canMakeDev)
+            }
+        }
+        .onChange(of: skipIntro) { _, new in DevSettings.skipFlightIntro = new }
+    }
+}
+#endif
