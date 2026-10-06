@@ -13,6 +13,7 @@ ap.add_argument("--guide", required=True); ap.add_argument("--view", choices=["s
 ap.add_argument("--sprite", required=True, help="the approved in-game sprite for this view")
 ap.add_argument("--design", required=True, help="the character design sheet")
 ap.add_argument("--out", required=True); ap.add_argument("--takes", default="abc")
+ap.add_argument("--pose", choices=["walk", "idle", "carry"], default="walk")
 ap.add_argument("--who", default="the game's flight attendant")
 ap.add_argument("--look", default="teal uniform jacket and skirt, coral scarf, white gloves, short skin-tone legs, brown shoes")
 a = ap.parse_args()
@@ -33,8 +34,17 @@ VIEW = {
     "back": ("walking AWAY from the camera (up the screen), seen from the game's high camera, back of the head visible",
              "Blue limbs are on the LEFT of the picture, orange limbs on the RIGHT. A foot or hand that is forward is HIGHER on the screen"),
 }[a.view]
+WHAT = {"walk": "24-frame walk cycle",
+        "idle": "24 frames of the character standing still and relaxed (an idle pose: feet together, arms down)",
+        "carry": "24-frame walk cycle while carrying a serving tray"}[a.pose]
+TRAY = (" The light grey oval with the dark outline is a TRAY: paint it as an empty, round, polished silver serving tray held out flat "
+        "on one gloved hand at CHEST height, exactly where the guide puts it: never raised above her shoulders or head, never a second "
+        "tray, the whole tray inside the picture, the same tray in every one of the 24 cells (from behind, her body hides most of it). "
+        "It is the only grey allowed." if a.pose == "carry" and a.view != "back" else
+        " She carries a serving tray in front of her at chest height; seen from behind, her body hides it COMPLETELY: her right arm "
+        "reaches forward out of sight, as in the guide. Do not paint any tray." if a.pose == "carry" else "")
 PROMPT = (
-    "Animation sprite sheet, 24-frame walk cycle. IMAGE 1 is a 6 x 4 grid of POSE GUIDES, read left to right, top row first. "
+    f"Animation sprite sheet, {WHAT}. IMAGE 1 is a 6 x 4 grid of POSE GUIDES, read left to right, top row first. "
     f"The character is {a.who}, {VIEW[0]}. In every cell the HEAD is already final: the same head, same size, same angle in all 24 cells. "
     "Keep it exactly as it is in each cell; do not resize, turn or redraw it, only its position shifts slightly as the body bobs. "
     "Below the head a grey mannequin shows the body for that frame; the dark shapes are the shoes, the white dots the hands. "
@@ -42,7 +52,7 @@ PROMPT = (
     f"and IMAGE 3 (design sheet): {a.look}, soft matte toy 3D, light from the upper left. "
     "Match the guide precisely: which foot is forward, which is lifted, the knee bend, where each hand is. "
     "The legs are as SHORT as in IMAGE 2: only a short stub of leg and the shoe show below the skirt; keep the small, quick steps of the guide. "
-    "Do NOT keep any blue, orange or grey: those are guide colours only. The body must be the same size in every cell. "
+    f"{TRAY} Do NOT keep any blue, orange or mannequin grey: those are guide colours only. The body must be the same size in every cell. "
     "Background stays perfectly flat pure magenta (#FF00FF). No grid lines, no numbers, no text.")
 
 

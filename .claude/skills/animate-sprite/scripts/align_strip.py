@@ -19,6 +19,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("src"); ap.add_argument("out")
 ap.add_argument("--bob", type=float, default=4); ap.add_argument("--height", type=float, default=625)
 ap.add_argument("--cut", type=float, default=0.55, help="share of the height from the head top that is never stretched")
+ap.add_argument("--fix-orange", action="store_true", help="repaint leftover orange guide limbs as shadowed skin (a far leg Gemini forgot)")
 a = ap.parse_args()
 
 src = Image.open(a.src).convert("RGBA")
@@ -29,7 +30,9 @@ big = [f.resize((round(FW * k), round(FH * k)), Image.LANCZOS) for f in fr]
 
 
 def head(f):
-    A = alpha(f); top = np.nonzero(A.any(1))[0].min(); cols = np.nonzero(A[top:top + 160].any(0))[0]
+    """Head top and centre from the coloured pixels only: a silver tray or white gloves near the head must not move it."""
+    px = np.asarray(f).astype(int); A = alpha(f) & ~((px[..., :3].max(2) - px[..., :3].min(2) < 28) & (px[..., :3].min(2) > 140))
+    top = np.nonzero(A.any(1))[0].min(); cols = np.nonzero(A[top:top + 160].any(0))[0]
     return top, (cols.min() + cols.max()) / 2, cols.max() - cols.min()
 
 
@@ -46,6 +49,13 @@ for t, (f, (top, hx, _)) in enumerate(zip(big, M)):
 
 strip = Image.new("RGBA", (FW * 24, FH))
 for i, f in enumerate(res): strip.paste(f, (i * FW, 0))
+if a.fix_orange:
+    from scipy import ndimage
+    px = np.array(strip).astype(float); r, gg, b, al = [px[..., i] for i in range(4)]
+    o = ndimage.binary_dilation((al > 128) & (r > 200) & (gg > 110) & (gg < 190) & (b < 90), iterations=2) & (al > 0)
+    lum = (0.3 * r + 0.59 * gg + 0.11 * b)[o] / 255 / 0.6
+    px[o, 0], px[o, 1], px[o, 2] = 190 * lum, 128 * lum, 110 * lum
+    strip = Image.fromarray(np.clip(px, 0, 255).astype(np.uint8)); res = [strip.crop((i * FW, 0, (i + 1) * FW, FH)) for i in range(24)]
 strip.save(a.out + "-24.png")
 g = [Image.alpha_composite(Image.new("RGBA", (FW, FH), (236, 230, 220, 255)), f).convert("RGB").resize((FW // 2, FH // 2)) for f in res]
 g[0].save(a.out + ".gif", save_all=True, append_images=g[1:], duration=42, loop=0)
@@ -58,3 +68,5 @@ px = np.asarray(strip).astype(int); r, gg, b, al = [px[..., i] for i in range(4)
 orange = int(((al > 128) & (r > 200) & (gg > 110) & (gg < 190) & (b < 90)).sum())
 blue = int(((al > 128) & (b > 180) & (r < 90) & (gg < 150)).sum())
 print(f"guide colour left: orange {orange} px, blue {blue} px  (want < ~50 each)")
+clipped = [i for i, m in enumerate(alpha(f) for f in res) if m[:, :2].any() or m[:, -2:].any() or m[:2].any()]
+print(f"frames touching the frame edge (clipped): {clipped or 'none'}  (want none: move the prop inside her width)")

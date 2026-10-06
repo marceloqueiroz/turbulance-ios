@@ -1224,23 +1224,32 @@ func easeOutBack(_ t: Double) -> Double { 1 + 2.70158 * pow(t - 1, 3) + 1.70158 
 
 // MARK: - Crew node (teal uniform, coral scarf, hair in a bun; walk cycle)
 
-/// The painted attendant walk: 24 frames per facing (side faces right; mirrored for left),
-/// exported by ios/tools/sprite_atlas.py into Assets.xcassets/AttendantWalk.spriteatlas.
+/// The painted attendant: 24-frame walk and carry cycles per facing (side faces right; mirrored for left) and a
+/// standing pose per facing, exported by ios/tools/sprite_atlas.py into Assets.xcassets/Attendant.spriteatlas.
 enum AttendantArt {
-    enum Facing { case side, front, back }
+    enum Facing: String { case side, front, back }
+    enum Move: String { case walk, carry }
     static let frameCount = 24
-    /// Frame size in points; the feet stand on the line `groundY` up from the frame's bottom (the figure is ~56 pt tall).
+    /// Frame size in points; the feet stand on the frame's ground line (`anchor`); the figure is ~56 pt tall.
     static let frameSize = CGSize(width: 56, height: 76)
     static let anchor = CGPoint(x: 0.5, y: 73.0 / 848.0)
-    /// Shown while standing: the passing pose, both feet under the body.
-    static let idleFrame = 6
-    private static let atlas = SKTextureAtlas(named: "AttendantWalk")
-    static let available = atlas.textureNames.count >= frameCount * 3
-    private static func frames(_ name: String) -> [SKTexture] {
-        (0..<frameCount).map { atlas.textureNamed(String(format: "%@-%02d", name, $0)) }
+    /// Held while standing with the tray up: the carry cycle's passing pose, both feet under the body.
+    static let standFrame = 6
+    private static let atlas = SKTextureAtlas(named: "Attendant")
+    static let available = atlas.textureNames.count >= frameCount * 6 + 3
+    private static let cycles: [String: [SKTexture]] = Dictionary(uniqueKeysWithValues:
+        [Move.walk, .carry].flatMap { m in [Facing.side, .front, .back].map { f in
+            ("\(m.rawValue)-\(f.rawValue)", (0..<frameCount).map { atlas.textureNamed(String(format: "%@-%@-%02d", m.rawValue, f.rawValue, $0)) })
+        } })
+    private static let stills: [Facing: SKTexture] = Dictionary(uniqueKeysWithValues:
+        [Facing.side, .front, .back].map { ($0, atlas.textureNamed("idle-\($0.rawValue)")) })
+    static func frames(_ m: Move, _ f: Facing) -> [SKTexture] { cycles["\(m.rawValue)-\(f.rawValue)"]! }
+    static func idle(_ f: Facing) -> SKTexture { stills[f]! }
+    /// The tray's centre in the carry frames, from the feet, in points (side faces right). Held at chest height;
+    /// from behind her body hides it, so the items show just above her head, where the tray is.
+    static func tray(_ f: Facing) -> CGPoint {
+        switch f { case .side: CGPoint(x: 12, y: 20.6); case .front: CGPoint(x: -4.3, y: 17.8); case .back: CGPoint(x: 0, y: 43) }
     }
-    static let side = frames("side"), front = frames("front"), back = frames("back")
-    static func frames(_ f: Facing) -> [SKTexture] { f == .side ? side : f == .front ? front : back }
 }
 
 final class CrewNode: SKNode {
@@ -1285,7 +1294,7 @@ final class CrewNode: SKNode {
         if painted {
             body.size = AttendantArt.frameSize; body.anchorPoint = AttendantArt.anchor
             body.position = CGPoint(x: 0, y: feetY); body.zPosition = 1
-            body.texture = AttendantArt.front[AttendantArt.idleFrame]
+            body.texture = AttendantArt.idle(.front)
             addChild(body)
         }
         for f in feet { f.fillColor = Palette.navy; f.strokeColor = .clear; addChild(f) }
@@ -1368,9 +1377,14 @@ final class CrewNode: SKNode {
             }
             last = (c.x, c.y)
             let cycle = (c.walk / (2 * .pi)).truncatingRemainder(dividingBy: 1)
-            let k = moving ? Int(cycle * Double(AttendantArt.frameCount)) % AttendantArt.frameCount : AttendantArt.idleFrame
-            body.texture = AttendantArt.frames(facing)[k]
+            let carrying = !c.tray.isEmpty
+            if moving {
+                body.texture = AttendantArt.frames(carrying ? .carry : .walk, facing)[Int(cycle * Double(AttendantArt.frameCount)) % AttendantArt.frameCount]
+            } else {
+                body.texture = carrying ? AttendantArt.frames(.carry, facing)[AttendantArt.standFrame] : AttendantArt.idle(facing)
+            }
             body.xScale = facing == .side && face < 0 ? -1 : 1
+            body.yScale = moving ? 1 : 1 + 0.012 * CGFloat(sin(clock * 2.4))       // breathing while standing
         } else {
             feet[0].isHidden = !moving; feet[1].isHidden = !moving
             feet[0].position = CGPoint(x: face * (3 + sw * 6), y: 5)
@@ -1412,7 +1426,13 @@ final class CrewNode: SKNode {
                 heldNodes[k].isHidden = false
                 heldItems[k].texture = CabinScene.Tex.items[c.tray[k]]
                 let x: CGFloat = c.tray.count == 1 ? 0 : (k == 0 ? -12 : 12)
-                heldNodes[k].position = CGPoint(x: x, y: headTop + 22 + CGFloat(sin(clock * 6 + Double(k))) * 1.5)
+                if painted {                         // the items ride on the tray she holds up
+                    let t = AttendantArt.tray(facing), flip: CGFloat = facing == .side && face < 0 ? -1 : 1
+                    heldNodes[k].position = CGPoint(x: t.x * flip + x * 0.8, y: feetY + t.y + 6)
+                    heldNodes[k].setScale(0.75)
+                } else {
+                    heldNodes[k].position = CGPoint(x: x, y: headTop + 22 + CGFloat(sin(clock * 6 + Double(k))) * 1.5)
+                }
             } else {
                 heldNodes[k].isHidden = true
             }
@@ -1449,7 +1469,7 @@ final class CrewNode: SKNode {
         if c.bubble != nil {
             let w = (bubbleNode.userData?["w"] as? CGFloat) ?? 60
             let bx = min(max(c.x, Double(w / 2 + 24)), worldWidth - Double(w / 2) - 24)
-            bubbleNode.position = CGPoint(x: bx - c.x, y: headTop + (c.tray.isEmpty ? 30 : 48))
+            bubbleNode.position = CGPoint(x: bx - c.x, y: headTop + (c.tray.isEmpty || painted ? 30 : 48))   // painted: items ride on her tray, not above her
         }
     }
 }

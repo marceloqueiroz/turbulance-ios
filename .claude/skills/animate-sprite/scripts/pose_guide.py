@@ -8,6 +8,9 @@ Usage:
   pose_guide.py --view side  --head head.png --out grid.png [--stride 42 --lift 24 --bob 9 --head-h 310]
   pose_guide.py --view front --head head.png --out grid.png
   pose_guide.py --view back  --head head.png --out grid.png
+  --pose idle   standing still (legs together, arms down, slow breathing bob): pick ONE clean frame per view
+  --pose carry  the walk with a round silver tray held out at chest height on her RIGHT hand, inside her own
+                width (held up beside the head it ran past the frame edge and got clipped)
 Also writes <out>-peek.png (first row) and <out>.gif (the guide animated): look at both before generating.
 
 Proportions are the approved chibi attendant (head ~55% of the height, body ~35%, legs ~10%). Gemini copies
@@ -18,6 +21,7 @@ from PIL import Image, ImageDraw
 
 CW, CH, SS = 682, 768, 2                      # cell = 1/6 x 1/4 of the 4096 x 3072 grid; supersampled
 BLUE, ORANGE, CLAY, DARK, WHITE = (60, 110, 210), (235, 140, 50), (200, 194, 186), (90, 84, 80), (245, 245, 245)
+SILVER = (214, 218, 226)                      # the carry tray: Gemini is told this light grey oval is a silver tray
 # side view body, in cell px: short legs, round torso, arms from just under the head
 BODY = dict(ground=700, thigh=34, shin=32, torso=(4, -88, 96, 98), shoulder=-128, upper_arm=42, forearm=36,
             arm_swing=38, head_gap=40)
@@ -74,7 +78,7 @@ def side_frame(t, head, a):
         r = math.radians(toe); line((foot[0] - 8, foot[1]), (foot[0] + 30 * math.cos(r), foot[1] + 30 * math.sin(r)), 24, DARK)
 
     def draw_arm(name, c, sh):
-        x = legs["far" if name == "near" else "near"][4] / a.stride        # each arm swings with the OPPOSITE leg
+        x = legs["far" if name == "near" else "near"][4] / a.stride if a.stride else 0   # swings with the OPPOSITE leg
         r = math.radians(90 - B["arm_swing"] * x); el = (sh[0] + B["upper_arm"] * math.cos(r), sh[1] + B["upper_arm"] * math.sin(r))
         r2 = r - math.radians(20 + 18 * max(0, x)); hand = (el[0] + B["forearm"] * math.cos(r2), el[1] + B["forearm"] * math.sin(r2))
         line(sh, el, 28, c); line(el, hand, 26, c); ell(hand[0], hand[1], 19, 19, WHITE)
@@ -83,10 +87,16 @@ def side_frame(t, head, a):
     draw_arm("far", ORANGE, (cx + 18, shy)); draw_leg("far", ORANGE)
     tx, ty, rx, ry = B["torso"]; ell(cx + tx + lean, hipy + ty, rx, ry, CLAY)
     draw_leg("near", BLUE)
-    draw_arm("near", BLUE, (cx - 10, shy))
+    if a.pose != "carry": draw_arm("near", BLUE, (cx - 10, shy))
     im = im.resize((CW, CH), Image.LANCZOS)
     hh = head.resize((round(head.width * a.head_h / head.height), a.head_h), Image.LANCZOS)
     im.alpha_composite(hh, (round(CW / 2 - hh.width / 2), round(hipy - 180 - hh.height + B["head_gap"])))
+    if a.pose == "carry":                     # facing right her right side is the near side: tray held out at chest height, clear of the face
+        d = ImageDraw.Draw(im); w = lambda p, q, wd: (d.line([p, q], fill=BLUE, width=wd), [d.ellipse((z[0] - wd / 2, z[1] - wd / 2, z[0] + wd / 2, z[1] + wd / 2), fill=BLUE) for z in (p, q)])
+        sh = (cx - 10, shy); el = (sh[0] + 36, sh[1] + 44); hand = (el[0] + 46, el[1] - 4)
+        w(sh, el, 28); w(el, hand, 26)
+        d.ellipse((hand[0] - 50, hand[1] - 40, hand[0] + 96, hand[1] + 2), fill=SILVER, outline=DARK, width=4)
+        d.ellipse((hand[0] - 19, hand[1] - 19, hand[0] + 19, hand[1] + 19), fill=WHITE, outline=DARK, width=3)
     return im.convert("RGB")
 
 
@@ -111,23 +121,34 @@ def fb_frame(t, head, a):
         feet[side] = (col, x0, F["feet_y"] + fwd * F["depth"] * fx - lift, fx)
     arms = {}
     for side, col, sh, hx0 in (("L", BLUE, F["shoulder_l"], F["hand_l"]), ("R", ORANGE, F["shoulder_r"], F["hand_r"])):
-        fx = feet["R" if side == "L" else "L"][3] / (a.stride * 0.8)
+        fx = feet["R" if side == "L" else "L"][3] / (a.stride * 0.8) if a.stride else 0
         hy = F["hand_y"] + fwd * 55 * fx; hx = hx0 + (1 if side == "L" else -1) * 18 * fx * fwd
         arms[side] = (col, sh, (hx, hy), fx)
     behind = lambda s: arms[s][3] * fwd < 0    # arm swung away from the camera goes behind the body
+    tray = ("L" if a.view == "front" else "R") if a.pose == "carry" else None   # her right hand: screen left from the front
+    if tray: arms.pop(tray)
 
     def draw_arm(s):
         col, sh, hand, _ = arms[s]; ln(sh, hand, 70, col); ell(hand[0], hand[1], 48, 48, WHITE)
 
-    for s in "LR":
+    def draw_tray():                           # chest height, in front of her right side, never wider than her body
+        sd = -1 if tray == "L" else 1; sh = F["shoulder_l"] if tray == "L" else F["shoulder_r"]
+        if a.view == "back":                   # from behind her body hides the tray: only the arm reaching forward shows
+            ln(sh, (F["cx"] + 150, 470), 70, ORANGE); return
+        hand = (F["cx"] + sd * (120 if a.view == "front" else 175), 660 if a.view == "front" else 600); col = BLUE if tray == "L" else ORANGE
+        ln(sh, hand, 70, col); ell(hand[0] - sd * 30, hand[1] - 25, 125, 60, SILVER); ell(hand[0], hand[1], 48, 48, WHITE)
+
+    if tray and a.view == "back": draw_tray()  # from behind the tray is in front of her: the body hides most of it
+    for s in arms:
         if behind(s): draw_arm(s)
     for s in "LR":
         col, x0, y, _ = feet[s]; ln((x0, F["skirt_y"]), (x0, y - 10), 70, col); ell(x0, y + 5, 52, 34, DARK, DARK)
     ell(*F["torso"], CLAY)
-    for s in "LR":
+    for s in arms:
         if not behind(s): draw_arm(s)
     hh = head.resize((round(head.width * k), round(head.height * k)), Image.LANCZOS)
     im.alpha_composite(hh, (round(ox), round(oy)))     # the ellipse-cut head keeps the sprite's full canvas
+    if tray and a.view == "front": draw_tray()
     return im.resize((CW, CH), Image.LANCZOS).convert("RGB")
 
 
@@ -138,7 +159,9 @@ if __name__ == "__main__":
     ap.add_argument("--stride", type=float, default=42); ap.add_argument("--lift", type=float, default=24)
     ap.add_argument("--bob", type=float, default=9); ap.add_argument("--sway", type=float, default=6)
     ap.add_argument("--head-h", type=int, default=310, help="side view: head+scarf height in cell px")
+    ap.add_argument("--pose", choices=["walk", "idle", "carry"], default="walk")
     a = ap.parse_args()
+    if a.pose == "idle": a.stride, a.lift, a.sway, a.bob = 0, 0, 0, 3
     head = Image.open(a.head).convert("RGBA")
     fn = side_frame if a.view == "side" else fb_frame
     frames = [fn(t, head, a) for t in range(24)]
