@@ -5,14 +5,22 @@ rigf, outp = sys.argv[1], sys.argv[2]; rig = json.load(open(rigf)); d = rigf.rsp
 def pose(f, t):
     R = rig[f]; W, H = R["size"]; c = Image.new("RGBA", (W, H + 40), (245, 222, 206, 255)); s = math.sin(t * 2 * math.pi)
     ang = {"armR": 22 * s, "armL": -22 * s, "legR": -18 * s, "legL": 18 * s, "head": 4 * math.sin(t * 4 * math.pi)}
-    if f != "side": ang = {"armR": 14 * s, "armL": 14 * s, "legR": 0, "legL": 0, "head": 3 * s}
+    # walking towards or away from the camera: each foot steps forward and back (up and down the screen, a little
+    # wider when lifted), the arms swing opposite to the legs, the body sways side to side
+    step = {"legR": 0, "legL": 0, "armR": 0, "armL": 0}; sway = 0
+    if f != "side":
+        sgn = 1 if f == "front" else -1
+        ang = {"armR": -10 * s, "armL": -10 * s, "legR": 5 * s, "legL": 5 * s, "head": 3 * s}
+        step = {"legR": 16 * s * sgn, "legL": -16 * s * sgn, "armR": -12 * s * sgn, "armL": 12 * s * sgn}
+        sway = int(5 * s)
     bob = int(6 * abs(s))
     for nm in R["order"]:
         if nm not in R["parts"]: continue
         im = Image.open(f"{d}/{R['parts'][nm]}"); pv = R["pivots"].get(nm)
         if pv and ang.get(nm):
             im = im.rotate(ang[nm], resample=Image.BICUBIC, center=tuple(pv))
-        c.alpha_composite(im, (0, 20 - (bob if nm != "legL" and nm != "legR" else 0)))
+        leg = nm in ("legL", "legR")
+        c.alpha_composite(im, (sway if not leg else 0, int(20 - (0 if leg else bob) + step.get(nm, 0))))
     for nm, pv in ({} if NOMARK else R["pivots"]).items():
         if pv: ImageDraw.Draw(c).ellipse((pv[0] - 6, pv[1] + 14, pv[0] + 6, pv[1] + 26), outline=(214, 40, 40), width=3)
     return c
