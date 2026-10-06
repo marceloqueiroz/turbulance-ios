@@ -86,3 +86,29 @@ struct CabinSkin {
         }
     }
 }
+
+/// Painted seated passengers (sprite plan §6b): one look per archetype, relaxed and calling, seen from above facing the
+/// nose like the painted seats. Each picture is 64 × 64 world units centred on the seat point; the seat itself is in the
+/// cabin picture. Sources: branding/sprites/characters/passengers/seated/.
+enum PassengerArt {
+    static let size = CGSize(width: 64, height: 64)
+    private static let atlas = SKTextureAtlas(named: "Passengers")
+    private static let textures: [String: SKTexture] = Dictionary(uniqueKeysWithValues: atlas.textureNames.map { n in
+        let name = (n as NSString).deletingPathExtension
+        return (name, atlas.textureNamed(name))
+    })
+
+    /// The relaxed and calling pictures for this passenger, if their archetype is painted.
+    static func textures(for p: Passenger) -> (seated: SKTexture, call: SKTexture)? {
+        let look: String
+        switch p.archetype {
+        case .business: look = "business"
+        case .family: look = p.hasKid ? "family" : "familysolo"     // only parents with a toddler show one (crying-baby problems)
+        case .nervous: look = "nervous"
+        case .sleeper: look = "sleeper"
+        case .chatterbox: look = "chatterbox"
+        }
+        guard let s = textures["\(look)-seated"], let c = textures["\(look)-call"] else { return nil }
+        return (s, c)
+    }
+}

@@ -602,11 +602,12 @@ final class CabinScene: SKScene {
         updateCamera(dt: dt)
 
         let turbulence = sim.turbulenceIntensity
+        let calling = Set(sim.occurrences.compactMap { $0.kind == .call && !$0.dead && !$0.failed ? $0.passenger : nil })
         for (i, p) in sim.passengers.enumerated() where i < paxNodes.count {
             let n = paxNodes[i]
             n.position = pt(p.drawX, p.drawY)
             n.zPosition = p.stroll != nil ? 3 : 0
-            n.sync(p, clock: clock, dt: dt, turbulence: turbulence)
+            n.sync(p, calling: calling.contains(i), clock: clock, dt: dt, turbulence: turbulence)
         }
 
         var live = Set<Int>()
@@ -1060,13 +1061,16 @@ final class PaxNode: SKNode {
     private let chat = SKSpriteNode(texture: CabinScene.Tex.chat, size: CGSize(width: 18, height: 11))
     private let archetype: Archetype
     private let phase: Double
+    /// Painted seated pictures (PassengerArt); the flat drawing stays for walking until passengers get walk cycles.
+    private let painted: (seated: SKTexture, call: SKTexture)?
     private var shownSick = false
     private var visible: CGFloat = 1
 
     init(_ p: Passenger) {
         normalTex = SKTexture(image: Art.passenger(p, sick: false))
         sickTex = SKTexture(image: Art.passenger(p, sick: true))
-        body = SKSpriteNode(texture: normalTex, size: Art.passengerSize)
+        painted = PassengerArt.textures(for: p)
+        body = SKSpriteNode(texture: painted?.seated ?? normalTex, size: painted == nil ? Art.passengerSize : PassengerArt.size)
         archetype = p.archetype
         phase = p.phase
         super.init()
@@ -1106,11 +1110,20 @@ final class PaxNode: SKNode {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    func sync(_ p: Passenger, clock: Double, dt: Double, turbulence: Double) {
-        if p.sick != shownSick { shownSick = p.sick; body.texture = p.sick ? sickTex : normalTex }
+    func sync(_ p: Passenger, calling: Bool, clock: Double, dt: Double, turbulence: Double) {
+        if let painted {
+            // seated: the painted picture (arm up while their call button is on, green-tinged when sick); walking: the flat one
+            let tex = p.stroll != nil ? (p.sick ? sickTex : normalTex) : (calling ? painted.call : painted.seated)
+            if body.texture !== tex {
+                body.texture = tex
+                body.size = p.stroll != nil ? Art.passengerSize : PassengerArt.size
+            }
+            body.color = UIColor(hex: 0x8DBF5A)
+            body.colorBlendFactor = p.sick && p.stroll == nil ? 0.38 : 0
+        } else if p.sick != shownSick { shownSick = p.sick; body.texture = p.sick ? sickTex : normalTex }
         grumpy.isHidden = !p.grumpy
         let dozing = p.asleep && !p.sick
-        mask.isHidden = !dozing || archetype == .sleeper
+        mask.isHidden = !dozing || archetype == .sleeper || painted != nil
         zzz.isHidden = !dozing
         chatHolder.isHidden = p.sick || p.grumpy || p.asleep
         var chatting = false
