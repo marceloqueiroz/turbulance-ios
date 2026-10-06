@@ -14,6 +14,8 @@ ap.add_argument("--sprite", required=True, help="the approved in-game sprite for
 ap.add_argument("--design", required=True, help="the character design sheet")
 ap.add_argument("--out", required=True); ap.add_argument("--takes", default="abc")
 ap.add_argument("--pose", choices=["walk", "idle", "carry"], default="walk")
+ap.add_argument("--build", default="The legs are as SHORT as in IMAGE 2: only a short stub of leg and the shoe show below the clothes; keep the small, quick steps of the guide.",
+                help="the sentence about body proportions and stride; match it to the character (the default is the attendant's)")
 ap.add_argument("--who", default="the game's flight attendant")
 ap.add_argument("--look", default="teal uniform jacket and skirt, coral scarf, white gloves, short skin-tone legs, brown shoes")
 a = ap.parse_args()
@@ -28,7 +30,7 @@ mime = lambda f: "image/jpeg" if f.lower().endswith((".jpg", ".jpeg")) else "ima
 
 VIEW = {
     "side": ("walking to the RIGHT, seen from the side from the game's high camera",
-             "Blue limbs are her NEAR side (closest to the camera), orange limbs her FAR side, partly hidden behind the body"),
+             "Blue limbs are the NEAR side (closest to the camera), orange limbs the FAR side, partly hidden behind the body"),
     "front": ("walking TOWARD the camera (down the screen), seen from the game's high camera, face visible",
               "Blue limbs are on the LEFT of the picture, orange limbs on the RIGHT. A foot or hand that is forward is LOWER on the screen"),
     "back": ("walking AWAY from the camera (up the screen), seen from the game's high camera, back of the head visible",
@@ -51,7 +53,7 @@ PROMPT = (
     f"{VIEW[1]}. Paint the body under the head in exactly the guide's pose, as the character in IMAGE 2 (the approved sprite for this view) "
     f"and IMAGE 3 (design sheet): {a.look}, soft matte toy 3D, light from the upper left. "
     "Match the guide precisely: which foot is forward, which is lifted, the knee bend, where each hand is. "
-    "The legs are as SHORT as in IMAGE 2: only a short stub of leg and the shoe show below the skirt; keep the small, quick steps of the guide. "
+    f"{a.build} "
     f"{TRAY} Do NOT keep any blue, orange or mannequin grey: those are guide colours only. The body must be the same size in every cell. "
     "Background stays perfectly flat pure magenta (#FF00FF). No grid lines, no numbers, no text.")
 

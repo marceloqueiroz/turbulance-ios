@@ -45,7 +45,10 @@ def bob_at(u, amp):
 
 
 def side_frame(t, head, a):
-    B = BODY
+    B = dict(BODY)
+    B["thigh"] *= a.legs; B["shin"] *= a.legs
+    tx, ty, rx, ry = B["torso"]; B["torso"] = (tx, ty * a.torso, rx * a.torso_w, ry * a.torso)
+    B["shoulder"] *= a.torso; B["upper_arm"] *= a.torso; B["forearm"] *= a.torso
     im = Image.new("RGBA", (CW * SS, CH * SS), (255, 0, 255, 255)); d = ImageDraw.Draw(im)
     P = lambda p: (p[0] * SS, p[1] * SS)
 
@@ -74,14 +77,14 @@ def side_frame(t, head, a):
 
     def draw_leg(name, c):
         hip, knee, foot, toe, _ = legs[name]
-        line(hip, knee, 34, c); line(knee, foot, 32, c)
+        line(hip, knee, round(34 * a.limb), c); line(knee, foot, round(32 * a.limb), c)
         r = math.radians(toe); line((foot[0] - 8, foot[1]), (foot[0] + 30 * math.cos(r), foot[1] + 30 * math.sin(r)), 24, DARK)
 
     def draw_arm(name, c, sh):
         x = legs["far" if name == "near" else "near"][4] / a.stride if a.stride else 0   # swings with the OPPOSITE leg
         r = math.radians(90 - B["arm_swing"] * x); el = (sh[0] + B["upper_arm"] * math.cos(r), sh[1] + B["upper_arm"] * math.sin(r))
         r2 = r - math.radians(20 + 18 * max(0, x)); hand = (el[0] + B["forearm"] * math.cos(r2), el[1] + B["forearm"] * math.sin(r2))
-        line(sh, el, 28, c); line(el, hand, 26, c); ell(hand[0], hand[1], 19, 19, WHITE)
+        line(sh, el, round(28 * a.limb), c); line(el, hand, round(26 * a.limb), c); ell(hand[0], hand[1], 19 * a.limb, 19 * a.limb, WHITE)
 
     shy = hipy + B["shoulder"]
     draw_arm("far", ORANGE, (cx + 18, shy)); draw_leg("far", ORANGE)
@@ -90,7 +93,7 @@ def side_frame(t, head, a):
     if a.pose != "carry": draw_arm("near", BLUE, (cx - 10, shy))
     im = im.resize((CW, CH), Image.LANCZOS)
     hh = head.resize((round(head.width * a.head_h / head.height), a.head_h), Image.LANCZOS)
-    im.alpha_composite(hh, (round(CW / 2 - hh.width / 2), round(hipy - 180 - hh.height + B["head_gap"])))
+    im.alpha_composite(hh, (round(CW / 2 - hh.width / 2), round(hipy - 180 * a.torso - hh.height + B["head_gap"])))
     if a.pose == "carry":                     # facing right her right side is the near side: tray held out at chest height, clear of the face
         d = ImageDraw.Draw(im); w = lambda p, q, wd: (d.line([p, q], fill=BLUE, width=wd), [d.ellipse((z[0] - wd / 2, z[1] - wd / 2, z[0] + wd / 2, z[1] + wd / 2), fill=BLUE) for z in (p, q)])
         sh = (cx - 10, shy); el = (sh[0] + 36, sh[1] + 44); hand = (el[0] + 46, el[1] - 4)
@@ -160,6 +163,10 @@ if __name__ == "__main__":
     ap.add_argument("--bob", type=float, default=9); ap.add_argument("--sway", type=float, default=6)
     ap.add_argument("--head-h", type=int, default=310, help="side view: head+scarf height in cell px")
     ap.add_argument("--pose", choices=["walk", "idle", "carry"], default="walk")
+    ap.add_argument("--legs", type=float, default=1, help="side view: leg length vs the attendant's (a passenger with real legs: ~2)")
+    ap.add_argument("--torso", type=float, default=1, help="side view: torso height vs the attendant's")
+    ap.add_argument("--torso-w", type=float, default=1, help="side view: torso width vs the attendant's")
+    ap.add_argument("--limb", type=float, default=1, help="side view: leg thickness vs the attendant's")
     a = ap.parse_args()
     if a.pose == "idle": a.stride, a.lift, a.sway, a.bob = 0, 0, 0, 3
     head = Image.open(a.head).convert("RGBA")

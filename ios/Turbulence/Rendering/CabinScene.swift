@@ -1063,6 +1063,11 @@ final class PaxNode: SKNode {
     private let phase: Double
     /// Painted seated pictures (PassengerArt); the flat drawing stays for walking until passengers get walk cycles.
     private let painted: (seated: SKTexture, call: SKTexture)?
+    /// Painted walk cycle (PassengerArt.walk): facing from the way they move, the frame from the distance walked.
+    private let walkLook: String
+    private var walkFacing = AttendantArt.Facing.side
+    private var walkDistance = 0.0
+    private var lastPos: (x: Double, y: Double)?
     private var shownSick = false
     private var visible: CGFloat = 1
 
@@ -1070,6 +1075,7 @@ final class PaxNode: SKNode {
         normalTex = SKTexture(image: Art.passenger(p, sick: false))
         sickTex = SKTexture(image: Art.passenger(p, sick: true))
         painted = PassengerArt.textures(for: p)
+        walkLook = PassengerArt.walkLook(p)
         body = SKSpriteNode(texture: painted?.seated ?? normalTex, size: painted == nil ? Art.passengerSize : PassengerArt.size)
         archetype = p.archetype
         phase = p.phase
@@ -1111,12 +1117,31 @@ final class PaxNode: SKNode {
     required init?(coder: NSCoder) { fatalError() }
 
     func sync(_ p: Passenger, calling: Bool, clock: Double, dt: Double, turbulence: Double) {
-        if let painted {
+        // walking: the painted cycle, facing the way they move (side along the aisle, front going down, back going up)
+        var walkTex: SKTexture?
+        if p.stroll != nil {
+            if let l = lastPos {
+                let dx = p.drawX - l.x, dy = p.drawY - l.y, d = hypot(dx, dy)
+                if d > 0.01 { walkFacing = abs(dy) > abs(dx) ? (dy > 0 ? .front : .back) : .side; walkDistance += d }
+            }
+            if let frames = PassengerArt.walk(walkLook, walkFacing) {
+                // one 24-frame cycle per 34 world units walked (short, quick steps like the crew's)
+                walkTex = frames[Int(walkDistance / 34 * Double(frames.count)) % frames.count]
+            }
+        }
+        lastPos = (p.drawX, p.drawY)
+        if let walkTex {
+            if body.texture !== walkTex {
+                body.texture = walkTex; body.size = AttendantArt.frameSize; body.anchorPoint = AttendantArt.anchor
+            }
+            body.colorBlendFactor = 0
+        } else if let painted {
             // seated: the painted picture (arm up while their call button is on, green-tinged when sick); walking: the flat one
             let tex = p.stroll != nil ? (p.sick ? sickTex : normalTex) : (calling ? painted.call : painted.seated)
             if body.texture !== tex {
                 body.texture = tex
                 body.size = p.stroll != nil ? Art.passengerSize : PassengerArt.size
+                body.anchorPoint = CGPoint(x: 0.5, y: 0.5)
             }
             body.color = UIColor(hex: 0x8DBF5A)
             body.colorBlendFactor = p.sick && p.stroll == nil ? 0.38 : 0
@@ -1136,8 +1161,13 @@ final class PaxNode: SKNode {
         if p.sick { dx += sin(t * 9) * 0.9 }
         if turbulence > 0 { dx += sin(t * 31) * 1.6 * turbulence; dy += sin(t * 27 + 1) * 1.2 * turbulence }
         if let s = p.stroll {
-            flip.xScale = s.face > 0 ? -1 : 1
-            if s.stage == .walking || s.stage == .returning { dy += sin(clock * 14 + phase) * 0.9 }
+            if walkTex != nil {
+                flip.xScale = walkFacing == .side && s.face < 0 ? -1 : 1      // painted side frames face right
+                dy -= 20                                                     // feet on the walking line, like the crew
+            } else {
+                flip.xScale = s.face > 0 ? -1 : 1
+                if s.stage == .walking || s.stage == .returning { dy += sin(clock * 14 + phase) * 0.9 }
+            }
         } else {
             flip.xScale = 1
         }

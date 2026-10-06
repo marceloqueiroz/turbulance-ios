@@ -19,6 +19,32 @@ Work in the scratchpad; copy only finals into `branding/` and the atlas into the
 - The character design sheet (`ref-design.jpg` for the attendant).
 - Facing left = side mirrored in code, so 3 views are enough.
 
+## Other characters (passengers): put their head on the attendant's walk
+
+What worked (2026-10-06, after several failed rounds on the passengers):
+
+1. **Redraw the head at her exact camera angle first.** Send her cut head for that view as IMAGE 1 and the
+   character's approved views as references; ask for the character's head "at EXACTLY this angle, size and
+   place". A head taken from the character's own sheet carries that sheet's angle (the passengers' side views
+   were three-quarter) and the whole walk inherits it; the user rejected that. Front and back need "seen from
+   HIGH ABOVE ... the camera looks down on the top of the head" or Gemini draws them at eye level.
+2. **Fit the head into her canvas:** side heads by her head width (`--head-h`); front/back heads scaled to her
+   head's box and pasted at its place, so `pose_guide.py` puts them where hers sits.
+3. **Use her guide unchanged** (chunky build, her stride). The passenger takes her proportions, which is what
+   the user approved. Building a guide to the character's own taller proportions (`--legs/--torso/--limb`) gave
+   strides and wobble the user rejected twice.
+4. **`gen_sheet.py --build`** must describe the chunky build ("the big head is more than half of the height ...
+   very short stubby legs"); the default sentence is the attendant's. Back views: "seen from BEHIND ... NO face
+   anywhere; the guide's arms become the sleeves" (otherwise a face appears on the back of the head).
+5. **Don't trust the leftover-colour count** for clothing that is orange, mustard, coral or ginger: it reports
+   thousands of px on a clean take. Look at the sheet; repaint real guide leftovers on the legs only (rows below
+   ~600 px) with the trouser colour.
+6. **Budget:** Gemini 3 Pro Image allows 250 requests per day per project. Five passengers x 3 views x 3 takes
+   plus head redraws and retries used it up; generate one character at a time and stop rerolling at 2 takes.
+
+Tried and rejected for passengers: a mannequin with their own longer legs, locking head + chest, and
+repainting another character's finished walk (the business walk) as them.
+
 ## Steps (per view; do side first and get it approved before front/back)
 
 1. **Cut the locked head** (`cut_head.py`).

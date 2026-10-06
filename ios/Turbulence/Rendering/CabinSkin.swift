@@ -111,4 +111,29 @@ enum PassengerArt {
         guard let s = textures["\(look)-seated"], let c = textures["\(look)-call"] else { return nil }
         return (s, c)
     }
+
+    /// The archetype's walking look (parents only stroll without their toddler, so the father walks alone).
+    static func walkLook(_ p: Passenger) -> String {
+        switch p.archetype {
+        case .business: return "business"
+        case .family: return "familysolo"
+        case .nervous: return "nervous"
+        case .sleeper: return "sleeper"
+        case .chatterbox: return "chatterbox"
+        }
+    }
+
+    // MARK: Walk cycles (24 frames per facing; side faces right and is mirrored for left), same frame size as the attendant's
+
+    private static let walkAtlas = SKTextureAtlas(named: "PassengerWalk")
+    private static var walkCache: [String: [SKTexture]] = [:]
+    static func walk(_ look: String, _ facing: AttendantArt.Facing) -> [SKTexture]? {
+        let key = "\(look)-\(facing.rawValue)"
+        if let t = walkCache[key] { return t.isEmpty ? nil : t }
+        let names = Set(walkAtlas.textureNames.map { ($0 as NSString).deletingPathExtension })
+        let frames = (0..<AttendantArt.frameCount).map { String(format: "%@-%02d", key, $0) }
+        let t = frames.allSatisfy(names.contains) ? frames.map { walkAtlas.textureNamed($0) } : []
+        walkCache[key] = t
+        return t.isEmpty ? nil : t
+    }
 }
