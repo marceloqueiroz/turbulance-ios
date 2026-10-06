@@ -13,3 +13,6 @@ build/
 
 # Secrets
 .env
+
+# Animation experiments (Blender, Meshy, draft Gemini takes): large, kept locally only
+branding/sprites/characters/animation-tests/

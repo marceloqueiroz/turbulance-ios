@@ -87,6 +87,9 @@ final class CabinScene: SKScene {
     private var worldH = 380.0
     private var builtFor: String?
     private var freshNodes: [Int: SKSpriteNode] = [:]      // stations new on this flight, popped in at Go
+    /// The painted cabin set for this aircraft, if it has one (CabinSkin); its stations are sprites that show machine states.
+    private var skin: CabinSkin?
+    private var stationNodes: [Int: SKSpriteNode] = [:]
     private var dustTimer = 0.0
     /// Jump seats as sprites, so they can fold away after Go on flights without turbulence.
     private var jumpSeatNodes: [SKSpriteNode] = []
@@ -398,12 +401,27 @@ final class CabinScene: SKScene {
         builtFor = staticKey(layout, hiding)
 
         // no wings: the camera frames the inside of the cabin only (GDD §8a)
-        let cabin = SKSpriteNode(texture: SKTexture(image: Art.cabin(layout, hiding: hiding, jumpSeats: false)))
-        cabin.size = CGSize(width: worldW + 2 * Double(Art.cabinPad), height: worldH)
-        cabin.anchorPoint = .zero
-        cabin.position = CGPoint(x: -Art.cabinPad, y: 0)
-        cabin.zPosition = 0
-        world.addChild(cabin); staticNodes.append(cabin)
+        skin = CabinSkin.forAircraft(layout.aircraft)
+        if let skin {
+            // the painted base picture, its outermost columns stretched over the pads past the nose and tail
+            let r = skin.baseRect, pad = Art.cabinPad
+            let base = SKSpriteNode(texture: skin.base, size: r.size)
+            base.anchorPoint = .zero; base.position = CGPoint(x: r.minX, y: worldH - r.maxY); base.zPosition = 0
+            world.addChild(base); staticNodes.append(base)
+            for (u, x0, w) in [(CGFloat(0), -pad, r.minX + pad), (CGFloat(0.998), r.maxX, worldW + pad - r.maxX)] where w > 0 {
+                let edge = SKSpriteNode(texture: SKTexture(rect: CGRect(x: u, y: 0, width: 0.002, height: 1), in: skin.base),
+                                        size: CGSize(width: w, height: r.height))
+                edge.anchorPoint = .zero; edge.position = CGPoint(x: x0, y: worldH - r.maxY); edge.zPosition = -0.1
+                world.addChild(edge); staticNodes.append(edge)
+            }
+        } else {
+            let cabin = SKSpriteNode(texture: SKTexture(image: Art.cabin(layout, hiding: hiding, jumpSeats: false)))
+            cabin.size = CGSize(width: worldW + 2 * Double(Art.cabinPad), height: worldH)
+            cabin.anchorPoint = .zero
+            cabin.position = CGPoint(x: -Art.cabinPad, y: 0)
+            cabin.zPosition = 0
+            world.addChild(cabin); staticNodes.append(cabin)
+        }
 
         machineRings.values.forEach { $0.removeFromParent() }
         machineRings.removeAll()
@@ -411,22 +429,37 @@ final class CabinScene: SKScene {
         machineCold.removeAll()
         freshNodes.values.forEach { $0.removeFromParent() }
         freshNodes.removeAll()
+        stationNodes.values.forEach { $0.removeFromParent() }
+        stationNodes.removeAll()
         jumpSeatNodes.forEach { $0.removeFromParent() }
-        let seatTex = SKTexture(image: Art.jumpSeatImage())
+        let painted = skin?.crewSeat
+        let seatTex = painted?.texture ?? SKTexture(image: Art.jumpSeatImage())
         jumpSeatNodes = layout.jumpSeats.map { j in
-            let n = SKSpriteNode(texture: seatTex, size: CGSize(width: 32, height: 28))
+            let n = SKSpriteNode(texture: seatTex, size: painted?.size ?? CGSize(width: 32, height: 28))
+            if let painted { n.anchorPoint = painted.anchor }
             n.position = pt(j.x, layout.aisles[j.aisle] - 30)
             n.zPosition = 0.4
             world.addChild(n)
             return n
         }
-        for i in hiding where layout.bins.indices.contains(i) {
-            let b = layout.bins[i]
-            let n = SKSpriteNode(texture: SKTexture(image: Art.stationImage(b)))
-            n.size = CGSize(width: 64, height: 64)
-            n.position = pt(b.x, b.y)
-            n.zPosition = 0.5; n.alpha = 0; n.setScale(0.2)
-            world.addChild(n); freshNodes[i] = n
+        // stations: painted fittings when the aircraft has a set (all of them, so machines can change), else only the new ones
+        for (i, b) in layout.bins.enumerated() {
+            let fresh = hiding.contains(i)
+            let n: SKSpriteNode
+            if let s = skin?.station(b.kind, machine: nil) {
+                n = SKSpriteNode(texture: s.texture, size: s.size); n.anchorPoint = s.anchor
+                n.position = pt(b.x, b.y - 4)
+                stationNodes[i] = n
+            } else if fresh || skin != nil {
+                n = SKSpriteNode(texture: SKTexture(image: Art.stationImage(b)))
+                n.size = CGSize(width: 64, height: 64)
+                n.position = pt(b.x, b.y)
+            } else {
+                continue
+            }
+            n.zPosition = 0.5
+            if fresh { n.alpha = 0; n.setScale(0.2); freshNodes[i] = n }
+            world.addChild(n)
         }
         for (i, b) in layout.bins.enumerated() {
             let hw: CGFloat = b.kind == .drinks ? 27 : 19
@@ -658,6 +691,12 @@ final class CabinScene: SKScene {
 
         for (i, b) in sim.layout.bins.enumerated() where i < binHighlights.count {
             binHighlights[i].isHidden = b.item.map { !sim.crew.tray.contains($0) } ?? true
+        }
+        if let skin {
+            for (i, n) in stationNodes where sim.layout.bins[i].isMachine {
+                guard let s = skin.station(sim.layout.bins[i].kind, machine: sim.machines[i]), n.texture !== s.texture else { continue }
+                n.texture = s.texture; n.size = s.size; n.anchorPoint = s.anchor
+            }
         }
         for (i, ring) in machineRings {
             switch sim.machines[i] ?? .idle {
