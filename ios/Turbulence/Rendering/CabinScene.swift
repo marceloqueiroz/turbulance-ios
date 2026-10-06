@@ -733,7 +733,7 @@ final class CabinScene: SKScene {
         if running {
             dustTimer -= dt
             if dustTimer <= 0 {
-                footSmoke(x: crew.x - crew.face * 12, y: crew.y + 10, strength: strength)
+                footSmoke(x: crew.x - crew.face * 12, y: crew.y + (AttendantArt.available ? 18 : 10), strength: strength)
                 dustTimer = 0.11 - 0.06 * Double(strength)
             }
         }
@@ -754,7 +754,7 @@ final class CabinScene: SKScene {
         }
         partnerNode.isHidden = !sim.twoCrew
         activeMark.isHidden = !sim.twoCrew
-        if sim.twoCrew { activeMark.position = pt(crew.x, crew.y - 36 - 3 * sin(clock * 5)) }
+        if sim.twoCrew { activeMark.position = pt(crew.x, crew.y - (AttendantArt.available ? 50 : 36) - 3 * sin(clock * 5)) }
         if let t = crew.target {
             targetMarker.isHidden = false
             targetMarker.position = pt(t.x, sim.layout.aisles[min(t.aisle, sim.layout.aisles.count - 1)] + 22)
@@ -1224,6 +1224,25 @@ func easeOutBack(_ t: Double) -> Double { 1 + 2.70158 * pow(t - 1, 3) + 1.70158 
 
 // MARK: - Crew node (teal uniform, coral scarf, hair in a bun; walk cycle)
 
+/// The painted attendant walk: 24 frames per facing (side faces right; mirrored for left),
+/// exported by ios/tools/sprite_atlas.py into Assets.xcassets/AttendantWalk.spriteatlas.
+enum AttendantArt {
+    enum Facing { case side, front, back }
+    static let frameCount = 24
+    /// Frame size in points; the feet stand on the line `groundY` up from the frame's bottom (the figure is ~56 pt tall).
+    static let frameSize = CGSize(width: 56, height: 76)
+    static let anchor = CGPoint(x: 0.5, y: 73.0 / 848.0)
+    /// Shown while standing: the passing pose, both feet under the body.
+    static let idleFrame = 6
+    private static let atlas = SKTextureAtlas(named: "AttendantWalk")
+    static let available = atlas.textureNames.count >= frameCount * 3
+    private static func frames(_ name: String) -> [SKTexture] {
+        (0..<frameCount).map { atlas.textureNamed(String(format: "%@-%02d", name, $0)) }
+    }
+    static let side = frames("side"), front = frames("front"), back = frames("back")
+    static func frames(_ f: Facing) -> [SKTexture] { f == .side ? side : f == .front ? front : back }
+}
+
 final class CrewNode: SKNode {
     private let feet = [SKShapeNode(ellipseOf: CGSize(width: 9, height: 5.2)), SKShapeNode(ellipseOf: CGSize(width: 9, height: 5.2))]
     private let arms = [SKShapeNode(ellipseOf: CGSize(width: 11, height: 6.8)), SKShapeNode(ellipseOf: CGSize(width: 11, height: 6.8))]
@@ -1248,16 +1267,32 @@ final class CrewNode: SKNode {
     private let strap = SKShapeNode(rect: CGRect(x: -11, y: -2, width: 22, height: 4), cornerRadius: 2)
     private var shownBubble: String?
     var worldWidth = 1000.0
+    /// The painted attendant (AttendantArt); when its atlas is missing the shape figure below is drawn instead.
+    private let body = SKSpriteNode()
+    private let painted = AttendantArt.available
+    private var facing = AttendantArt.Facing.front
+    private var last: (x: Double, y: Double)?
+    /// Where the painted figure's feet stand, relative to the crew position (the aisle line).
+    private let feetY: CGFloat = -20
+    private var headTop: CGFloat { painted ? feetY + 56 : 8 }
 
     override init() {
         super.init()
-        let shadow = SKShapeNode(ellipseOf: CGSize(width: 26, height: 34))
-        shadow.fillColor = Art.ink(0.25); shadow.strokeColor = .clear; shadow.position = CGPoint(x: 3, y: -4)
+        let shadow = painted ? SKShapeNode(ellipseOf: CGSize(width: 34, height: 12)) : SKShapeNode(ellipseOf: CGSize(width: 26, height: 34))
+        shadow.fillColor = Art.ink(0.25); shadow.strokeColor = .clear
+        shadow.position = painted ? CGPoint(x: 0, y: feetY + 2) : CGPoint(x: 3, y: -4)
         addChild(shadow)
+        if painted {
+            body.size = AttendantArt.frameSize; body.anchorPoint = AttendantArt.anchor
+            body.position = CGPoint(x: 0, y: feetY); body.zPosition = 1
+            body.texture = AttendantArt.front[AttendantArt.idleFrame]
+            addChild(body)
+        }
         for f in feet { f.fillColor = Palette.navy; f.strokeColor = .clear; addChild(f) }
         for a in arms { a.fillColor = UIColor(hex: 0x197476); a.strokeColor = .clear; addChild(a) }
         for h in hands { h.fillColor = UIColor(hex: 0xE9B892); h.strokeColor = .clear; addChild(h) }
         addChild(torso)
+        if painted { ([torso] + feet + arms + hands as [SKNode]).forEach { $0.isHidden = true } }
 
         let bodyShape = SKShapeNode(ellipseOf: CGSize(width: 20, height: 31))
         bodyShape.fillColor = Palette.teal; bodyShape.strokeColor = Palette.navy; bodyShape.lineWidth = 2
@@ -1323,15 +1358,30 @@ final class CrewNode: SKNode {
         let sw = moving ? CGFloat(sin(c.walk)) : 0
         let sq = moving ? 1 + abs(sw) * 0.04 : 1 + CGFloat(sin(clock * 2)) * 0.015
 
-        feet[0].isHidden = !moving; feet[1].isHidden = !moving
-        feet[0].position = CGPoint(x: face * (3 + sw * 6), y: 5)
-        feet[1].position = CGPoint(x: face * (3 - sw * 6), y: -5)
-        arms[0].position = CGPoint(x: -sw * 4 * face, y: 13.5)
-        arms[1].position = CGPoint(x: sw * 4 * face, y: -13.5)
-        hands[0].position = CGPoint(x: -sw * 4 * face + face * 5, y: 13.5)
-        hands[1].position = CGPoint(x: sw * 4 * face + face * 5, y: -13.5)
-        torso.xScale = (face < 0 ? 1 : -1) / sq
-        torso.yScale = sq
+        if painted {
+            // facing from the way she actually moved this frame: sideways along an aisle, down (front) or up (back) across one
+            if let l = last, moving {
+                let dx = c.x - l.x, dy = c.y - l.y
+                if abs(dx) > 0.01 || abs(dy) > 0.01 { facing = abs(dy) > abs(dx) ? (dy > 0 ? .front : .back) : .side }
+            } else if c.seated != nil {
+                facing = .front
+            }
+            last = (c.x, c.y)
+            let cycle = (c.walk / (2 * .pi)).truncatingRemainder(dividingBy: 1)
+            let k = moving ? Int(cycle * Double(AttendantArt.frameCount)) % AttendantArt.frameCount : AttendantArt.idleFrame
+            body.texture = AttendantArt.frames(facing)[k]
+            body.xScale = facing == .side && face < 0 ? -1 : 1
+        } else {
+            feet[0].isHidden = !moving; feet[1].isHidden = !moving
+            feet[0].position = CGPoint(x: face * (3 + sw * 6), y: 5)
+            feet[1].position = CGPoint(x: face * (3 - sw * 6), y: -5)
+            arms[0].position = CGPoint(x: -sw * 4 * face, y: 13.5)
+            arms[1].position = CGPoint(x: sw * 4 * face, y: -13.5)
+            hands[0].position = CGPoint(x: -sw * 4 * face + face * 5, y: 13.5)
+            hands[1].position = CGPoint(x: sw * 4 * face + face * 5, y: -13.5)
+            torso.xScale = (face < 0 ? 1 : -1) / sq
+            torso.yScale = sq
+        }
 
         strap.isHidden = c.seated == nil               // buckled into a jump seat
         // the tray: up to two items above the crew member's head (the HUD no longer repeats this)
@@ -1362,7 +1412,7 @@ final class CrewNode: SKNode {
                 heldNodes[k].isHidden = false
                 heldItems[k].texture = CabinScene.Tex.items[c.tray[k]]
                 let x: CGFloat = c.tray.count == 1 ? 0 : (k == 0 ? -12 : 12)
-                heldNodes[k].position = CGPoint(x: x, y: 30 + CGFloat(sin(clock * 6 + Double(k))) * 1.5)
+                heldNodes[k].position = CGPoint(x: x, y: headTop + 22 + CGFloat(sin(clock * 6 + Double(k))) * 1.5)
             } else {
                 heldNodes[k].isHidden = true
             }
@@ -1399,7 +1449,7 @@ final class CrewNode: SKNode {
         if c.bubble != nil {
             let w = (bubbleNode.userData?["w"] as? CGFloat) ?? 60
             let bx = min(max(c.x, Double(w / 2 + 24)), worldWidth - Double(w / 2) - 24)
-            bubbleNode.position = CGPoint(x: bx - c.x, y: c.tray.isEmpty ? 38 : 56)
+            bubbleNode.position = CGPoint(x: bx - c.x, y: headTop + (c.tray.isEmpty ? 30 : 48))
         }
     }
 }
