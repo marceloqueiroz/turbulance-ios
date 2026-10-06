@@ -1,0 +1,129 @@
+{
+ "side": {
+  "size": [
+   528,
+   843
+  ],
+  "parts": {
+   "head": "family-side-head.png",
+   "armR": "family-side-armR.png",
+   "armL": "family-side-armL.png",
+   "legR": "family-side-legR.png",
+   "legL": "family-side-legL.png",
+   "torso": "family-side-torso.png"
+  },
+  "pivots": {
+   "head": [
+    287.3225136328226,
+    331.6307452609712
+   ],
+   "armR": [
+    124.48421052631579,
+    601.1789473684211
+   ],
+   "armL": [
+    165.76392652815417,
+    474.6341463414634
+   ],
+   "legR": [
+    251.66718603926458,
+    636.8663134933001
+   ],
+   "legL": [
+    326.0,
+    751.0714285714286
+   ]
+  },
+  "order": [
+   "legL",
+   "legR",
+   "armL",
+   "torso",
+   "armR",
+   "head"
+  ]
+ },
+ "back": {
+  "size": [
+   599,
+   775
+  ],
+  "parts": {
+   "head": "family-back-head.png",
+   "armL": "family-back-armL.png",
+   "legR": "family-back-legR.png",
+   "legL": "family-back-legL.png",
+   "torso": "family-back-torso.png"
+  },
+  "pivots": {
+   "head": [
+    250.27261306532662,
+    312.4312185929648
+   ],
+   "armL": [
+    408.73344947735194,
+    388.2032520325203
+   ],
+   "legR": [
+    284.4235537190083,
+    581.24173553719
+   ],
+   "legL": [
+    190.0,
+    702.0714285714286
+   ]
+  },
+  "order": [
+   "legL",
+   "legR",
+   "armR",
+   "torso",
+   "armL",
+   "head"
+  ]
+ },
+ "front": {
+  "size": [
+   587,
+   798
+  ],
+  "parts": {
+   "head": "family-front-head.png",
+   "armR": "family-front-armR.png",
+   "armL": "family-front-armL.png",
+   "legR": "family-front-legR.png",
+   "legL": "family-front-legL.png",
+   "torso": "family-front-torso.png"
+  },
+  "pivots": {
+   "head": [
+    313.8799596503026,
+    346.18930733019505
+   ],
+   "armR": [
+    57.5,
+    427.5
+   ],
+   "armL": [
+    151.17554756456357,
+    356.82052958483166
+   ],
+   "legR": [
+    294.8291519800954,
+    595.5797221646278
+   ],
+   "legL": [
+    240.72894736842105,
+    710.7552631578948
+   ]
+  },
+  "order": [
+   "legL",
+   "legR",
+   "armL",
+   "torso",
+   "armR",
+   "head"
+  ]
+ }
+}

@@ -1,0 +1,134 @@
+{
+ "side": {
+  "size": [
+   555,
+   814
+  ],
+  "parts": {
+   "head": "business-side-head.png",
+   "armR": "business-side-armR.png",
+   "armL": "business-side-armL.png",
+   "legR": "business-side-legR.png",
+   "legL": "business-side-legL.png",
+   "torso": "business-side-torso.png"
+  },
+  "pivots": {
+   "head": [
+    277.5803694513372,
+    417.3818582850841
+   ],
+   "armR": [
+    428.94023242944104,
+    411.8090758162701
+   ],
+   "armL": [
+    191.44645550527903,
+    545.2144293614882
+   ],
+   "legR": [
+    326.00388802488334,
+    678.4331259720062
+   ],
+   "legL": [
+    363.0,
+    723.0714285714286
+   ]
+  },
+  "order": [
+   "legL",
+   "legR",
+   "armL",
+   "torso",
+   "armR",
+   "head"
+  ]
+ },
+ "back": {
+  "size": [
+   619,
+   839
+  ],
+  "parts": {
+   "head": "business-back-head.png",
+   "armR": "business-back-armR.png",
+   "armL": "business-back-armL.png",
+   "legR": "business-back-legR.png",
+   "legL": "business-back-legL.png",
+   "torso": "business-back-torso.png"
+  },
+  "pivots": {
+   "head": [
+    301.0162116040956,
+    412.1962457337884
+   ],
+   "armR": [
+    450.2182240278584,
+    460.5159605339524
+   ],
+   "armL": [
+    139.0,
+    509.18313805399896
+   ],
+   "legR": [
+    245.08813838550248,
+    684.509884678748
+   ],
+   "legL": [
+    363.7037037037037,
+    685.9739952718676
+   ]
+  },
+  "order": [
+   "legL",
+   "legR",
+   "armR",
+   "torso",
+   "armL",
+   "head"
+  ]
+ },
+ "front": {
+  "size": [
+   621,
+   828
+  ],
+  "parts": {
+   "head": "business-front-head.png",
+   "armR": "business-front-armR.png",
+   "armL": "business-front-armL.png",
+   "legR": "business-front-legR.png",
+   "legL": "business-front-legL.png",
+   "torso": "business-front-torso.png"
+  },
+  "pivots": {
+   "head": [
+    312.1522253787879,
+    444.7064393939394
+   ],
+   "armR": [
+    476.97095761381473,
+    509.81554160125586
+   ],
+   "armL": [
+    120.7560635628659,
+    445.5678840256482
+   ],
+   "legR": [
+    250.80817610062894,
+    665.062106918239
+   ],
+   "legL": [
+    373.73071895424835,
+    677.6078431372549
+   ]
+  },
+  "order": [
+   "legL",
+   "legR",
+   "armL",
+   "torso",
+   "armR",
+   "head"
+  ]
+ }
+}
