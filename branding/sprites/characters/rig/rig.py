@@ -51,8 +51,18 @@ for (x0, fi, sl), facing in zip(objs, FACING):
     parts, pivots = {}, {}
     def m(nm): return L == names.index(nm)
     def contact(a, b):
+        # the joint is where the limb meets the torso at its root: the top of an arm or leg (shoulder, hip),
+        # the bottom of the head (neck); a limb that doesn't touch the torso uses its own top
         t = ndimage.binary_dilation(m(a), iterations=6) & ndimage.binary_dilation(m(b), iterations=6)
-        yy, xx = np.nonzero(t); return [float(xx.mean()), float(yy.mean())] if len(xx) else None
+        yy, xx = np.nonzero(t)
+        if len(yy) < 20:
+            yy, xx = np.nonzero(m(a))
+            if not len(yy): return None
+        if a == "head":
+            k = yy >= np.percentile(yy, 70)
+        else:
+            k = yy <= np.percentile(yy, 25)
+        return [float(xx[k].mean()), float(yy[k].mean())]
     for nm in ["head", "armR", "armL", "legR", "legL"]:
         if m(nm).sum() < 50: continue
         mk = m(nm); cc, kk = ndimage.label(mk)

@@ -4,14 +4,22 @@ from PIL import Image, ImageDraw
 rigf, outp = sys.argv[1], sys.argv[2]; rig = json.load(open(rigf)); d = rigf.rsplit("/", 1)[0]
 def pose(f, t):
     R = rig[f]; W, H = R["size"]; c = Image.new("RGBA", (W, H + 40), (245, 222, 206, 255)); s = math.sin(t * 2 * math.pi)
-    ang = {"armR": 22 * s, "armL": -22 * s, "legR": -18 * s, "legL": 18 * s, "head": 4 * math.sin(t * 4 * math.pi)}
+    # side: legs swing opposite each other; each arm swings opposite its own leg (a normal walk)
+    ang = {"legR": -30 * s, "legL": 30 * s, "armR": 32 * s, "armL": -32 * s, "head": 3 * math.sin(t * 4 * math.pi)}
     # walking towards or away from the camera: each foot steps forward and back (up and down the screen, a little
     # wider when lifted), the arms swing opposite to the legs, the body sways side to side
     step = {"legR": 0, "legL": 0, "armR": 0, "armL": 0}; sway = 0
+    # side: feet slide forward and back along the walk (legs are short stubs at this camera height, so a step
+    # reads as the feet passing each other), lifting a little as they swing through
+    slide = {}
+    if f == "side":
+        ang = {"legR": -12 * s, "legL": 12 * s, "armR": 34 * s, "armL": -34 * s, "head": 3 * math.sin(t * 4 * math.pi)}
+        slide = {"legR": 34 * s, "legL": -34 * s}
+        step = {"legR": -8 * max(0, math.cos(t * 2 * math.pi)), "legL": -8 * max(0, -math.cos(t * 2 * math.pi))}
     if f != "side":
         sgn = 1 if f == "front" else -1
-        ang = {"armR": -10 * s, "armL": -10 * s, "legR": 5 * s, "legL": 5 * s, "head": 3 * s}
-        step = {"legR": 16 * s * sgn, "legL": -16 * s * sgn, "armR": -12 * s * sgn, "armL": 12 * s * sgn}
+        ang = {"armR": 14 * s, "armL": 14 * s, "legR": 0, "legL": 0, "head": 2 * s}
+        step = {"legR": 40 * s, "legL": -40 * s, "armR": -22 * s, "armL": 22 * s}
         sway = int(5 * s)
     bob = int(6 * abs(s))
     for nm in R["order"]:
@@ -20,7 +28,7 @@ def pose(f, t):
         if pv and ang.get(nm):
             im = im.rotate(ang[nm], resample=Image.BICUBIC, center=tuple(pv))
         leg = nm in ("legL", "legR")
-        c.alpha_composite(im, (sway if not leg else 0, int(20 - (0 if leg else bob) + step.get(nm, 0))))
+        c.alpha_composite(im, (int((sway if not leg else 0) + slide.get(nm, 0)), int(20 - (0 if leg else bob) + step.get(nm, 0))))
     for nm, pv in ({} if NOMARK else R["pivots"]).items():
         if pv: ImageDraw.Draw(c).ellipse((pv[0] - 6, pv[1] + 14, pv[0] + 6, pv[1] + 26), outline=(214, 40, 40), width=3)
     return c
