@@ -1006,12 +1006,12 @@ final class FlightSimulation {
     func clog(lavatory li: Int) -> Int {
         let lav = layout.lavatories[li]
         var o = Occurrence(id: nextID, kind: .toilet, passenger: nil, row: layout.nearestRow(toX: lav.doorX), x: lav.doorX,
-                           y: layout.aisles[lav.aisle], aisle: lav.aisle, steps: [.item(.plunger)], fuse: Tuning.clogFuse, seed: random() * 6)
+                           y: layout.aisles[lav.aisle], aisle: lav.aisle, steps: [.clean], fuse: Tuning.clogFuse, seed: random() * 6)   // plunged on the spot
         o.lavatory = li
         add(o)
         lavUsesSinceClog[li] = 0
         events.append(.spawned(.toilet, x: lav.doorX, y: layout.aisles[lav.aisle]))
-        hint("toilet", "A lavatory is clogged! Nobody can use it until it's fixed. The icon shows what you need.")
+        hint("toilet", "A lavatory is clogged! Nobody can use it until it's fixed: tap it to plunge it.")
         return o.id
     }
 

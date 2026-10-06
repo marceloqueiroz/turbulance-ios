@@ -224,12 +224,13 @@ final class FlightSimulationTests: XCTestCase {
         use(sim, station(sim, .bin(.toy)))
         use(sim, station(sim, .bin(.snack)))
         XCTAssertEqual(sim.crew.tray, [.toy, .snack])
-        _ = sim.drainEvents()
-        use(sim, station(sim, .bin(.plunger)))
-        XCTAssertEqual(sim.crew.tray.count, 2, "tray full")
-        XCTAssertTrue(sim.drainEvents().contains(.nope))
         use(sim, station(sim, .bin(.toy)))
         XCTAssertEqual(sim.crew.tray, [.snack], "tapping the same bin puts it back")
+        sim.crew.tray = [.water, .juice]
+        _ = sim.drainEvents()
+        use(sim, station(sim, .bin(.toy)))
+        XCTAssertEqual(sim.crew.tray.count, 2, "tray full")
+        XCTAssertTrue(sim.drainEvents().contains(.nope))
     }
 
     func testCoffeeBrewsThenHandsOver() {
@@ -327,15 +328,15 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(sim.noiseLevel(o), 1)
     }
 
-    func testLavatoryClogsAndThePlungerFixesIt() {
+    func testLavatoryClogsAndIsPlungedOnTheSpot() {
         let sim = runningSim(plan: flight("TB105"))
         let id = sim.clog(lavatory: 0)
         XCTAssertTrue(sim.isClogged(0))
         let o = sim.occurrences.first { $0.id == id }!
-        XCTAssertEqual(o.need, .item(.plunger))
-        use(sim, station(sim, .bin(.plunger)))
-        XCTAssertEqual(sim.crew.tray, [.plunger])
+        XCTAssertEqual(o.need, .clean, "no tool to fetch: the plunger lives in the lavatory")
+        XCTAssertFalse(sim.layout.bins.contains { $0.item == .plunger })
         sim.crew.aisle = o.aisle
+        sim.crew.x = o.x - 40                  // beside the lavatory: the plunge itself takes 1.5 s
         sim.tap(x: o.x, y: o.y)
         step(sim, seconds: 4)
         XCTAssertFalse(sim.isClogged(0))
@@ -672,7 +673,7 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertEqual(L.aisles, [180])
         XCTAssertEqual(L.rows[0].seats.map(\.y), [64, 108, 252, 296])
         let kinds = L.bins.map(\.kind)
-        for k: StationKind in [.drinks, .coffee, .oven, .bin(.snack), .bin(.toy), .trash, .bin(.plunger)] {
+        for k: StationKind in [.drinks, .coffee, .oven, .bin(.snack), .bin(.toy), .trash] {
             XCTAssertTrue(kinds.contains(k), "\(k)")
         }
         XCTAssertFalse(L.bins.contains { $0.item == .usedBag })
@@ -699,11 +700,13 @@ final class FlightSimulationTests: XCTestCase {
     func testAftServiceBlocksAndEndWallsFrameTheWorkArea() {
         for a in Aircraft.allCases {
             let L = a.layout
-            // two equal aft blocks: a lavatory and one station each, on both sides of the cabin
+            // two open-top lavatories aft, and a wall trash bin at each end (GDD §4a)
             let aft = L.blocks.filter { $0.x >= L.aftX }
             XCTAssertEqual(aft.filter { $0.kind == .lavatory }.count, 2, "\(a) has two aft lavatories")
-            XCTAssertEqual(Set(aft.map { $0.w }).count, 2, "\(a) aft blocks: one lavatory width and one station width")
-            XCTAssertTrue(L.bins.contains { $0.item == .plunger && $0.x > L.aftX }, "\(a) plunger aft")
+            XCTAssertEqual(Set(aft.map { $0.w }).count, 1, "\(a) aft lavatories are the same width")
+            XCTAssertFalse(L.bins.contains { $0.item == .plunger }, "\(a) no plunger station")
+            XCTAssertTrue(L.bins.contains { $0.kind == .trash && $0.x < L.firstRowX }, "\(a) trash on the nose wall")
+            XCTAssertTrue(L.bins.contains { $0.kind == .trash && $0.x > L.aftX }, "\(a) trash on the tail wall")
             XCTAssertLessThanOrEqual(L.bins.map(\.x).max()!, L.maxX, "\(a) every station is in reach")
             // the camera keeps 32 pt between the work area and the screen edges
             let s = CameraRig.fitScale(availW: CameraRig.referenceView.w, availH: CameraRig.referenceView.h, layout: L)

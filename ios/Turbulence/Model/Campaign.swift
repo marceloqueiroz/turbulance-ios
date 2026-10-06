@@ -186,7 +186,6 @@ struct FlightPlan: Identifiable, Equatable {
             switch item {
             case .snack: return menu.contains(.snack)
             case .toy: return kinds.contains(.baby)
-            case .plunger: return kinds.contains(.toilet)
             case .tool: return cart == .breaks
             default: return true
             }
@@ -239,15 +238,15 @@ enum Campaign {
     /// at most 0.55× 3★; 2★ = min(the mid-skill bot's 30th percentile, halfway from 1★ to 3★). All rounded down to 5.
     static let starTargets: [String: [Int]] = [
         "TB101": [30, 45, 60], "TB102": [120, 170, 225], "TB103": [230, 325, 420],
-        "TB104": [195, 275, 360], "TB105": [95, 235, 390], "TB106": [165, 375, 680],
+        "TB104": [195, 275, 360], "TB105": [95, 235, 390], "TB106": [165, 375, 610],
         "TB201": [290, 410, 530], "TB202": [230, 325, 420], "TB203": [265, 375, 490],
-        "TB204": [275, 385, 500], "TB205": [210, 300, 390], "TB206": [130, 260, 390],
-        "TB207": [225, 320, 415], "TB208": [310, 435, 565], "TB209": [275, 390, 505],
-        "TB210": [235, 335, 435], "TB211": [215, 285, 395], "TB212": [190, 365, 475],
+        "TB204": [275, 385, 500], "TB205": [210, 300, 390], "TB206": [130, 260, 370],
+        "TB207": [225, 320, 415], "TB208": [310, 435, 565], "TB209": [275, 390, 500],
+        "TB210": [235, 335, 435], "TB211": [215, 285, 380], "TB212": [190, 365, 475],
         "TB301": [255, 360, 465], "TB302": [320, 455, 590], "TB303": [225, 315, 410],
-        "TB304": [260, 370, 480], "TB305": [290, 410, 535], "TB306": [220, 340, 450],
+        "TB304": [260, 370, 480], "TB305": [290, 410, 535], "TB306": [220, 340, 410],
         "TB307": [485, 685, 890], "TB308": [525, 740, 960], "TB309": [670, 950, 1225],
-        "TB310": [680, 960, 1240], "TB311": [400, 565, 790], "TB312": [560, 785, 895]
+        "TB310": [680, 960, 1240], "TB311": [400, 565, 720], "TB312": [560, 785, 895]
     ]
 
     private static func bump(_ start: Double, _ duration: Double = 7, _ intensity: Double = 0.375) -> [TurbulenceBump] {
@@ -296,7 +295,7 @@ enum Campaign {
             FlightPlan(id: "TB105", name: "Night Flight", aircraft: .comet, duration: 135,
                        kinds: full, script: [.drink, .call], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
                        turbulence: bump(55), twist: .redEye, story: .commuters, goal: .noneWoken,
-                       whatsNew: "A dim red-eye: don't wake the sleepers. Snacks and two-item combo orders. A dirty loo left too long clogs and needs the plunger. Midway, a rush of requests hits at once.",
+                       whatsNew: "A dim red-eye: don't wake the sleepers. Snacks and two-item combo orders. A dirty loo left too long clogs: tap it to plunge it. Midway, a rush of requests hits at once.",
                        pace: Pace(fuseScale: 1.0, spawnEvery: 5...6.5, rush: true)),
             FlightPlan(id: "TB106", name: "Full Service", aircraft: .comet, duration: 180,
                        kinds: full, script: [.drink, .sick], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,

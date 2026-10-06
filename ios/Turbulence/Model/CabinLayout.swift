@@ -268,7 +268,9 @@ struct CabinLayout: Equatable {
                  SupplyBin(.coffee, x: 150, y: topY, aisle: 0), SupplyBin(.oven, x: 186, y: topY, aisle: 0),
                  SupplyBin(.oven, x: 78, y: bottomY, aisle: last)]
         bins += [SupplyBin(item: .snack, x: 114, y: bottomY, aisle: last),
-                 SupplyBin(item: .toy, x: 150, y: bottomY, aisle: last), SupplyBin(.trash, x: 186, y: bottomY, aisle: last)]
+                 SupplyBin(item: .toy, x: 150, y: bottomY, aisle: last)]
+        // trash: a wall bin on the nose wall, below the aisle, under the fold-down crew seat (GDD §4a)
+        bins.append(SupplyBin(.trash, x: 76, y: bottomAisle + 34, aisle: last))
         for a in 0..<last {
             let top = aisles[a] + 56, bottom = aisles[a + 1] - 56
             blocks.append(CabinBlock(kind: .counter, x: 60, y: top, w: 150, h: bottom - top))
@@ -331,17 +333,14 @@ struct CabinLayout: Equatable {
             x += 36
         }
 
-        // Aft: two equal service blocks, a lavatory and one station each: the plunger above the top aisle,
-        // the trash below the bottom one.
+        // Aft: two open-top lavatories, one each side of the aisle (a clog is plunged on the spot: no plunger
+        // station), and a wall trash bin on the tail wall below the aisle, under the fold-down crew seat (GDD §4a).
         let aftX = rows.last!.x + 31
-        let topH = topAisle - 72, bottomTop = bottomAisle + 62, bottomH = height - 30 - (bottomAisle + 62)
-        blocks += [CabinBlock(kind: .lavatory, x: aftX, y: 30, w: 66, h: topH, label: "LAV"),
-                   CabinBlock(kind: .closet, x: aftX + 66, y: 30, w: 44, h: topH),
-                   CabinBlock(kind: .lavatory, x: aftX, y: bottomTop, w: 66, h: bottomH, label: "LAV"),
-                   CabinBlock(kind: .closet, x: aftX + 66, y: bottomTop, w: 44, h: bottomH)]
+        let bottomTop = bottomAisle + 62
+        blocks += [CabinBlock(kind: .lavatory, x: aftX, y: 30, w: 110, h: topAisle - 72, label: "LAV"),
+                   CabinBlock(kind: .lavatory, x: aftX, y: bottomTop, w: 110, h: height - 30 - bottomTop, label: "LAV")]
         lavs += [Lavatory(doorX: aftX + 18, aisle: 0), Lavatory(doorX: aftX + 18, aisle: last, above: false)]
-        bins += [SupplyBin(item: .plunger, x: aftX + 88, y: topAisle - 102, aisle: 0),
-                 SupplyBin(.trash, x: aftX + 88, y: bottomAisle + 102, aisle: last)]
+        bins.append(SupplyBin(.trash, x: aftX + 96, y: bottomAisle + 34, aisle: last))
 
         jumpXs.append(aftX + 80)                    // aft, past the lavatory
         let jumps = jumpXs.flatMap { x in aisles.indices.map { JumpSeat(x: x, aisle: $0) } }
