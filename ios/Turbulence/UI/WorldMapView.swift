@@ -62,6 +62,20 @@ struct WorldMapView: View {
         let reveals = MapState(profile: profile).pendingReveals
         let leg = app.pendingLeg
         scene.configure(profile: profile, hiding: Set(reveals))
+        #if DEBUG
+        // -flyAllLegs: the toy plane flies every leg of every route in turn, for checking how it flies;
+        // -flyFromRoute N starts at route N
+        if ProcessInfo.processInfo.arguments.contains("-flyAllLegs") {
+            let from = UserDefaults.standard.integer(forKey: "flyFromRoute")
+            let legs = Campaign.routes.filter { $0.id >= from }.flatMap(\.flights)
+            func fly(_ i: Int) {
+                guard legs.indices.contains(i) else { return }
+                scene.flyLeg(legs[i]) { DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { fly(i + 1) } }
+            }
+            fly(0)
+            return
+        }
+        #endif
         if leg == nil && reveals.isEmpty {
             if let city = Campaign.destination(of: app.briefing ?? profile.nextFlight) { scene.focus(city: city, animated: false) }
             return

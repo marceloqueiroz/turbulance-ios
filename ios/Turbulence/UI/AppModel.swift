@@ -50,6 +50,15 @@ final class AppModel {
             screen = .map
             return
         }
+        // -flyAllLegs: in memory only, the Dev crew with every route open, so the map can fly each leg in turn
+        if args.contains("-flyAllLegs") {
+            var slots = ProfileStore.load()
+            slots.makeDev()
+            slots.current?.seenRoutes = Set(Campaign.routes.map(\.id))
+            self.init(slots: slots, device: device, persist: false, arguments: args)
+            screen = .map
+            return
+        }
         #endif
         self.init(slots: ProfileStore.load(), device: device, persist: true, arguments: args)
     }

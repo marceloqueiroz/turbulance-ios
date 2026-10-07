@@ -433,30 +433,40 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
               let a = scenePoint(city: r.cities[i]), let b = scenePoint(city: r.cities[i + 1]) else { completion(); return }
         let c = legControl(a, b)
         plane.isHidden = false; planeShadow.isHidden = false
-        move(to: CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2), zoom: min(0.7, max(0.3, size.width / (abs(b.x - a.x) * 1.8 + 1))), duration: 0.5)
+        let zoom = min(0.7, max(0.3, size.width / (abs(b.x - a.x) * 1.8 + 1)))
+        // a leg too long to frame whole (world to world) has the camera ride along with the plane instead
+        let follow = abs(b.x - a.x) * zoom > size.width * 0.8 || abs(b.y - a.y) * zoom > size.height * 0.7
+        move(to: follow ? a : CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2), zoom: zoom, duration: 0.5)
         guard !reduceMotion else {
-            plane.position = CGPoint(x: b.x - 30, y: b.y + 24); completion(); return
+            plane.position = CGPoint(x: b.x - 30, y: b.y + 24)
+            if follow { move(to: b, zoom: zoom, duration: 0) }
+            completion(); return
         }
         let duration = min(3.2, max(1.6, Double(hypot(b.x - a.x, b.y - a.y)) / 260))
-        plane.xScale = b.x >= a.x ? -1 : 1                                           // the piece faces left
+        plane.xScale = b.x >= a.x ? 1 : -1                                           // the piece faces right
         let fly = SKAction.customAction(withDuration: duration) { [weak self] node, e in
             guard let self else { return }
             let t = CGFloat(e / duration), k = t * t * (3 - 2 * t)
             let p = self.quad(a, c, b, k), ahead = self.quad(a, c, b, min(1, k + 0.02))
             let lift = sin(k * .pi)                                                  // climb, cruise, descend
             node.position = CGPoint(x: p.x, y: p.y + 24 + lift * 30)
+            // the nose follows the path all the way round, so the plane always points at where it is heading
             let tilt = atan2(ahead.y - p.y, abs(ahead.x - p.x) + 0.001)
-            node.zRotation = max(-0.35, min(0.35, tilt)) * (b.x >= a.x ? 1 : -1)
+            node.zRotation = tilt * (b.x >= a.x ? 1 : -1)
             let s = 1 + 0.25 * lift
-            node.yScale = s; node.xScale = (b.x >= a.x ? -1 : 1) * s
+            node.yScale = s; node.xScale = (b.x >= a.x ? 1 : -1) * s
             self.planeShadow.position = CGPoint(x: p.x + 4 + lift * 10, y: p.y - 4)
             self.planeShadow.setScale(1 - 0.35 * lift)
+            if follow { self.cam.position = p; self.clampCamera(); self.applyZoom() }
         }
-        plane.position = CGPoint(x: a.x, y: a.y + 24); plane.zRotation = 0
+        plane.position = CGPoint(x: a.x, y: a.y + 24)
+        let start = quad(a, c, b, 0.02)
+        plane.zRotation = atan2(start.y - a.y, abs(start.x - a.x) + 0.001) * (b.x >= a.x ? 1 : -1)
         // contrail: soft puffs left behind the tail while it flies
         let puff = SKAction.run { [weak self] in
             guard let self else { return }
-            let tail = CGPoint(x: self.plane.position.x + (b.x >= a.x ? -26 : 26), y: self.plane.position.y - 4)
+            let r = self.plane.zRotation, nose = b.x >= a.x ? CGVector(dx: cos(r), dy: sin(r)) : CGVector(dx: -cos(r), dy: -sin(r))
+            let tail = CGPoint(x: self.plane.position.x - nose.dx * 26, y: self.plane.position.y - nose.dy * 26 - 4)
             let p = SKShapeNode(circleOfRadius: 4)
             p.fillColor = UIColor.white.withAlphaComponent(0.7); p.strokeColor = .clear
             p.position = tail; p.zPosition = 4.55
