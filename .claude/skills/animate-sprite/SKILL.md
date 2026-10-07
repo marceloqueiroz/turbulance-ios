@@ -45,6 +45,21 @@ What worked (2026-10-06, after several failed rounds on the passengers):
 Tried and rejected for passengers: a mannequin with their own longer legs, locking head + chest, and
 repainting another character's finished walk (the business walk) as them.
 
+7. **Lock what flickers with `lock_head.py`.** Gemini redraws the head, collar, scarf or hair a little
+   differently each frame (the user spotted: a collar changing, a face turning, a scarf and ponytail changing).
+   Frames are aligned on the head, so copy one good frame's head onto all 24 (`--ref N --cut 0.45-0.62`,
+   cut at the chin for front views so the moving shoulders don't ghost). For a back view whose arms flare or
+   change, lock the whole upper body (`--cut 0.80`) to the frame where both arms hang down; only the legs walk.
+8. **Don't recolour arms by hand to fix guide leftovers** when the take also has its own painted arms: the two
+   never match (the sleeper's sleeves changed colour halfway). Regenerate with "the arms hang close to the body,
+   the SAME sleeves in every cell, never raised or flared" in `--build` instead.
+
+9. **Hands were being clipped by the cutter (fixed 2026-10-07).** `cut_sheet.py` used to paste each generated
+   cell unscaled into the 625 px frame, so figures wider than that (arms out, ~610 px) lost a hand at the frame
+   edge, and `align_strip.py` then shrank the clipped figure, hiding the cut inside the frame. It now scales
+   the whole sheet to fit and centres on the figure. Check finished strips for a straight vertical edge on the
+   figure's left/right side (a sliced hand); the straight back of a head is a false alarm.
+
 ## Steps (per view; do side first and get it approved before front/back)
 
 1. **Cut the locked head** (`cut_head.py`).

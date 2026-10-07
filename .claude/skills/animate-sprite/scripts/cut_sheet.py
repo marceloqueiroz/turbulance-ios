@@ -28,9 +28,13 @@ src, out = sys.argv[1], sys.argv[2]
 im = Image.open(src); W, H = im.size; cw, ch = W / 6, H / 4
 cells = [key(im.crop((round(i % 6 * cw), round(i // 6 * ch), round((i % 6 + 1) * cw), round((i // 6 + 1) * ch)))) for i in range(24)]
 strip = Image.new("RGBA", (FW * 24, FH))
+# one scale for the whole sheet so nothing is clipped: the widest/tallest figure fits the frame with a margin
+boxes = [c.getchannel("A").point(lambda v: 255 if v > 128 else 0).getbbox() for c in cells]
+k = min(1.0, (FW - 40) / max(b[2] - b[0] for b in boxes), (FH - 100) / max(b[3] - b[1] for b in boxes))
+if k < 1: cells = [c.resize((round(c.width * k), round(c.height * k)), Image.LANCZOS) for c in cells]
 for i, c in enumerate(cells):
     A = np.asarray(c)[..., 3] > 128; ys, xs = np.nonzero(A)
-    hx = np.nonzero(A[ys.min():ys.min() + 120])[1].mean()                    # head-top band centre
+    hx = (xs.min() + xs.max()) / 2                                           # whole-figure centre (align_strip re-centres on the head)
     f = Image.new("RGBA", (FW, FH), (0, 0, 0, 0)); f.alpha_composite(c, (int(FW / 2 - hx), int(FH - 60 - ys.max())))
     strip.paste(f, (i * FW, 0))
 strip.save(out)

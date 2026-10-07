@@ -99,6 +99,19 @@ final class CabinScene: SKScene {
     /// A coloured frame around each seat that's asking for something, under the passenger.
     private var seatFrames: [Int: SKShapeNode] = [:]
     private let seatLayer = SKNode()
+    /// The painted action a crew member is doing right now, if any: cleaning (a .clean step), or binning at a trash bin.
+    private func paintedAction(_ c: Crew, _ sim: FlightSimulation) -> AttendantArt.Action? {
+        switch c.busy?.task {
+        case .apply(let id)?:
+            guard let o = sim.occurrences.first(where: { $0.id == id }), o.steps.indices.contains(o.step) else { return nil }
+            return o.steps[o.step] == .clean ? .clean : nil
+        case .pick(let bin)?:
+            return sim.layout.bins.indices.contains(bin) && sim.layout.bins[bin].kind == .trash ? .trash : nil
+        default:
+            return nil
+        }
+    }
+
     /// Three streaks behind the crew while running.
     private lazy var speedLines: SKNode = {
         let n = SKNode()
@@ -842,6 +855,7 @@ final class CabinScene: SKScene {
         for (i, c) in sim.crews.enumerated() {
             let node = i == 0 ? crewNode : partnerNode
             node.trayWarmth = c.tray.indices.map { sim.warmth(ofTraySlot: $0, crew: i) }
+            node.action = paintedAction(c, sim)
             node.sync(c, clock: clock)
             node.position = pt(c.x, c.y)
         }
@@ -1387,6 +1401,8 @@ func easeOutBack(_ t: Double) -> Double { 1 + 2.70158 * pow(t - 1, 3) + 1.70158 
 enum AttendantArt {
     enum Facing: String { case side, front, back }
     enum Move: String { case walk, carry }
+    /// Painted action cycles (side view only so far): cleaning on the spot, dropping something in a trash bin.
+    enum Action: String { case clean, trash }
     static let frameCount = 24
     /// Frame size in points; the feet stand on the frame's ground line (`anchor`); the figure is ~56 pt tall.
     static let frameSize = CGSize(width: 56, height: 76)
@@ -1403,6 +1419,12 @@ enum AttendantArt {
         [Facing.side, .front, .back].map { ($0, atlas.textureNamed("idle-\($0.rawValue)")) })
     static func frames(_ m: Move, _ f: Facing) -> [SKTexture] { cycles["\(m.rawValue)-\(f.rawValue)"]! }
     static func idle(_ f: Facing) -> SKTexture { stills[f]! }
+    private static let actions: [Action: [SKTexture]] = Dictionary(uniqueKeysWithValues: [Action.clean, .trash].compactMap { a in
+        let names = Set(atlas.textureNames.map { ($0 as NSString).deletingPathExtension })
+        let frames = (0..<frameCount).map { String(format: "%@-side-%02d", a.rawValue, $0) }
+        return frames.allSatisfy(names.contains) ? (a, frames.map { atlas.textureNamed($0) }) : nil
+    })
+    static func frames(_ a: Action) -> [SKTexture]? { actions[a] }
     /// The tray's centre in the carry frames, from the feet, in points (side faces right). Held at chest height;
     /// from behind her body hides it, so the items show just above her head, where the tray is.
     static func tray(_ f: Facing) -> CGPoint {
@@ -1439,6 +1461,8 @@ final class CrewNode: SKNode {
     private let painted = AttendantArt.available
     private var facing = AttendantArt.Facing.front
     private var last: (x: Double, y: Double)?
+    /// Set by the scene each frame: the painted action to play instead of walking or standing.
+    var action: AttendantArt.Action?
     /// Where the painted figure's feet stand, relative to the crew position (the aisle line).
     private let feetY: CGFloat = -20
     private var headTop: CGFloat { painted ? feetY + 56 : 8 }
@@ -1556,13 +1580,22 @@ final class CrewNode: SKNode {
             last = (c.x, c.y)
             let cycle = (c.walk / (2 * .pi)).truncatingRemainder(dividingBy: 1)
             let carrying = !c.tray.isEmpty
-            if moving {
-                body.texture = AttendantArt.frames(carrying ? .carry : .walk, facing)[Int(cycle * Double(AttendantArt.frameCount)) % AttendantArt.frameCount]
+            if let action, let frames = AttendantArt.frames(action), let busy = c.busy {
+                // cleaning loops (~1.2 s a sweep); binning plays once over the pick
+                let k = action == .clean ? Int(clock / 1.2 * Double(frames.count)) % frames.count
+                                         : min(frames.count - 1, Int(busy.progress * Double(frames.count)))
+                body.texture = frames[k]
+                body.xScale = face < 0 ? -1 : 1
+                body.yScale = 1
             } else {
-                body.texture = carrying ? AttendantArt.frames(.carry, facing)[AttendantArt.standFrame] : AttendantArt.idle(facing)
+                if moving {
+                    body.texture = AttendantArt.frames(carrying ? .carry : .walk, facing)[Int(cycle * Double(AttendantArt.frameCount)) % AttendantArt.frameCount]
+                } else {
+                    body.texture = carrying ? AttendantArt.frames(.carry, facing)[AttendantArt.standFrame] : AttendantArt.idle(facing)
+                }
+                body.xScale = facing == .side && face < 0 ? -1 : 1
+                body.yScale = moving ? 1 : 1 + 0.012 * CGFloat(sin(clock * 2.4))       // breathing while standing
             }
-            body.xScale = facing == .side && face < 0 ? -1 : 1
-            body.yScale = moving ? 1 : 1 + 0.012 * CGFloat(sin(clock * 2.4))       // breathing while standing
         } else {
             feet[0].isHidden = !moving; feet[1].isHidden = !moving
             feet[0].position = CGPoint(x: face * (3 + sw * 6), y: 5)
