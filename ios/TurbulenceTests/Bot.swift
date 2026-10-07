@@ -18,7 +18,9 @@ func botAct(_ sim: FlightSimulation) {
     func tapStation(_ i: Int) { let b = sim.layout.bins[i]; sim.tap(x: b.x, y: b.y) }
     func trash() { if let i = nearest({ $0 == .trash }) { tapStation(i) } }
     func tapProblem(_ o: Occurrence) {
-        if let pi = o.passenger { sim.tap(x: sim.passengers[pi].x, y: sim.passengers[pi].y) } else { sim.tap(x: o.x, y: o.y) }
+        if let pi = o.passenger { sim.tap(x: sim.passengers[pi].x, y: sim.passengers[pi].y) }
+        else if let li = o.lavatory { let lav = sim.layout.lavatories[li]; sim.tap(x: lav.seatX, y: lav.seatY) }   // its icon
+        else { sim.tap(x: o.x, y: o.y) }
     }
     func fetch(_ it: Item) {
         guard crew.hasFreeHand else { return trash() }

@@ -154,7 +154,7 @@ struct FlightPlan: Identifiable, Equatable {
     let name: String
     let aircraft: Aircraft
     let duration: Double               // seconds, boarding to touchdown
-    let kinds: [OccurrenceKind]        // what the director may roll (toilet = lavatories can clog)
+    let kinds: [OccurrenceKind]        // what the director may roll (dirtyLav = lavatories get dirty)
     let script: [OccurrenceKind]       // teaching beats played first
     let maxCap: Int                    // most problems at once at the cruise peak
     var menu: [Item] = [.water, .juice]  // what drink/meal orders can ask for
@@ -174,7 +174,7 @@ struct FlightPlan: Identifiable, Equatable {
     /// Whether this flight fits a galley station; the rest stay hidden (GDD §6a "Only what this flight uses").
     /// Jump seats are for turbulence; lavatories for passengers who walk (GDD §6a, Route 1 flight checklist).
     var usesJumpSeats: Bool { !turbulence.isEmpty }
-    var usesLavatories: Bool { strolls || kinds.contains(.dirtyLav) || kinds.contains(.toilet) }
+    var usesLavatories: Bool { strolls || kinds.contains(.dirtyLav) }
 
     func uses(_ kind: StationKind) -> Bool {
         switch kind {
@@ -238,13 +238,13 @@ enum Campaign {
     /// at most 0.55× 3★; 2★ = min(the mid-skill bot's 30th percentile, halfway from 1★ to 3★). All rounded down to 5.
     static let starTargets: [String: [Int]] = [
         "TB101": [30, 45, 60], "TB102": [120, 170, 225], "TB103": [230, 325, 420],
-        "TB104": [195, 275, 360], "TB105": [95, 235, 390], "TB106": [165, 375, 610],
+        "TB104": [195, 275, 360], "TB105": [100, 195, 360], "TB106": [130, 345, 680],
         "TB201": [290, 410, 530], "TB202": [230, 325, 420], "TB203": [265, 375, 490],
-        "TB204": [275, 385, 500], "TB205": [210, 300, 390], "TB206": [130, 260, 370],
+        "TB204": [275, 385, 500], "TB205": [210, 300, 390], "TB206": [140, 245, 350],
         "TB207": [225, 320, 415], "TB208": [310, 435, 565], "TB209": [275, 390, 500],
         "TB210": [235, 335, 435], "TB211": [215, 285, 380], "TB212": [190, 365, 475],
         "TB301": [255, 360, 465], "TB302": [320, 455, 590], "TB303": [225, 315, 410],
-        "TB304": [260, 370, 480], "TB305": [290, 410, 535], "TB306": [220, 340, 410],
+        "TB304": [260, 370, 480], "TB305": [290, 410, 535], "TB306": [185, 265, 345],
         "TB307": [485, 685, 890], "TB308": [525, 740, 960], "TB309": [670, 950, 1225],
         "TB310": [680, 960, 1240], "TB311": [400, 565, 720], "TB312": [560, 785, 895]
     ]
@@ -255,7 +255,7 @@ enum Campaign {
     private static let service: [OccurrenceKind] = [.call, .drink, .sick]
     private static let cabin: [OccurrenceKind] = [.call, .drink, .sick, .spill]
     private static let family: [OccurrenceKind] = [.call, .drink, .sick, .spill, .baby]
-    private static let full: [OccurrenceKind] = [.call, .drink, .sick, .spill, .baby, .dirtyLav, .toilet]
+    private static let full: [OccurrenceKind] = [.call, .drink, .sick, .spill, .baby, .dirtyLav]
     // Menus (GDD §6a): drinks come from the drinks machine, chicken and pasta from the ovens.
     private static let basic: [Item] = [.water, .juice, .soda]
     private static let simple: [Item] = [.water, .juice, .soda, .snack]
@@ -295,7 +295,7 @@ enum Campaign {
             FlightPlan(id: "TB105", name: "Night Flight", aircraft: .comet, duration: 135,
                        kinds: full, script: [.drink, .call], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
                        turbulence: bump(55), twist: .redEye, story: .commuters, goal: .noneWoken,
-                       whatsNew: "A dim red-eye: don't wake the sleepers. Snacks and two-item combo orders. A dirty loo left too long clogs: tap it to plunge it. Midway, a rush of requests hits at once.",
+                       whatsNew: "A dim red-eye: don't wake the sleepers. Snacks and two-item combo orders. Midway, a rush of requests hits at once.",
                        pace: Pace(fuseScale: 1.0, spawnEvery: 5...6.5, rush: true)),
             FlightPlan(id: "TB106", name: "Full Service", aircraft: .comet, duration: 180,
                        kinds: full, script: [.drink, .sick], maxCap: 4, menu: dining, combos: true, strolls: true, dozing: true,
@@ -325,7 +325,7 @@ enum Campaign {
             FlightPlan(id: "TB203", name: "Two Lavatories", aircraft: .swift, duration: 150,
                        kinds: full, script: [.drink], maxCap: 3, menu: cafe, strolls: true,
                        story: .wedding, goal: .noMisses,
-                       whatsNew: "Walkers head for both ends, and either lavatory can clog.",
+                       whatsNew: "Walkers head for both ends, and either lavatory can get dirty.",
                        pace: Pace(fuseScale: 1.8, spawnEvery: 3.5...5.5, rush: false)),
             FlightPlan(id: "TB204", name: "Morning Nap", aircraft: .swift, duration: 150,
                        kinds: family, script: [.baby], maxCap: 3, menu: cafe, strolls: true, dozing: true,
@@ -378,7 +378,7 @@ enum Campaign {
     // MARK: Route 3 – Transcontinental (B757-Longhaul, then A330-Voyager)
 
     private static let bins: [OccurrenceKind] = [.call, .drink, .sick, .spill, .binJam]
-    private static let binsFull: [OccurrenceKind] = [.call, .drink, .sick, .spill, .binJam, .baby, .toilet]
+    private static let binsFull: [OccurrenceKind] = [.call, .drink, .sick, .spill, .binJam, .baby]
 
     static let route3 = Route(
         id: 3, name: "Transcontinental", aircraftNames: "B757-Longhaul · A330-Voyager",

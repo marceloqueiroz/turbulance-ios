@@ -328,20 +328,6 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(sim.noiseLevel(o), 1)
     }
 
-    func testLavatoryClogsAndIsPlungedOnTheSpot() {
-        let sim = runningSim(plan: flight("TB105"))
-        let id = sim.clog(lavatory: 0)
-        XCTAssertTrue(sim.isClogged(0))
-        let o = sim.occurrences.first { $0.id == id }!
-        XCTAssertEqual(o.need, .clean, "no tool to fetch: the plunger lives in the lavatory")
-        XCTAssertFalse(sim.layout.bins.contains { $0.item == .plunger })
-        sim.crew.aisle = o.aisle
-        sim.crew.x = o.x - 40                  // beside the lavatory: the plunge itself takes 1.5 s
-        sim.tap(x: o.x, y: o.y)
-        step(sim, seconds: 4)
-        XCTAssertFalse(sim.isClogged(0))
-    }
-
     // MARK: Twists and stories (GDD §6a)
 
     func testRedEyeStartsMostlyAsleep() {
@@ -643,6 +629,26 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(sim.lavatoryUses, 1)
     }
 
+    func testALavatoryGetsDirtyOnlyOnceThePassengerComesOut() {
+        let sim = runningSim(plan: flight("TB102"))
+        step(sim, seconds: 7)
+        let li = sim.layout.lavatories.indices.last!
+        let walkers = sim.passengers.indices.filter { sim.passengers[$0].aisle == sim.layout.lavatories[li].aisle }.prefix(Tuning.lavUsesBeforeDirty)
+        for (k, p) in walkers.enumerated() {
+            sim.placeStroller(passenger: p, x: sim.layout.lavatories[li].doorX - 60)
+            var wasInside = false
+            for _ in 0..<(60 * 60) where sim.passengers[p].stroll != nil {
+                sim.update(dt: 1.0 / 60)
+                let inside = sim.passengers[p].stroll?.inLavatory ?? false
+                if inside { XCTAssertFalse(sim.isDirty(li), "visit \(k + 1): not dirty while they're still inside") }
+                if wasInside && !inside { break }
+                wasInside = inside
+            }
+            XCTAssertTrue(wasInside, "visit \(k + 1) went in")
+        }
+        XCTAssertTrue(sim.isDirty(li), "dirty as the last visitor comes out")
+    }
+
     // MARK: Dozing and noise (GDD §7)
 
     func testNoisyPassengerWakesNearbySleepers() {
@@ -704,7 +710,6 @@ final class FlightSimulationTests: XCTestCase {
             let aft = L.blocks.filter { $0.x >= L.aftX }
             XCTAssertEqual(aft.filter { $0.kind == .lavatory }.count, 2, "\(a) has two aft lavatories")
             XCTAssertEqual(Set(aft.map { $0.w }).count, 1, "\(a) aft lavatories are the same width")
-            XCTAssertFalse(L.bins.contains { $0.item == .plunger }, "\(a) no plunger station")
             XCTAssertTrue(L.bins.contains { $0.kind == .trash && $0.x < L.firstRowX }, "\(a) trash on the nose wall")
             XCTAssertTrue(L.bins.contains { $0.kind == .trash && $0.x > L.aftX }, "\(a) trash on the tail wall")
             XCTAssertLessThanOrEqual(L.bins.map(\.x).max()!, L.maxX, "\(a) every station is in reach")
@@ -990,11 +995,22 @@ final class FlightSimulationTests: XCTestCase {
         let id = sim.makeDirty(lavatory: 0)
         let o = sim.occurrences.first { $0.id == id }!
         XCTAssertEqual(o.need, .clean, "no towel needed")
-        XCTAssertFalse(sim.isClogged(0), "dirty still works")
         sim.crew.aisle = o.aisle; sim.crew.x = o.x - 40
-        sim.tap(x: o.x, y: o.y)
+        let lav = sim.layout.lavatories[0]
+        sim.tap(x: lav.seatX, y: lav.seatY)                   // its icon sits over the toilet seat
         step(sim, seconds: 2.5)
         XCTAssertFalse(sim.occurrences.contains { $0.id == id })
+    }
+
+    func testTappingNearTheSharedDoorSpotPicksTheRightLavatory() {
+        let sim = runningSim(plan: flight("TB102"))
+        let ids = sim.layout.lavatories.indices.map { sim.makeDirty(lavatory: $0) }
+        let lav = sim.layout.lavatories[1]
+        sim.crew.aisle = lav.aisle; sim.crew.x = lav.doorX - 40
+        sim.tap(x: lav.seatX, y: lav.seatY)
+        step(sim, seconds: 2.5)
+        XCTAssertTrue(sim.isDirty(0), "the other lavatory is untouched")
+        XCTAssertFalse(sim.occurrences.contains { $0.id == ids[1] }, "the tapped one is cleaned")
     }
 
     func testDirtyLavatoryHasNoTimer() {
@@ -1011,20 +1027,52 @@ final class FlightSimulationTests: XCTestCase {
         let sim = runningSim(plan: flight("TB102"))
         sim.strollsEnabled = true
         step(sim, seconds: Tuning.boardingEnds + 0.5)
-        sim.makeDirty(lavatory: 0)
+        for li in sim.layout.lavatories.indices { sim.makeDirty(lavatory: li) }   // nowhere else to go
         step(sim, seconds: 30)
-        XCTAssertGreaterThan(sim.lavQueue(0), 0, "passengers line up for it")
+        XCTAssertGreaterThan(sim.layout.lavatories.indices.map { sim.lavQueue($0) }.reduce(0, +), 0, "passengers line up")
         XCTAssertGreaterThan(sim.stats.queueCost, 0, "and waiting costs points")
-        XCTAssertFalse(sim.isClogged(0), "no plunger on TB102: the line just waits")
     }
 
-    func testAFullLineClogsTheLavatoryOnceClogsAreIn() {
+    func testPassengersUseTheCleanLavatoryInsteadOfQueueing() {
+        let sim = runningSim(plan: flight("TB102"))
+        sim.strollsEnabled = true
+        step(sim, seconds: Tuning.boardingEnds + 0.5)
+        XCTAssertEqual(sim.layout.lavatories.count, 2)
+        sim.makeDirty(lavatory: 0)
+        let usesBefore = sim.lavatoryUses
+        step(sim, seconds: 45)
+        XCTAssertEqual(sim.lavQueue(0), 0, "nobody lines up while the other lavatory is clean")
+        XCTAssertEqual(sim.stats.queueCost, 0)
+        XCTAssertGreaterThan(sim.lavatoryUses, usesBefore, "they use the clean one")
+    }
+
+    func testALineMovesToTheOtherLavatoryOnceItsClean() {
+        let sim = runningSim(plan: flight("TB102"))
+        sim.strollsEnabled = true
+        step(sim, seconds: Tuning.boardingEnds + 0.5)
+        let ids = sim.layout.lavatories.indices.map { sim.makeDirty(lavatory: $0) }
+        step(sim, seconds: 30)
+        guard let lined = sim.layout.lavatories.indices.first(where: { sim.lavQueue($0) > 0 }) else {
+            return XCTFail("both dirty: a line forms")
+        }
+        let other = 1 - lined                                 // clean the other one
+        let lav = sim.layout.lavatories[other]
+        sim.crew.aisle = lav.aisle; sim.crew.x = lav.doorX - 40
+        sim.tap(x: lav.seatX, y: lav.seatY)
+        step(sim, seconds: 3)
+        XCTAssertFalse(sim.occurrences.contains { $0.id == ids[other] })
+        XCTAssertEqual(sim.lavQueue(lined), 0, "the line left for the clean lavatory")
+    }
+
+    func testANeglectedDirtyLavatoryJustKeepsItsLine() {
         let sim = runningSim(plan: flight("TB105"))
         sim.strollsEnabled = true
         step(sim, seconds: Tuning.boardingEnds + 0.5)
-        sim.makeDirty(lavatory: 0)
+        let id = sim.makeDirty(lavatory: 0)
         step(sim, seconds: 45)
-        XCTAssertTrue(sim.isClogged(0), "the line filled up: someone went in anyway")
+        XCTAssertTrue(sim.isDirty(0), "no clog stage: it stays dirty until cleaned")
+        XCTAssertTrue(sim.occurrences.contains { $0.id == id })
+        XCTAssertLessThanOrEqual(sim.lavQueue(0), Tuning.maxLavQueue, "the line stops growing at the cap")
     }
 
     func testQuickTapsMakeTheCrewHurryUpToACap() {
@@ -1082,7 +1130,6 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertTrue(kinds.contains(.drinks))
         XCTAssertFalse(kinds.contains(.oven), "no meals yet")
         XCTAssertFalse(kinds.contains(.bin(.toy)))
-        XCTAssertFalse(kinds.contains(.bin(.plunger)))
         XCTAssertTrue(first.freshStations.isEmpty, "the first flight has nothing to compare with")
         let third = FlightSimulation(plan: flight("TB103"), seed: 1)
         let fresh = third.freshStations.map { third.layout.bins[$0].kind }

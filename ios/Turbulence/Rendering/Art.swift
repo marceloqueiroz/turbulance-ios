@@ -148,12 +148,6 @@ enum Art {
             c.addEllipse(in: CGRect(x: -10, y: -12, width: 8, height: 8)); c.addEllipse(in: CGRect(x: 2, y: -12, width: 8, height: 8)); c.strokePath()
             fillStroke(CGPath(ellipseIn: CGRect(x: -9, y: -8, width: 18, height: 18), transform: nil), bear)
             dot(c, -3, -1, 1.4, Palette.navy); dot(c, 3, -1, 1.4, Palette.navy); dot(c, 0, 3, 2, UIColor(hex: 0x6B3E26))
-        case .plunger:
-            c.setStrokeColor(UIColor(hex: 0x8A5A3C).cgColor); c.setLineWidth(3.5)
-            c.move(to: P(0, -12)); c.addLine(to: P(0, 3)); c.strokePath()
-            c.setStrokeColor(Palette.navy.cgColor); c.setLineWidth(2)
-            let cup = CGMutablePath(); cup.move(to: P(-9, 11)); cup.addQuadCurve(to: P(9, 11), control: P(0, -4)); cup.closeSubpath()
-            fillStroke(cup, UIColor(hex: 0xD62828))
         case .tool:
             // a toolkit: steel box, coral latch, carry handle
             c.move(to: P(-5, -6)); c.addLine(to: P(-5, -10)); c.addLine(to: P(5, -10)); c.addLine(to: P(5, -6)); c.strokePath()
@@ -728,6 +722,46 @@ enum Art {
             c.setFillColor(UIColor.white.cgColor); c.setStrokeColor(Palette.navy.cgColor); c.setLineWidth(1.2)
             c.addPath(cup); c.drawPath(using: .fillStroke)
             c.restoreGState()
+        }
+    }
+
+    // MARK: - Dirty lavatory
+
+    /// Murky water on a dirty lavatory's floor (GDD §5a). `seep` is the part creeping out under the door: its top
+    /// edge is straight along the door's foot and uneven runs reach out toward the aisle.
+    static func lavStain(seed: Double, seep: Bool) -> UIImage {
+        let w: CGFloat = 44, h: CGFloat = seep ? 22 : 30
+        return image(w, h) { c in
+            let s = CGFloat(seed)
+            let color = UIColor(hex: 0x86703A, alpha: 0.78)
+            let rim = UIColor(hex: 0x3E3018, alpha: 0.55)
+            func shape(_ grow: CGFloat, _ fill: UIColor) {
+                c.setFillColor(fill.cgColor)
+                if seep {
+                    c.fill(CGRect(x: 4 - grow, y: 0, width: w - 8 + 2 * grow, height: 5 + grow))
+                    for k in 0..<3 {
+                        let x = 11 + CGFloat(k) * 11 + 2.5 * sin(s + CGFloat(k))
+                        let len = 9 + 9 * (0.5 + 0.5 * sin(s * 1.7 + CGFloat(k) * 2.1))
+                        c.fillEllipse(in: CGRect(x: x - 6, y: -len / 2, width: 12, height: len * 1.5).insetBy(dx: -grow, dy: -grow))
+                    }
+                } else {
+                    c.saveGState(); c.translateBy(x: w / 2, y: h / 2); c.rotate(by: 0.3 * sin(s))
+                    c.fillEllipse(in: CGRect(x: -15, y: -8, width: 30, height: 17).insetBy(dx: -grow, dy: -grow))
+                    c.restoreGState()
+                    c.fillEllipse(in: CGRect(x: w / 2 + 4 * cos(s) - 1, y: 3, width: 15, height: 10).insetBy(dx: -grow, dy: -grow))
+                    c.fillEllipse(in: CGRect(x: 4, y: h / 2 + 3 * sin(s) - 2, width: 12, height: 9).insetBy(dx: -grow, dy: -grow))
+                }
+            }
+            c.saveGState(); c.setShadow(offset: .zero, blur: 2, color: rim.cgColor); shape(1, rim); c.restoreGState()
+            shape(0, color)
+            if seep {
+                // the shadow under the door, where it all comes from
+                c.setFillColor(UIColor(hex: 0x2B230E, alpha: 0.5).cgColor); c.fill(CGRect(x: 5, y: 0, width: w - 10, height: 2))
+                dot(c, w - 7, 16, 1.6, color); dot(c, 8, 14, 1.3, color)
+            } else {
+                dot(c, w - 4, h - 6, 1.6, color); dot(c, 3, 6, 1.3, color)
+                c.saveGState(); c.translateBy(x: w / 2 - 4, y: h / 2 - 3); c.rotate(by: -0.3); ellipse(c, 0, 0, 6, 2, white(0.35)); c.restoreGState()
+            }
         }
     }
 

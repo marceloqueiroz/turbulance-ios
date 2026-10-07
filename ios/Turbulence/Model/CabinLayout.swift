@@ -85,6 +85,8 @@ struct Lavatory: Equatable {
     let aisle: Int
     /// Which side of its aisle it stands: problems over a lavatory show on that side.
     var above = true
+    /// Where a lavatory's problem icon sits, inside it and clear of the door (over the toilet seat where possible).
+    var seatX = 0.0, seatY = 0.0
 }
 
 /// A fixed fixture drawn in the static cabin art.
@@ -281,7 +283,7 @@ struct CabinLayout: Equatable {
         var x0 = 235.0
         if fwdLav {
             blocks.append(CabinBlock(kind: .lavatory, x: 222, y: bottomAisle + 62, w: 66, h: height - 30 - (bottomAisle + 62), label: "LAV"))
-            lavs.append(Lavatory(doorX: 255, aisle: last, above: false))
+            lavs.append(Lavatory(doorX: 255, aisle: last, above: false, seatX: 255, seatY: (bottomAisle + 62 + height - 30) / 2))
             // a wardrobe opposite, so the first premium row isn't fronted by empty floor
             blocks.append(CabinBlock(kind: .wardrobe, x: 222, y: 30, w: 66, h: topAisle - 72))
             x0 = 322
@@ -323,7 +325,7 @@ struct CabinLayout: Equatable {
                     blocks.append(CabinBlock(kind: .counter, x: gx + 6, y: bottomAisle + 56, w: 88, h: height - 50 - (bottomAisle + 56)))
                     bins += [SupplyBin(.drinks, x: gx + 33, y: bottomAisle + 102, aisle: last),
                              SupplyBin(item: .snack, x: gx + 76, y: bottomAisle + 102, aisle: last)]
-                    lavs.append(Lavatory(doorX: gx + 34, aisle: 0))
+                    lavs.append(Lavatory(doorX: gx + 34, aisle: 0, seatX: gx + 48, seatY: 30 + (topAisle - 72) / 2))
                     jumpXs.append(gx + 62)
                 }
                 x += 96
@@ -333,16 +335,19 @@ struct CabinLayout: Equatable {
             x += 36
         }
 
-        // Aft: two open-top lavatories, one each side of the aisle (a clog is plunged on the spot: no plunger
+        // Aft: two open-top lavatories, one each side of the aisle (a dirty one is cleaned on the spot: no cleaning
         // station), and a wall trash bin on the tail wall below the aisle, under the fold-down crew seat (GDD §4a).
         let aftX = rows.last!.x + 31
         let bottomTop = bottomAisle + 62
         blocks += [CabinBlock(kind: .lavatory, x: aftX, y: 30, w: 110, h: topAisle - 72, label: "LAV"),
                    CabinBlock(kind: .lavatory, x: aftX, y: bottomTop, w: 110, h: height - 30 - bottomTop, label: "LAV")]
-        lavs += [Lavatory(doorX: aftX + 18, aisle: 0), Lavatory(doorX: aftX + 18, aisle: last, above: false)]
+        // problem icons over the top lavatory's toilet seat, and mirrored across the aisle for the bottom one, so
+        // the two sit in the same spot on either side
+        lavs += [Lavatory(doorX: aftX + 18, aisle: 0, seatX: aftX + 41, seatY: topAisle - 105),
+                 Lavatory(doorX: aftX + 18, aisle: last, above: false, seatX: aftX + 41, seatY: bottomAisle + 105)]
         bins.append(SupplyBin(.trash, x: aftX + 96, y: bottomAisle + 34, aisle: last))
 
-        jumpXs.append(aftX + 80)                    // aft, past the lavatory
+        jumpXs.append(aftX + 96)                    // aft, against the tail wall like the trash bin under it
         let jumps = jumpXs.flatMap { x in aisles.indices.map { JumpSeat(x: x, aisle: $0) } }
 
         return CabinLayout(aircraft: aircraft, width: aftX + 132, height: height, aisles: aisles, rows: rows, bins: bins,

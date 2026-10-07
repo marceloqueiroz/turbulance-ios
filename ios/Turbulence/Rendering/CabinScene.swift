@@ -14,6 +14,8 @@ final class CabinScene: SKScene {
     var contentInsets = UIEdgeInsets.zero { didSet { if oldValue != contentInsets { layoutWorld() } } }
     private let paxLayer = SKNode()
     private let spillLayer = SKNode()
+    /// Dirty-lavatory stains: on the floor, under the passengers queuing over them.
+    private let stainLayer = SKNode()
     private let iconLayer = SKNode()
     private let fxLayer = SKNode()
     private var clouds: [(node: SKSpriteNode, speed: CGFloat)] = []
@@ -21,6 +23,7 @@ final class CabinScene: SKScene {
     private var paxNodes: [PaxNode] = []
     private var iconNodes: [Int: IconNode] = [:]
     private var spillNodes: [Int: SpillNode] = [:]
+    private var lavStainNodes: [Int: SKNode] = [:]
     private let crewNode = CrewNode()
     /// The second attendant on twin-aisle planes, and the chevron over whichever one you control (GDD §8a).
     private let partnerNode = CrewNode()
@@ -181,8 +184,9 @@ final class CabinScene: SKScene {
         helperNode.addChild(badge)
         world.addChild(helperNode)
 
+        stainLayer.zPosition = 0.9
         seatLayer.zPosition = 1.9; paxLayer.zPosition = 2; spillLayer.zPosition = 4; iconLayer.zPosition = 7; fxLayer.zPosition = 8
-        [seatLayer, paxLayer, spillLayer, iconLayer, fxLayer].forEach(world.addChild)
+        [stainLayer, seatLayer, paxLayer, spillLayer, iconLayer, fxLayer].forEach(world.addChild)
 
         targetMarker.strokeColor = Palette.teal.withAlphaComponent(0.8); targetMarker.lineWidth = 2
         targetMarker.fillColor = .clear; targetMarker.zPosition = 5
@@ -441,6 +445,8 @@ final class CabinScene: SKScene {
         jumpSeatNodes = layout.jumpSeats.map { j in
             let n = SKSpriteNode(texture: seatTex, size: painted?.size ?? CGSize(width: 32, height: 28))
             if let painted { n.anchorPoint = painted.anchor }
+            // the painted seat faces into the cabin from the nose wall; on the tail wall it faces the other way
+            if painted != nil && j.x > layout.aftX { n.xScale = -1 }
             n.position = pt(j.x, layout.aisles[j.aisle] - 30)
             n.zPosition = 0.4
             world.addChild(n)
@@ -453,6 +459,8 @@ final class CabinScene: SKScene {
             if let s = skin?.station(b.kind, machine: nil) {
                 n = SKSpriteNode(texture: s.texture, size: s.size); n.anchorPoint = s.anchor
                 n.position = pt(b.x, b.y - 4)
+                // the painted trash opens to the right (nose wall); on the tail wall it faces the other way
+                if b.kind == .trash && b.x > layout.aftX { n.xScale = -1 }
                 stationNodes[i] = n
             } else if fresh || skin != nil {
                 n = SKSpriteNode(texture: SKTexture(image: Art.stationImage(b)))
@@ -557,12 +565,16 @@ final class CabinScene: SKScene {
     /// Rebuild per-flight nodes after the controller swaps in a new simulation.
     func reset() {
         paxLayer.removeAllChildren(); seatLayer.removeAllChildren(); spillLayer.removeAllChildren(); iconLayer.removeAllChildren(); fxLayer.removeAllChildren()
+        stainLayer.removeAllChildren(); lavStainNodes.removeAll()
         iconNodes.removeAll(); seatFrames.removeAll(); spillNodes.removeAll(); jamNodes.removeAll(); noiseTimers.removeAll()
         guard let sim = game?.sim else { paxNodes = []; return }
         let hiding = Set(sim.freshStations)
         if builtFor != staticKey(sim.layout, hiding) { buildStatic(sim.layout, hiding: hiding) }
         for n in freshNodes.values { n.removeAllActions(); n.alpha = 0; n.setScale(0.2) }
-        for n in jumpSeatNodes { n.removeAllActions(); n.alpha = 1; n.setScale(1) }   // back for the take-off countdown
+        for n in jumpSeatNodes {                                   // back for the take-off countdown
+            let facing: CGFloat = n.xScale < 0 ? -1 : 1           // the tail-wall seat stays mirrored
+            n.removeAllActions(); n.alpha = 1; n.setScale(1); n.xScale = facing
+        }
         cartNode.isHidden = true
         flightNodes.forEach { $0.removeFromParent() }
         flightNodes.removeAll()
@@ -635,6 +647,17 @@ final class CabinScene: SKScene {
                 }()
                 sn.sync(o, clock: clock)
             }
+            if o.kind == .dirtyLav, let li = o.lavatory, li < sim.layout.lavatories.count {
+                let n = lavStainNodes[o.id] ?? {
+                    let lav = sim.layout.lavatories[li]
+                    let n = lavStain(o, lav, aisle: sim.layout.aisles[lav.aisle])
+                    stainLayer.addChild(n); lavStainNodes[o.id] = n; return n
+                }()
+                // the seep creeps out from under the door over a few seconds
+                if let seep = n.childNode(withName: "seep") {
+                    seep.yScale = (seep.yScale < 0 ? -1 : 1) * CGFloat(0.25 + 0.75 * min(1, o.life / 4))
+                }
+            }
             if o.kind == .binJam || o.kind == .carryOn, jamNodes[o.id] == nil {
                 let n = o.kind == .binJam ? SKSpriteNode(texture: Tex.binJam, size: CGSize(width: 48, height: 48))
                                           : SKSpriteNode(texture: Tex.suitcase, size: CGSize(width: 40, height: 36))
@@ -650,11 +673,12 @@ final class CabinScene: SKScene {
                     let c = sim.bubbleCenter(o)
                     n.position = pt(c.x, c.y)
                     n.pointTail(c.y > o.y ? -1 : 1)
+                } else if o.kind.atLavatory, let li = o.lavatory, sim.layout.lavatories.indices.contains(li) {
+                    // over the toilet seat, so the dirt seeping out under the door stays in view
+                    let lav = sim.layout.lavatories[li]
+                    n.position = pt(lav.seatX, lav.seatY)
                 } else {
-                    // a lavatory's problem sits over its door, on its side of the aisle
-                    let lavBelow = o.lavatory.map { sim.layout.lavatories[$0].above == false } ?? false
-                    let lift: Double = o.kind.isCart ? 22 : o.kind.atLavatory ? (lavBelow ? -30 : 30) : 2
-                    n.position = pt(o.x, o.y - lift)
+                    n.position = pt(o.x, o.y - (o.kind.isCart ? 22 : 2))
                 }
                 iconLayer.addChild(n); iconNodes[o.id] = n; return n
             }()
@@ -702,6 +726,10 @@ final class CabinScene: SKScene {
             spillNodes[id] = nil
             n.run(.sequence([.fadeOut(withDuration: 0.25), .removeFromParent()]))
         }
+        for (id, n) in lavStainNodes where !live.contains(id) {
+            lavStainNodes[id] = nil
+            n.run(.sequence([.fadeOut(withDuration: 0.3), .removeFromParent()]))
+        }
         for (id, n) in jamNodes where !live.contains(id) {
             jamNodes[id] = nil
             n.run(.sequence([.scale(to: 0, duration: 0.15), .removeFromParent()]))
@@ -711,10 +739,10 @@ final class CabinScene: SKScene {
             binHighlights[i].isHidden = b.item.map { !sim.crew.tray.contains($0) } ?? true
         }
         for (li, sign) in lavSigns.enumerated() where li < sim.layout.lavatories.count {
-            let lav = sim.layout.lavatories[li]
+            // by the lavatory the passenger went into: the Comet's two aft lavatories share one aisle and door x
             let taken = sim.passengers.contains { p in
-                guard let s = p.stroll, s.inLavatory else { return false }
-                return p.aisle == lav.aisle && abs(s.targetX - lav.doorX) < 30
+                guard let s = p.stroll, s.inLavatory, case .lavatory(li) = s.purpose else { return false }
+                return true
             }
             (sign.childNode(withName: "lamp") as? SKShapeNode)?.fillColor = taken ? Palette.critical : UIColor(hex: 0x6FD08C)
         }
@@ -962,7 +990,7 @@ final class CabinScene: SKScene {
         case .jumpSeatsAway:
             for n in jumpSeatNodes {
                 n.run(.sequence([.wait(forDuration: 1.2),
-                                 .group([.scaleX(to: 1, y: 0.1, duration: 0.35), .fadeOut(withDuration: 0.35)])]))
+                                 .group([.scaleX(to: n.xScale < 0 ? -1 : 1, y: 0.1, duration: 0.35), .fadeOut(withDuration: 0.35)])]))
             }
         case .newStations(let list):
             for (k, i) in list.enumerated() {
@@ -1041,6 +1069,24 @@ final class CabinScene: SKScene {
         let pop = SKAction.scale(to: 1, duration: 0.2); pop.timingMode = .easeOut
         let fade = SKAction.fadeOut(withDuration: 1.1); fade.timingMode = .easeIn
         label.run(.sequence([.group([pop, .moveBy(x: 0, y: 26, duration: 1.1), fade]), .removeFromParent()]))
+    }
+
+    /// Two stains for a dirty lavatory (GDD §5a): one on its floor inside, and one seeping out under the door
+    /// toward the aisle. Spots fit the Comet's painted lavatories (door ~18 aft of `doorX`, floor clear of the
+    /// toilet, sink and bin); the door faces the aisle, so a lavatory below the aisle seeps upward.
+    private func lavStain(_ o: Occurrence, _ lav: Lavatory, aisle: Double) -> SKNode {
+        let node = SKNode()
+        let side: Double = lav.above ? -1 : 1                     // toward the lavatory, away from the aisle
+        let inside = SKSpriteNode(texture: SKTexture(image: Art.lavStain(seed: o.seed, seep: false)), size: CGSize(width: 36, height: 25))
+        inside.position = pt(lav.doorX + 45, aisle + side * (lav.above ? 80 : 98))
+        inside.setScale(0); inside.run(.scale(to: 1, duration: 0.3))
+        let seep = SKSpriteNode(texture: SKTexture(image: Art.lavStain(seed: o.seed + 1.3, seep: true)), size: CGSize(width: 44, height: 22))
+        seep.name = "seep"
+        seep.anchorPoint = CGPoint(x: 0.5, y: 1)                  // the straight edge sits on the door's foot
+        seep.position = pt(lav.doorX + 18, aisle + side * (lav.above ? 42 : 45))
+        if !lav.above { seep.yScale = -1 }
+        node.addChild(inside); node.addChild(seep)
+        return node
     }
 
     /// Sound-wave arcs on both sides of a waiting passenger; bigger and redder as they get louder.

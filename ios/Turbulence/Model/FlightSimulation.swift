@@ -43,12 +43,11 @@ enum Tuning {
     static let babyFuse = 22.0
     static let bagFuse = 20.0
     // A dirty lavatory has no timer (GDD §5a): passengers who need it queue at the door and each one waiting
-    // costs satisfaction until it's cleaned. A full queue means someone goes in anyway, and it clogs.
+    // costs satisfaction until it's cleaned. The line stops growing at `maxLavQueue`.
     static let lavQueueEvery = 6.0              // a new passenger joins the line this often
     static let maxLavQueue = 3
     static let lavQueueDrain = 0.5              // satisfaction per second, per passenger waiting
     static let lavQueueGap = 26.0               // spacing between people in the line
-    static let clogFuse = 26.0
     static let lavUsesBeforeDirty = 2
     static let rushAt = 0.6                     // share of the flight when the mid-flight rush hits
     static let rushSize = 2
@@ -123,7 +122,7 @@ struct SplitMix64: RandomNumberGenerator {
 }
 
 enum Item: String, CaseIterable {
-    case water, juice, soda, snack, coffee, chicken, pasta, toy, plunger, tool, usedBag, coldCoffee, coldChicken, coldPasta
+    case water, juice, soda, snack, coffee, chicken, pasta, toy, tool, usedBag, coldCoffee, coldChicken, coldPasta
 
     /// What the drinks machine pours and the ovens heat (GDD §6a).
     static let coldDrinks: [Item] = [.water, .juice, .soda]      // from the drinks dispenser, no wait
@@ -163,7 +162,6 @@ enum Item: String, CaseIterable {
         case .chicken: return "Chicken"
         case .pasta: return "Pasta"
         case .toy: return "Toy"
-        case .plunger: return "Plunger"
         case .tool: return "Toolkit"
         case .usedBag: return "Used sick bag"
         case .coldCoffee: return "Cold coffee"
@@ -245,7 +243,7 @@ struct Passenger: Identifiable {
 }
 
 enum OccurrenceKind: Equatable, CaseIterable {
-    case sick, call, drink, baby, spill, binJam, carryOn, toilet, dirtyLav, stuckCart, brokenCart
+    case sick, call, drink, baby, spill, binJam, carryOn, dirtyLav, stuckCart, brokenCart
     /// Happens at a seat to a passenger.
     var atSeat: Bool { self == .sick || self == .call || self == .drink || self == .baby }
     /// Sits in the aisle and slows the crew down until cleared.
@@ -263,14 +261,13 @@ enum OccurrenceKind: Equatable, CaseIterable {
         case .spill: return "Spill"
         case .binJam: return "Open bin"
         case .carryOn: return "Carry-on bag"
-        case .toilet: return "Clogged toilet"
         case .dirtyLav: return "Dirty lavatory"
         case .stuckCart: return "Stuck cart"
         case .brokenCart: return "Broken cart"
         }
     }
     /// Happens at a lavatory door.
-    var atLavatory: Bool { self == .toilet || self == .dirtyLav }
+    var atLavatory: Bool { self == .dirtyLav }
 
     /// What fixing it pays before the speed bonus and streak (GDD §2 Scoring).
     var basePay: Double { self == .call ? 3 : 6 }
@@ -347,7 +344,7 @@ enum Phase: Equatable { case boarding, cruise, landing, ended }
 enum TargetAction: Equatable {
     case none
     case bin(Int)
-    case clear(occurrence: Int)          // mop, shut a bin, stow a bag, push/fix the cart, plunge
+    case clear(occurrence: Int)          // mop, shut a bin, stow a bag, push/fix the cart, clean a lavatory
     case seat(row: Int, seat: Int)
     case jumpSeat(Int)
 }
@@ -480,7 +477,7 @@ final class FlightSimulation {
     let layout: CabinLayout
     private(set) var turbulence: Turbulence = .none
     private(set) var lavatoryUses = 0
-    private(set) var lavUsesSinceClog: [Int: Int] = [:]
+    private(set) var lavUsesSinceClean: [Int: Int] = [:]
     private(set) var cart: ServiceCart?
     private(set) var machines: [Int: MachineState] = [:]
     private(set) var helper: Helper?
@@ -871,7 +868,7 @@ final class FlightSimulation {
                 addAisle(.carryOn, row: row, aisle: aisle, steps: [.hands], fuse: Tuning.bagFuse)
             }
             events.append(.spawned(kind, x: layout.rows[row].x, y: layout.aisles[aisle]))
-        case .toilet, .dirtyLav:
+        case .dirtyLav:
             return false          // triggered by lavatory use, not rolled
         case .stuckCart, .brokenCart:
             guard var c = cart, c.active, !c.stuck else { return false }
@@ -986,7 +983,7 @@ final class FlightSimulation {
         return o.id
     }
 
-    /// A lavatory gets dirty every couple of visits (GDD §5a): tap it to clean it before it clogs.
+    /// A lavatory gets dirty every couple of visits (GDD §5a): tap it to clean it before a line builds up.
     @discardableResult
     func makeDirty(lavatory li: Int) -> Int {
         let lav = layout.lavatories[li]
@@ -994,24 +991,10 @@ final class FlightSimulation {
                            y: layout.aisles[lav.aisle], aisle: lav.aisle, steps: [.clean], fuse: .infinity, seed: random() * 6)   // no timer: a line forms instead
         o.lavatory = li
         add(o)
-        lavUsesSinceClog[li] = 0
+        lavUsesSinceClean[li] = 0
         frontReleased[li] = nil
         events.append(.spawned(.dirtyLav, x: lav.doorX, y: layout.aisles[lav.aisle]))
         hint("dirtyLav", "A lavatory is dirty. Tap it to clean it: passengers will start queuing for it.")
-        return o.id
-    }
-
-    /// A neglected dirty lavatory clogs (GDD §5a); walkers can't use it until it's plunged.
-    @discardableResult
-    func clog(lavatory li: Int) -> Int {
-        let lav = layout.lavatories[li]
-        var o = Occurrence(id: nextID, kind: .toilet, passenger: nil, row: layout.nearestRow(toX: lav.doorX), x: lav.doorX,
-                           y: layout.aisles[lav.aisle], aisle: lav.aisle, steps: [.clean], fuse: Tuning.clogFuse, seed: random() * 6)   // plunged on the spot
-        o.lavatory = li
-        add(o)
-        lavUsesSinceClog[li] = 0
-        events.append(.spawned(.toilet, x: lav.doorX, y: layout.aisles[lav.aisle]))
-        hint("toilet", "A lavatory is clogged! Nobody can use it until it's fixed: tap it to plunge it.")
         return o.id
     }
 
@@ -1040,7 +1023,6 @@ final class FlightSimulation {
         return door + dir * Tuning.lavQueueGap * Double(k + 1)
     }
 
-    func isClogged(_ li: Int) -> Bool { occurrences.contains { $0.kind == .toilet && !$0.dead && $0.lavatory == li } }
     private func needsCleaning(_ li: Int) -> Bool { occurrences.contains { $0.kind.atLavatory && !$0.dead && $0.lavatory == li } }
 
     /// Changes the score (never below 0) and logs it for the scorecard.
@@ -1064,11 +1046,8 @@ final class FlightSimulation {
         if o.vip { stats.vipFailed = true }
         events.append(.failed(x: o.x, y: o.y))
         breakStreak(x: o.x, y: o.y)
-        if o.kind == .dirtyLav, let li = o.lavatory, plan.kinds.contains(.toilet) {
-            occurrences[i].dead = true                  // left too long: it clogs
-            clog(lavatory: li)
-        } else if o.kind.lingers {
-            // Obstacles and clogs stay put (and keep causing trouble) until someone clears them.
+        if o.kind.lingers {
+            // Obstacles and dirty lavatories stay put (and keep causing trouble) until someone clears them.
             occurrences[i].failed = true
             occurrences[i].state = .failed
         } else {
@@ -1552,6 +1531,9 @@ final class FlightSimulation {
         for o in occurrences where o.kind == .dirtyLav && !o.dead {
             guard let li = o.lavatory else { continue }
             guard strollsEnabled && phase == .cruise && !seatbeltOn else { lavQueueTimer[li] = 0; continue }
+            // nobody lines up while another lavatory on that aisle is clean: they use that one instead
+            let lav = layout.lavatories[li]
+            if cleanLavatory(aisle: lav.aisle, near: lav.doorX) != nil { lavQueueTimer[li] = 0; continue }
             lavQueueTimer[li, default: 0] += dt
             if lavQueueTimer[li, default: 0] >= Tuning.lavQueueEvery && lavQueue(li) < Tuning.maxLavQueue {
                 lavQueueTimer[li] = 0
@@ -1577,8 +1559,9 @@ final class FlightSimulation {
                         s.stage = .dwelling
                         switch s.purpose {
                         case .lavatory(let li):
-                            if isClogged(li) {
-                                s.dwell = 1.5                   // turns back, annoyed
+                            if isDirty(li), !s.waiting, let other = cleanLavatory(aisle: home.aisle, near: s.x) {
+                                // found it dirty, but another one is clean: go there instead
+                                s.purpose = .lavatory(other); s.targetX = layout.lavatories[other].doorX; s.stage = .walking
                             } else if isDirty(li) {
                                 // dirty: join the line (walk to the back of it first)
                                 if !s.waiting {
@@ -1589,17 +1572,9 @@ final class FlightSimulation {
                                 s.dwell = .infinity
                                 if s.stage == .dwelling {
                                     hint("lavQueue", "A line is forming at the dirty lavatory! Everyone waiting costs satisfaction. Clean it.")
-                                    if waitingAt(li).count + 1 >= Tuning.maxLavQueue && plan.kinds.contains(.toilet) {
-                                        overflow(li)          // the line is full: someone goes in anyway, and it clogs
-                                    }
                                 }
                             } else {
                                 s.dwell = random(in: Tuning.lavDwell); s.inLavatory = true; lavatoryUses += 1
-                                lavUsesSinceClog[li, default: 0] += 1
-                                if plan.kinds.contains(.dirtyLav), lavUsesSinceClog[li, default: 0] >= Tuning.lavUsesBeforeDirty,
-                                   !needsCleaning(li), activeCount < plan.cap(at: t) + 1 {
-                                    makeDirty(lavatory: li)
-                                }
                             }
                         case .chat(let partner):
                             s.dwell = random(in: Tuning.chatDwell)
@@ -1609,8 +1584,17 @@ final class FlightSimulation {
                 }
             case .dwelling:
                 if s.waiting, case .lavatory(let li) = s.purpose {
-                    if !isDirty(li) { s.waiting = false; s.dwell = 0 }          // cleaned: see below
-                    else { waiting.append(i) }
+                    if !isDirty(li) {
+                        s.waiting = false; s.dwell = 0                          // cleaned: see below
+                    } else if let other = cleanLavatory(aisle: home.aisle, near: s.x) {
+                        // another lavatory is clean now: leave the line and use that one
+                        s.waiting = false; s.purpose = .lavatory(other)
+                        s.targetX = layout.lavatories[other].doorX; s.stage = .walking
+                        passengers[i].stroll = s
+                        continue
+                    } else {
+                        waiting.append(i)
+                    }
                 }
                 if case .chat(let partner) = s.purpose {              // lean toward whoever they're talking to
                     let aisleY = layout.aisles[home.aisle]
@@ -1618,9 +1602,10 @@ final class FlightSimulation {
                 }
                 s.dwell -= dt
                 if s.dwell <= 0 {
+                    if s.inLavatory, case .lavatory(let li) = s.purpose { leftLavatory(li) }
                     s.inLavatory = false; s.stage = .returning; s.targetX = home.x
                     // a line released by a clean lavatory: the one at the front goes in, the rest head back
-                    if case .lavatory(let li) = s.purpose, !s.waiting, frontReleased[li] == nil, !isClogged(li),
+                    if case .lavatory(let li) = s.purpose, !s.waiting, frontReleased[li] == nil,
                        abs(s.x - queueSlotX(li, 0)) < 1 {
                         frontReleased[li] = i
                         s.stage = .walking; s.targetX = layout.lavatories[li].doorX
@@ -1647,17 +1632,11 @@ final class FlightSimulation {
         }
     }
 
-    /// The line is full: the passenger at the front can't wait and goes in anyway. It clogs.
-    private func overflow(_ li: Int) {
-        if let o = occurrences.firstIndex(where: { $0.kind == .dirtyLav && !$0.dead && $0.lavatory == li }) {
-            occurrences[o].dead = true
-            breakStreak(x: occurrences[o].x, y: occurrences[o].y)
-        }
-        clog(lavatory: li)
-        for i in waitingAt(li) {                      // the line breaks up, grumbling
-            passengers[i].stroll?.waiting = false
-            passengers[i].stroll?.dwell = 0.8
-        }
+
+    /// The nearest clean lavatory on an aisle, if there is one: passengers pick it over a dirty one.
+    private func cleanLavatory(aisle: Int, near x: Double) -> Int? {
+        layout.lavatories.indices.filter { layout.lavatories[$0].aisle == aisle && !isDirty($0) }
+            .min { abs(layout.lavatories[$0].doorX - x) < abs(layout.lavatories[$1].doorX - x) }
     }
 
     /// A passenger heads for a dirty lavatory (and will join the line there).
@@ -1699,11 +1678,12 @@ final class FlightSimulation {
         guard !candidates.isEmpty else { return }
         let i = candidates[pickWeighted(candidates.map { passengers[$0].archetype == .chatterbox ? 2.5 : 1 })]
         let p = passengers[i]
-        let lavs = layout.lavatories.indices.filter { layout.lavatories[$0].aisle == p.aisle && !isClogged($0) }
+        let lavs = layout.lavatories.indices.filter { layout.lavatories[$0].aisle == p.aisle }
         let wantsChat = lavs.isEmpty || random() < (p.archetype == .chatterbox ? 0.8 : 0.4)
         var purpose: StrollPurpose
         var targetX: Double
-        if let li = lavs.min(by: { abs(layout.lavatories[$0].doorX - p.x) < abs(layout.lavatories[$1].doorX - p.x) }) {
+        if let li = cleanLavatory(aisle: p.aisle, near: p.x)
+            ?? lavs.min(by: { abs(layout.lavatories[$0].doorX - p.x) < abs(layout.lavatories[$1].doorX - p.x) }) {
             purpose = .lavatory(li); targetX = layout.lavatories[li].doorX
         } else {
             purpose = .chat(partner: i); targetX = p.x
@@ -1728,13 +1708,25 @@ final class FlightSimulation {
                                       face: targetX < p.x ? -1 : 1)
     }
 
+    /// A passenger has just come out of a lavatory: every couple of visits it's left dirty (GDD §5a).
+    private func leftLavatory(_ li: Int) {
+        lavUsesSinceClean[li, default: 0] += 1
+        if plan.kinds.contains(.dirtyLav), lavUsesSinceClean[li, default: 0] >= Tuning.lavUsesBeforeDirty,
+           !needsCleaning(li), activeCount < plan.cap(at: t) + 1 {
+            makeDirty(lavatory: li)
+        }
+    }
+
     private func sendStrollersBack() {
         for i in passengers.indices {
             guard var s = passengers[i].stroll else { continue }
             switch s.stage {
             case .leaving: s.stage = .sitting
             case .walking, .dwelling:
-                if s.inLavatory { s.inLavatory = false; s.x = s.targetX }
+                if s.inLavatory {
+                    if case .lavatory(let li) = s.purpose { leftLavatory(li) }
+                    s.inLavatory = false; s.x = s.targetX
+                }
                 s.waiting = false
                 s.stage = .returning; s.targetX = passengers[i].x; s.y = s.laneY
             case .returning, .sitting: break
@@ -1849,6 +1841,18 @@ final class FlightSimulation {
         return (p.x, p.y + (p.isWindow ? -towardAisle : towardAisle) * Tuning.bubbleOffset)
     }
 
+    /// A tap on a lavatory problem's icon (over the toilet seat) or anywhere in that lavatory. Not at the door: on
+    /// the Comet both lavatories' doors face the same spot of aisle, so a tap there can't tell them apart.
+    private func onLavatory(_ o: Occurrence, _ x: Double, _ y: Double) -> Bool {
+        guard o.kind.atLavatory, let li = o.lavatory, layout.lavatories.indices.contains(li) else { return false }
+        let lav = layout.lavatories[li]
+        if abs(x - lav.seatX) < 26 && abs(y - lav.seatY) < 26 { return true }
+        return layout.blocks.contains { b in
+            b.kind == .lavatory && x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h
+                && lav.seatX >= b.x && lav.seatX <= b.x + b.w && lav.seatY >= b.y && lav.seatY <= b.y + b.h
+        }
+    }
+
     func target(forTapAt x: Double, _ y: Double) -> CrewTarget {
         for (i, j) in layout.jumpSeats.enumerated() where jumpSeatsInPlay && abs(x - j.x) < 22 && abs(y - jumpSeatY(j)) < 18 {
             return CrewTarget(x: j.x, aisle: j.aisle, action: .jumpSeat(i))
@@ -1865,7 +1869,7 @@ final class FlightSimulation {
             return CrewTarget(x: b.x, aisle: b.aisle, action: .bin(i))
         }
         for o in occurrences where !o.kind.atSeat && !o.dead
-            && abs(x - o.x) < (o.kind.isCart ? 26 : 22) && abs(y - o.y) < 44 {
+            && (o.kind.atLavatory ? onLavatory(o, x, y) : abs(x - o.x) < (o.kind.isCart ? 26 : 22) && abs(y - o.y) < 44) {
             let side = (crew.aisle == o.aisle ? crew.x : x) < o.x ? -1.0 : 1.0
             let stand = o.kind.atLavatory ? o.x : o.x + side * reach(o)
             return CrewTarget(x: stand, aisle: o.aisle, action: .clear(occurrence: o.id))
@@ -2016,7 +2020,7 @@ final class FlightSimulation {
             switch o.kind {
             case .binJam, .carryOn: d = 0.8
             case .stuckCart: d = 1.2
-            case .brokenCart, .toilet: d = 1.5
+            case .brokenCart: d = 1.5
             case .dirtyLav: d = 1.2
             default: d = 0.9 * Double(o.size)                 // bigger spills take longer to mop
             }
