@@ -708,13 +708,20 @@ enum Art {
         image(64, 56) { c in
             let s = CGFloat(seed)
             c.translateBy(x: 30, y: 30)
-            let color = failed ? UIColor(hex: 0x5E4330, alpha: 0.88) : UIColor(hex: 0x8A4B22, alpha: 0.88)
-            c.setFillColor(color.cgColor)
-            c.saveGState(); c.rotate(by: s); c.fillEllipse(in: CGRect(x: -18, y: -8, width: 36, height: 24)); c.restoreGState()
-            c.fillEllipse(in: CGRect(x: 9 * cos(s) - 10, y: -13, width: 20, height: 14))
-            c.fillEllipse(in: CGRect(x: -18, y: 14 * sin(s) * 0.6 - 5, width: 14, height: 10))
+            // dark coffee puddle with a soft darker rim and a light highlight, so it reads on the coral runner (sprite plan §6b)
+            let color = failed ? UIColor(hex: 0x2E1F16, alpha: 0.94) : UIColor(hex: 0x3F2717, alpha: 0.92)
+            let rim = UIColor(hex: 0x1E120B, alpha: 0.55)
+            func puddle(_ grow: CGFloat, _ fill: UIColor) {
+                c.setFillColor(fill.cgColor)
+                c.saveGState(); c.rotate(by: s); c.fillEllipse(in: CGRect(x: -18, y: -8, width: 36, height: 24).insetBy(dx: -grow, dy: -grow)); c.restoreGState()
+                c.fillEllipse(in: CGRect(x: 9 * cos(s) - 10, y: -13, width: 20, height: 14).insetBy(dx: -grow, dy: -grow))
+                c.fillEllipse(in: CGRect(x: -18, y: 14 * sin(s) * 0.6 - 5, width: 14, height: 10).insetBy(dx: -grow, dy: -grow))
+            }
+            c.saveGState(); c.setShadow(offset: .zero, blur: 3, color: rim.cgColor); puddle(1.2, rim); c.restoreGState()
+            puddle(0, color)
             dot(c, 20, 8, 2.2, color); dot(c, -18, -8, 1.8, color); dot(c, 14, -14, 1.5, color)
-            c.saveGState(); c.translateBy(x: -5, y: -2); c.rotate(by: -0.3); ellipse(c, 0, 0, 7, 2.6, white(0.3)); c.restoreGState()
+            c.saveGState(); c.translateBy(x: -5, y: -2); c.rotate(by: -0.3); ellipse(c, 0, 0, 8, 2.8, white(0.42)); c.restoreGState()
+            dot(c, 4, 3, 1.4, white(0.35))
             // the tipped-over cup
             c.saveGState(); c.translateBy(x: 17, y: -13); c.rotate(by: s)
             let cup = CGMutablePath(); cup.addLines(between: [P(-5, -4), P(5, -3), P(5, 3), P(-5, 4)]); cup.closeSubpath()

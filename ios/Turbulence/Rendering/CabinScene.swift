@@ -189,6 +189,8 @@ final class CabinScene: SKScene {
         world.addChild(crewNode)
         partnerNode.zPosition = 6; partnerNode.isHidden = true
         partnerNode.setLook(skin: UIColor(hex: 0x8D5A3B), hair: UIColor(hex: 0x2B2118))
+        partnerNode.setUniform(UIColor(hex: 0x7B3F6E))            // plum: the second attendant
+        helperNode.setUniform(UIColor(hex: 0x2F4A7A))             // navy: the trainee
         world.addChild(partnerNode)
         world.addChild(activeMark)
     }
@@ -1435,6 +1437,26 @@ final class CrewNode: SKNode {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    /// Recolours the painted attendant's teal uniform (cap, dress, sleeves) to `color`, leaving skin, hair, scarf and
+    /// gloves as painted, so a second crew member reads as someone else. Pixels count as uniform when green and blue
+    /// both clearly beat red; their shading is kept.
+    func setUniform(_ color: UIColor) {
+        guard painted else { return }
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        color.getRed(&r, green: &g, blue: &b, alpha: &a)
+        let shader = SKShader(source: """
+        void main() {
+            vec4 c = texture2D(u_texture, v_tex_coord);
+            float teal = clamp((min(c.g, c.b) - c.r) * 6.0 - 0.15, 0.0, 1.0);
+            float lum = dot(c.rgb, vec3(0.3, 0.59, 0.11)) / max(c.a, 0.001);
+            vec3 tinted = u_uniform.rgb * (lum / 0.42) * c.a;
+            gl_FragColor = vec4(mix(c.rgb, tinted, teal), c.a);
+        }
+        """)
+        shader.uniforms = [SKUniform(name: "u_uniform", vectorFloat4: vector_float4(Float(r), Float(g), Float(b), 1))]
+        body.shader = shader
+    }
 
     func setLook(skin: UIColor, hair: UIColor) {
         (torso.childNode(withName: "head") as? SKShapeNode)?.fillColor = skin
