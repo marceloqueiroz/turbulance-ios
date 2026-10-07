@@ -13,7 +13,7 @@ ap.add_argument("--guide", required=True); ap.add_argument("--view", choices=["s
 ap.add_argument("--sprite", required=True, help="the approved in-game sprite for this view")
 ap.add_argument("--design", required=True, help="the character design sheet")
 ap.add_argument("--out", required=True); ap.add_argument("--takes", default="abc")
-ap.add_argument("--pose", choices=["walk", "idle", "carry"], default="walk")
+ap.add_argument("--pose", choices=["walk", "idle", "carry", "clean", "trash"], default="walk")
 ap.add_argument("--build", default="The legs are as SHORT as in IMAGE 2: only a short stub of leg and the shoe show below the clothes; keep the small, quick steps of the guide.",
                 help="the sentence about body proportions and stride; match it to the character (the default is the attendant's)")
 ap.add_argument("--who", default="the game's flight attendant")
@@ -38,7 +38,11 @@ VIEW = {
 }[a.view]
 WHAT = {"walk": "24-frame walk cycle",
         "idle": "24 frames of the character standing still and relaxed (an idle pose: feet together, arms down)",
-        "carry": "24-frame walk cycle while carrying a serving tray"}[a.pose]
+        "carry": "24-frame walk cycle while carrying a serving tray",
+        "clean": "24-frame looping animation of the character crouched over a coffee spill on the floor, wiping it with a yellow cloth "
+                 "(the yellow oval in the guide is the cloth; she sweeps it forward and back on the floor in front of her)",
+        "trash": "24-frame animation of the character throwing a used paper cup into a bin in front of her: she holds the cup "
+                 "(the pale rounded box in the guide) in front of her, reaches out, lets go so it drops out of the picture, and her arm comes back"}[a.pose]
 TRAY = (" The light grey oval with the dark outline is a TRAY: paint it as an empty, round, polished silver serving tray held out flat "
         "on one gloved hand at CHEST height, exactly where the guide puts it: never raised above her shoulders or head, never a second "
         "tray, the whole tray inside the picture, the same tray in every one of the 24 cells (from behind, her body hides most of it). "

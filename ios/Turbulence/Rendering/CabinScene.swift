@@ -115,6 +115,8 @@ final class CabinScene: SKScene {
     private let cartNode = SKSpriteNode(texture: Tex.cart)
     private var machineRings: [Int: SKShapeNode] = [:]
     private var machineCold: [Int: SKSpriteNode] = [:]      // the cold cup/plate waiting in a machine
+    /// The vacant/occupied light over each lavatory door (green free, red taken), like a real cabin sign.
+    private var lavSigns: [SKShapeNode] = []
     private var flightNodes: [SKNode] = []          // per-flight overlays (closed galley)
     private let dimNode = SKSpriteNode(color: UIColor(hex: 0x0B1330), size: .zero)
     private let helperNode = CrewNode()
@@ -493,6 +495,17 @@ final class CabinScene: SKScene {
             world.addChild(g)
             return g
         }
+        lavSigns.forEach { $0.removeFromParent() }
+        lavSigns = layout.lavatories.map { lav in
+            let sign = SKShapeNode(rect: CGRect(x: -9, y: -3.5, width: 18, height: 7), cornerRadius: 3.5)
+            sign.fillColor = Palette.navy; sign.strokeColor = UIColor(white: 1, alpha: 0.85); sign.lineWidth = 1
+            let lamp = SKShapeNode(circleOfRadius: 2.4); lamp.name = "lamp"; lamp.strokeColor = .clear; lamp.glowWidth = 2
+            sign.addChild(lamp)
+            sign.position = pt(lav.doorX, layout.aisles[lav.aisle] + (lav.above ? -44 : 44))
+            sign.zPosition = 1.2
+            world.addChild(sign)
+            return sign
+        }
         crewNode.worldWidth = worldW
         layoutWorld()
     }
@@ -646,7 +659,9 @@ final class CabinScene: SKScene {
                 iconLayer.addChild(n); iconNodes[o.id] = n; return n
             }()
             icon.sync(o, clock: clock)
-            icon.isHidden = sim.isBehindCurtain(o)
+            // the dark spill puddle is its own indicator: no circle icon over it (tapping the puddle still targets it;
+            // off-screen spills keep their edge marker)
+            icon.isHidden = sim.isBehindCurtain(o) || o.kind == .spill
             if o.kind.atSeat, let pi = o.passenger {
                 let frame = seatFrames[o.id] ?? {
                     let p = sim.passengers[pi]
@@ -694,6 +709,14 @@ final class CabinScene: SKScene {
 
         for (i, b) in sim.layout.bins.enumerated() where i < binHighlights.count {
             binHighlights[i].isHidden = b.item.map { !sim.crew.tray.contains($0) } ?? true
+        }
+        for (li, sign) in lavSigns.enumerated() where li < sim.layout.lavatories.count {
+            let lav = sim.layout.lavatories[li]
+            let taken = sim.passengers.contains { p in
+                guard let s = p.stroll, s.inLavatory else { return false }
+                return p.aisle == lav.aisle && abs(s.targetX - lav.doorX) < 30
+            }
+            (sign.childNode(withName: "lamp") as? SKShapeNode)?.fillColor = taken ? Palette.critical : UIColor(hex: 0x6FD08C)
         }
         if let skin {
             for (i, n) in stationNodes where sim.layout.bins[i].isMachine {
@@ -1067,6 +1090,9 @@ final class PaxNode: SKNode {
     private let painted: (seated: SKTexture, call: SKTexture)?
     /// Painted walk cycle (PassengerArt.walk): facing from the way they move, the frame from the distance walked.
     private let walkLook: String
+    /// About half the seated passengers are drawn mirrored top-to-bottom (the other hand on the laptop, the toddler on the
+    /// other arm), so a full cabin of five painted archetypes repeats less.
+    private let mirrored: Bool
     private var walkFacing = AttendantArt.Facing.side
     private var walkDistance = 0.0
     private var lastPos: (x: Double, y: Double)?
@@ -1078,6 +1104,7 @@ final class PaxNode: SKNode {
         sickTex = SKTexture(image: Art.passenger(p, sick: true))
         painted = PassengerArt.textures(for: p)
         walkLook = PassengerArt.walkLook(p)
+        mirrored = (p.id &* 7 &+ p.row) % 2 == 1
         body = SKSpriteNode(texture: painted?.seated ?? normalTex, size: painted == nil ? Art.passengerSize : PassengerArt.size)
         archetype = p.archetype
         phase = p.phase
@@ -1173,6 +1200,7 @@ final class PaxNode: SKNode {
         } else {
             flip.xScale = 1
         }
+        flip.yScale = mirrored && p.stroll == nil && painted != nil ? -1 : 1
         body.position = CGPoint(x: dx, y: dy)
 
         let want: CGFloat = (p.stroll?.inLavatory ?? false) ? 0 : 1

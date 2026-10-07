@@ -11,6 +11,9 @@ Usage:
   --pose idle   standing still (legs together, arms down, slow breathing bob): pick ONE clean frame per view
   --pose carry  the walk with a round silver tray held out at chest height on her RIGHT hand, inside her own
                 width (held up beside the head it ran past the frame edge and got clipped)
+  --pose clean  side view: crouched over a spill, the near hand sweeping a yellow cloth on the floor in front
+  --pose trash  side view: a cup held at the chest, reached out forward and dropped, the arm comes back
+                (action guides are side view only so far; the cabin's trash bins sit on the end walls)
 Also writes <out>-peek.png (first row) and <out>.gif (the guide animated): look at both before generating.
 
 Proportions are the approved chibi attendant (head ~55% of the height, body ~35%, legs ~10%). Gemini copies
@@ -21,7 +24,9 @@ from PIL import Image, ImageDraw
 
 CW, CH, SS = 682, 768, 2                      # cell = 1/6 x 1/4 of the 4096 x 3072 grid; supersampled
 BLUE, ORANGE, CLAY, DARK, WHITE = (60, 110, 210), (235, 140, 50), (200, 194, 186), (90, 84, 80), (245, 245, 245)
-SILVER = (214, 218, 226)                      # the carry tray: Gemini is told this light grey oval is a silver tray
+SILVER = (214, 218, 226)
+CLOTH = (246, 214, 92)                        # the cleaning cloth (yellow), and the cup in the trash guide (pale)
+CUP = (250, 238, 200)                      # the carry tray: Gemini is told this light grey oval is a silver tray
 # side view body, in cell px: short legs, round torso, arms from just under the head
 BODY = dict(ground=700, thigh=34, shin=32, torso=(4, -88, 96, 98), shoulder=-128, upper_arm=42, forearm=36,
             arm_swing=38, head_gap=40)
@@ -103,6 +108,66 @@ def side_frame(t, head, a):
     return im.convert("RGB")
 
 
+def side_action(t, head, a):
+    """Action poses on the side mannequin (facing right). Legs planted, torso leaning; arms follow the action timeline."""
+    B = BODY
+    im = Image.new("RGBA", (CW * SS, CH * SS), (255, 0, 255, 255)); d = ImageDraw.Draw(im)
+    P = lambda p: (p[0] * SS, p[1] * SS)
+
+    def line(p, q, w, c):
+        d.line([P(p), P(q)], fill=c, width=round(w * SS))
+        for z in (p, q): d.ellipse([P((z[0] - w / 2, z[1] - w / 2)), P((z[0] + w / 2, z[1] + w / 2))], fill=c)
+
+    def ell(cx, cy, rx, ry, c, o=DARK):
+        d.ellipse([P((cx - rx, cy - ry)), P((cx + rx, cy + ry))], fill=c, outline=o, width=4 * SS)
+
+    u = t / 24; cx = CW / 2; g = B["ground"]
+    if a.pose == "clean":
+        crouch, lean = 18 + 3 * math.sin(4 * math.pi * u), 30       # knees bent, leaning toward the spill
+        sweep = math.sin(2 * math.pi * u)                            # the cloth goes forward and back once per cycle
+        feet = {"near": cx + 40, "far": cx - 26}
+    else:
+        rise = [0, 0, 0, 0, 0, 0, .2, .45, .7, .9, 1, 1, 1, 1, 1, 1, .85, .65, .45, .25, .1, 0, 0, 0][t]
+        crouch, lean, sweep = 2, 4 + 10 * rise, 0
+        feet = {"near": cx + 30, "far": cx - 14}
+    hipy = g - (B["thigh"] + B["shin"]) * 0.93 + crouch
+    lx = math.radians(lean)
+    def knee(hip, fx):                                               # simple bent knee toward the front
+        return ((hip[0] + fx) / 2 + 10, (hip[1] + g) / 2 + 2)
+    hips = {"near": (cx - 6, hipy + 3), "far": (cx + 6, hipy - 3)}
+    torso_c = (cx + 4 + 60 * math.sin(lx), hipy - 88 * math.cos(lx))
+    shy = hipy - 128 * math.cos(lx); shx = cx + 10 + 128 * math.sin(lx)
+    def draw_leg(n, c):
+        h = hips[n]; f = (feet[n], g); k = knee(h, f[0])
+        line(h, k, 34, c); line(k, f, 32, c); line((f[0] - 8, g), (f[0] + 28, g), 24, DARK)
+    hand_far = (shx + 20, hipy - 20) if a.pose == "clean" else (shx - 4, hipy - 40)
+    line((shx + 8, shy), hand_far, 28, ORANGE); ell(*hand_far, 19, 19, WHITE)
+    draw_leg("far", ORANGE)
+    ell(*torso_c, 96, 98, CLAY)
+    draw_leg("near", BLUE)
+    if a.pose == "clean":
+        hand = (cx + 150 + 45 * sweep, g - 18)                          # the cloth on the floor in front of her
+        el = ((shx + hand[0]) / 2 + 10, (shy + hand[1]) / 2 - 6)
+        d.ellipse([P((hand[0] - 52, g - 30)), P((hand[0] + 52, g + 2))], fill=CLOTH, outline=DARK, width=3 * SS)
+    else:
+        if t < 12 or t > 15:                                             # the cup in hand: in front of the belly, then out front
+            hand = (cx + 110 + 60 * rise, hipy - 40 - 60 * rise)
+        else:
+            hand = (cx + 170, hipy - 100)                                # hand open over the bin
+        el = ((shx + hand[0]) / 2 + 4, (shy + hand[1]) / 2 + 14)
+        if t <= 12:
+            d.rounded_rectangle([P((hand[0] + 4, hand[1] - 22)), P((hand[0] + 36, hand[1] + 18))], radius=5 * SS, fill=CUP, outline=DARK, width=3 * SS)
+        elif t <= 15:                                                     # dropping into the bin, out of the picture
+            fy = hand[1] + 45 * (t - 11) ** 1.5
+            d.rounded_rectangle([P((hand[0] + 4, fy - 40)), P((hand[0] + 36, fy))], radius=5 * SS, fill=CUP, outline=DARK, width=3 * SS)
+    line((shx - 8, shy), el, 28, BLUE); line(el, hand, 26, BLUE); ell(*hand, 19, 19, WHITE)
+    im = im.resize((CW, CH), Image.LANCZOS)
+    hh = head.resize((round(head.width * a.head_h / head.height), a.head_h), Image.LANCZOS)
+    hx = CW / 2 - hh.width / 2 + 170 * math.sin(lx); hy = hipy - 180 * math.cos(lx) - hh.height + B["head_gap"] + 60 * math.sin(lx)
+    im.alpha_composite(hh, (round(hx), round(hy)))
+    return im.convert("RGB")
+
+
 def fb_frame(t, head, a):
     F = FB; k = F["scale"] * SS
     im = Image.new("RGBA", (CW * SS, CH * SS), (255, 0, 255, 255)); d = ImageDraw.Draw(im)
@@ -162,7 +227,7 @@ if __name__ == "__main__":
     ap.add_argument("--stride", type=float, default=42); ap.add_argument("--lift", type=float, default=24)
     ap.add_argument("--bob", type=float, default=9); ap.add_argument("--sway", type=float, default=6)
     ap.add_argument("--head-h", type=int, default=310, help="side view: head+scarf height in cell px")
-    ap.add_argument("--pose", choices=["walk", "idle", "carry"], default="walk")
+    ap.add_argument("--pose", choices=["walk", "idle", "carry", "clean", "trash"], default="walk")
     ap.add_argument("--legs", type=float, default=1, help="side view: leg length vs the attendant's (a passenger with real legs: ~2)")
     ap.add_argument("--torso", type=float, default=1, help="side view: torso height vs the attendant's")
     ap.add_argument("--torso-w", type=float, default=1, help="side view: torso width vs the attendant's")
@@ -170,7 +235,7 @@ if __name__ == "__main__":
     a = ap.parse_args()
     if a.pose == "idle": a.stride, a.lift, a.sway, a.bob = 0, 0, 0, 3
     head = Image.open(a.head).convert("RGBA")
-    fn = side_frame if a.view == "side" else fb_frame
+    fn = side_action if a.pose in ("clean", "trash") else side_frame if a.view == "side" else fb_frame
     frames = [fn(t, head, a) for t in range(24)]
     g = Image.new("RGB", (CW * 6, CH * 4), (255, 0, 255))
     for t, f in enumerate(frames): g.paste(f, ((t % 6) * CW, (t // 6) * CH))
