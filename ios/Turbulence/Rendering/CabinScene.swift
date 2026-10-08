@@ -93,6 +93,8 @@ final class CabinScene: SKScene {
     /// The painted cabin set for this aircraft, if it has one (CabinSkin); its stations are sprites that show machine states.
     private var skin: CabinSkin?
     private var stationNodes: [Int: SKSpriteNode] = [:]
+    /// Trash bins whose flap is open, until this clock time (it swings shut a moment after the drop).
+    private var trashOpenUntil: [Int: Double] = [:]
     private var dustTimer = 0.0
     /// Jump seats as sprites, so they can fold away after Go on flights without turbulence.
     private var jumpSeatNodes: [SKSpriteNode] = []
@@ -105,8 +107,6 @@ final class CabinScene: SKScene {
         case .apply(let id)?:
             guard let o = sim.occurrences.first(where: { $0.id == id }), o.steps.indices.contains(o.step) else { return nil }
             return o.steps[o.step] == .clean ? .clean : nil
-        case .pick(let bin)?:
-            return sim.layout.bins.indices.contains(bin) && sim.layout.bins[bin].kind == .trash ? .trash : nil
         default:
             return nil
         }
@@ -759,6 +759,17 @@ final class CabinScene: SKScene {
             }
             (sign.childNode(withName: "lamp") as? SKShapeNode)?.fillColor = taken ? Palette.critical : UIColor(hex: 0x6FD08C)
         }
+        if let skin, let open = skin.trashOpen, let shut = skin.station(.trash, machine: nil) {
+            for c in sim.crews {
+                if case .pick(let bin)? = c.busy?.task, sim.layout.bins.indices.contains(bin), sim.layout.bins[bin].kind == .trash {
+                    trashOpenUntil[bin] = clock + 0.5
+                }
+            }
+            for (i, n) in stationNodes where sim.layout.bins[i].kind == .trash {
+                let s = (trashOpenUntil[i] ?? 0) > clock ? open : shut
+                if n.texture !== s.texture { n.texture = s.texture; n.size = s.size; n.anchorPoint = s.anchor }
+            }
+        }
         if let skin {
             for (i, n) in stationNodes where sim.layout.bins[i].isMachine {
                 guard let s = skin.station(sim.layout.bins[i].kind, machine: sim.machines[i]), n.texture !== s.texture else { continue }
@@ -1401,8 +1412,8 @@ func easeOutBack(_ t: Double) -> Double { 1 + 2.70158 * pow(t - 1, 3) + 1.70158 
 enum AttendantArt {
     enum Facing: String { case side, front, back }
     enum Move: String { case walk, carry }
-    /// Painted action cycles (side view only so far): cleaning on the spot, dropping something in a trash bin.
-    enum Action: String { case clean, trash }
+    /// Painted action cycles (side view only so far): cleaning on the spot. (Station stops last 0.25 s, too short to animate.)
+    enum Action: String { case clean }
     static let frameCount = 24
     /// Frame size in points; the feet stand on the frame's ground line (`anchor`); the figure is ~56 pt tall.
     static let frameSize = CGSize(width: 56, height: 76)
@@ -1419,7 +1430,7 @@ enum AttendantArt {
         [Facing.side, .front, .back].map { ($0, atlas.textureNamed("idle-\($0.rawValue)")) })
     static func frames(_ m: Move, _ f: Facing) -> [SKTexture] { cycles["\(m.rawValue)-\(f.rawValue)"]! }
     static func idle(_ f: Facing) -> SKTexture { stills[f]! }
-    private static let actions: [Action: [SKTexture]] = Dictionary(uniqueKeysWithValues: [Action.clean, .trash].compactMap { a in
+    private static let actions: [Action: [SKTexture]] = Dictionary(uniqueKeysWithValues: [Action.clean].compactMap { a in
         let names = Set(atlas.textureNames.map { ($0 as NSString).deletingPathExtension })
         let frames = (0..<frameCount).map { String(format: "%@-side-%02d", a.rawValue, $0) }
         return frames.allSatisfy(names.contains) ? (a, frames.map { atlas.textureNamed($0) }) : nil
@@ -1581,9 +1592,9 @@ final class CrewNode: SKNode {
             let cycle = (c.walk / (2 * .pi)).truncatingRemainder(dividingBy: 1)
             let carrying = !c.tray.isEmpty
             if let action, let frames = AttendantArt.frames(action), let busy = c.busy {
-                // cleaning loops (~1.2 s a sweep); binning plays once over the pick
-                let k = action == .clean ? Int(clock / 1.2 * Double(frames.count)) % frames.count
-                                         : min(frames.count - 1, Int(busy.progress * Double(frames.count)))
+                // cleaning loops (~1.2 s a sweep)
+                _ = busy
+                let k = Int(clock / 1.2 * Double(frames.count)) % frames.count
                 body.texture = frames[k]
                 body.xScale = face < 0 ? -1 : 1
                 body.yScale = 1

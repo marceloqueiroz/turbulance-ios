@@ -63,6 +63,9 @@ struct CabinSkin {
         return sprite(name, width: widths[name.split(separator: "-").first.map(String.init) ?? name] ?? 34)
     }
 
+    /// A trash bin with its flap pushed open (shown while someone drops something in).
+    var trashOpen: (texture: SKTexture, size: CGSize, anchor: CGPoint)? { sprite("trash-open", width: widths["trash"] ?? 30) }
+
     /// The crew's fold-down seat by the end walls.
     var crewSeat: (texture: SKTexture, size: CGSize, anchor: CGPoint)? { sprite("crewseat", width: widths["crewseat"] ?? 33) }
 

@@ -181,6 +181,19 @@ struct CabinLayout: Equatable {
     /// The crew's work area from the forward galley to the end of the aft service blocks (or the last row
     /// when nothing is fitted aft): the camera keeps this in view with a fixed margin, and the end walls close it.
     var startX: Double { blocks.map(\.x).min() ?? 60 }
+    /// A trash bin standing against a nose or tail end wall (its flap faces into the cabin); nil for any other station.
+    /// -1: against the nose wall (flap faces right), 1: against the tail wall (flap faces left).
+    func wallBinSide(_ b: SupplyBin) -> Double? {
+        guard b.kind == .trash else { return nil }
+        if b.x - startX < 40 { return -1 }
+        if endX - b.x < 40 { return 1 }
+        return nil
+    }
+    /// Where the crew stands to use a station: in front of a wall trash bin's flap, otherwise at the station.
+    func standX(_ b: SupplyBin) -> Double {
+        guard let side = wallBinSide(b) else { return b.x }
+        return b.x - side * 20
+    }
     var endX: Double { max(blocks.map { $0.x + $0.w }.max() ?? 0, lastRowX + 20) }
 
     var minX: Double { 70 }

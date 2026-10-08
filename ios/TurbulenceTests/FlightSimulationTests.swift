@@ -476,8 +476,11 @@ final class FlightSimulationTests: XCTestCase {
             let first = plan == Campaign.route1.flights[0]
             XCTAssertGreaterThanOrEqual(plan.stars(for: n), first ? 2 : 1, "\(plan.id): a newcomer earns \(first ? "two stars" : "a star")")
             XCTAssertEqual(plan.stars(for: e), 3, "\(plan.id): expert play earns three stars")
-            XCTAssertGreaterThanOrEqual(expertThrees, expert.count - 2,
-                                        "\(plan.id): expert play reaches three stars on all but at most 2 of \(expert.count) runs")
+            // TB106 may miss once more: standing in front of the wall trash bin's flap (2026-10-07) adds a few steps
+            // per trash trip, and the user chose to accept that rather than retune its star targets for now.
+            let allowedMisses = plan.id == "TB106" ? 3 : 2
+            XCTAssertGreaterThanOrEqual(expertThrees, expert.count - allowedMisses,
+                                        "\(plan.id): expert play reaches three stars on all but at most \(allowedMisses) of \(expert.count) runs")
         }
         print("BOT REPORT\n" + report.joined(separator: "\n"))
     }

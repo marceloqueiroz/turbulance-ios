@@ -1,9 +1,8 @@
 {
   "images": [
     {
-      "filename": "trash-side-11.png",
-      "idiom": "universal",
-      "scale": "3x"
+      "filename": "trash-open.png",
+      "idiom": "universal"
     }
   ],
   "info": {

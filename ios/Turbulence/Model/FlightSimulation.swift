@@ -1790,7 +1790,7 @@ final class FlightSimulation {
         guard running, layout.bins.indices.contains(i) else { return }
         let b = layout.bins[i]
         cur = active
-        let target = CrewTarget(x: b.x, aisle: b.aisle, action: .none)
+        let target = CrewTarget(x: layout.standX(b), aisle: b.aisle, action: .none)
         if crew.seated != nil {
             if seatbeltOn { say("Stay seated!"); events.append(.nope); return }
             crew.busy = BusyAction(duration: Tuning.unbuckleDuration, task: .unbuckle)
@@ -1866,7 +1866,7 @@ final class FlightSimulation {
             return CrewTarget(x: layout.rows[p.row].x, aisle: p.aisle, action: .seat(row: p.row, seat: p.seat))
         }
         for (i, b) in layout.bins.enumerated() where abs(x - b.x) < 18 && abs(y - b.y) < 40 {
-            return CrewTarget(x: b.x, aisle: b.aisle, action: .bin(i))
+            return CrewTarget(x: layout.standX(b), aisle: b.aisle, action: .bin(i))
         }
         for o in occurrences where !o.kind.atSeat && !o.dead
             && (o.kind.atLavatory ? onLavatory(o, x, y) : abs(x - o.x) < (o.kind.isCart ? 26 : 22) && abs(y - o.y) < 44) {
@@ -2012,6 +2012,7 @@ final class FlightSimulation {
             break
         case .bin(let i):
             crew.busy = BusyAction(duration: Tuning.pickDuration, task: .pick(bin: i))
+            if let side = layout.wallBinSide(layout.bins[i]) { crew.face = side }     // face the wall bin's flap
         case .jumpSeat(let i):
             crew.busy = BusyAction(duration: Tuning.buckleDuration, task: .buckle(seat: i))
         case .clear(let id):
