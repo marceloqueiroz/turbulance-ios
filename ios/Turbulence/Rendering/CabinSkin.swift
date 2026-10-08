@@ -63,6 +63,25 @@ struct CabinSkin {
         return sprite(name, width: widths[name.split(separator: "-").first.map(String.init) ?? name] ?? 34)
     }
 
+    /// One aft lavatory's painted open door and toilet, placed from the layout's `aftX` (world units, top-down y).
+    struct LavArt {
+        let openDoor: SKTexture
+        /// Where the open-door picture goes: x from `aftX`, y absolute (top-down).
+        let doorRect: CGRect
+        /// The toilet seat, x from `aftX`; a passenger inside sits here.
+        let toilet: CGPoint
+        /// Turns a seated passenger (who faces the nose) to face the way this toilet faces.
+        let facing: CGFloat
+    }
+
+    /// The painted lavatory above (true) or below (false) the aisle, if this set has them.
+    func lavatory(above: Bool) -> LavArt? {
+        guard let t = textures[above ? "lavdoor-top-open" : "lavdoor-bottom-open"] else { return nil }
+        return above
+            ? LavArt(openDoor: t, doorRect: CGRect(x: -0.7, y: 98, width: 70.4, height: 47.5), toilet: CGPoint(x: 34.5, y: 76.8), facing: .pi / 2)
+            : LavArt(openDoor: t, doorRect: CGRect(x: 4.3, y: 220.5, width: 70.4, height: 47.5), toilet: CGPoint(x: 83.7, y: 304.2), facing: -.pi / 2)
+    }
+
     /// A trash bin with its flap pushed open (shown while someone drops something in).
     var trashOpen: (texture: SKTexture, size: CGSize, anchor: CGPoint)? { sprite("trash-open", width: widths["trash"] ?? 30) }
 

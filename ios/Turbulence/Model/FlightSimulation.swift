@@ -207,6 +207,9 @@ struct Stroll: Equatable {
     var inLavatory = false
     /// Standing in line at a dirty lavatory (GDD §5a).
     var waiting = false
+    /// Waiting at the door of a clean lavatory someone else is using: one passenger at a time goes in.
+    /// Unlike the dirty-lavatory line this costs no satisfaction.
+    var turn = false
     var face = -1.0
     /// Spills this walker has already slipped on (once each).
     var slippedOn: Set<Int> = []
@@ -1008,11 +1011,20 @@ final class FlightSimulation {
         }.count
     }
 
-    /// Passengers standing in line at a lavatory.
+    /// Passengers standing in line at a lavatory (dirty, or waiting their turn), front of the line first.
     private func waitingAt(_ li: Int) -> [Int] {
         passengers.indices.filter { i in
             guard let s = passengers[i].stroll, case .lavatory(li) = s.purpose else { return false }
-            return s.waiting && s.stage == .dwelling
+            return (s.waiting || s.turn) && s.stage == .dwelling
+        }
+        .sorted { abs(passengers[$0].stroll!.x - layout.lavatories[li].doorX) < abs(passengers[$1].stroll!.x - layout.lavatories[li].doorX) }
+    }
+
+    /// Someone is inside this lavatory: it takes one passenger at a time.
+    func isOccupied(_ li: Int) -> Bool {
+        passengers.contains { p in
+            guard let s = p.stroll, s.inLavatory, case .lavatory(li) = s.purpose else { return false }
+            return true
         }
     }
 
@@ -1559,7 +1571,9 @@ final class FlightSimulation {
                         s.stage = .dwelling
                         switch s.purpose {
                         case .lavatory(let li):
-                            if isDirty(li), !s.waiting, let other = cleanLavatory(aisle: home.aisle, near: s.x) {
+                            if s.turn && abs(s.x - layout.lavatories[li].doorX) > 1 {
+                                s.dwell = .infinity                          // reached their place in line: wait there
+                            } else if isDirty(li), !s.waiting, let other = cleanLavatory(aisle: home.aisle, near: s.x) {
                                 // found it dirty, but another one is clean: go there instead
                                 s.purpose = .lavatory(other); s.targetX = layout.lavatories[other].doorX; s.stage = .walking
                             } else if isDirty(li) {
@@ -1573,7 +1587,17 @@ final class FlightSimulation {
                                 if s.stage == .dwelling {
                                     hint("lavQueue", "A line is forming at the dirty lavatory! Everyone waiting costs satisfaction. Clean it.")
                                 }
+                            } else if isOccupied(li) {
+                                // someone is inside: use another free lavatory, or wait for this one at its door
+                                if let other = freeLavatory(aisle: home.aisle, near: s.x, except: li) {
+                                    s.purpose = .lavatory(other); s.targetX = layout.lavatories[other].doorX; s.stage = .walking
+                                } else {
+                                    s.turn = true; s.dwell = .infinity
+                                    s.targetX = queueSlotX(li, waitingAt(li).count)
+                                    if abs(s.targetX - s.x) > 0.5 { s.stage = .walking }
+                                }
                             } else {
+                                s.turn = false
                                 s.dwell = random(in: Tuning.lavDwell); s.inLavatory = true; lavatoryUses += 1
                             }
                         case .chat(let partner):
@@ -1583,6 +1607,21 @@ final class FlightSimulation {
                     }
                 }
             case .dwelling:
+                if s.turn, case .lavatory(let li) = s.purpose {
+                    if isDirty(li) {
+                        s.turn = false; s.waiting = true                      // it got dirty meanwhile: this is the dirty line now
+                    } else if !isOccupied(li), waitingAt(li).first == i {
+                        // free again and first in line: step up to the door (going in is decided on arrival)
+                        s.stage = .walking; s.targetX = layout.lavatories[li].doorX
+                        passengers[i].stroll = s
+                        continue
+                    } else if let other = freeLavatory(aisle: home.aisle, near: s.x, except: li) {
+                        s.turn = false; s.purpose = .lavatory(other)
+                        s.targetX = layout.lavatories[other].doorX; s.stage = .walking
+                        passengers[i].stroll = s
+                        continue
+                    }
+                }
                 if s.waiting, case .lavatory(let li) = s.purpose {
                     if !isDirty(li) {
                         s.waiting = false; s.dwell = 0                          // cleaned: see below
@@ -1639,8 +1678,14 @@ final class FlightSimulation {
             .min { abs(layout.lavatories[$0].doorX - x) < abs(layout.lavatories[$1].doorX - x) }
     }
 
+    /// The nearest lavatory on this aisle that is clean and nobody is using, other than `except`.
+    private func freeLavatory(aisle: Int, near x: Double, except: Int? = nil) -> Int? {
+        layout.lavatories.indices.filter { $0 != except && layout.lavatories[$0].aisle == aisle && !isDirty($0) && !isOccupied($0) }
+            .min { abs(layout.lavatories[$0].doorX - x) < abs(layout.lavatories[$1].doorX - x) }
+    }
+
     /// A passenger heads for a dirty lavatory (and will join the line there).
-    private func startStroll(toLavatory li: Int) {
+    func startStroll(toLavatory li: Int) {
         let lav = layout.lavatories[li]
         let busy = Set(occurrences.filter { !$0.dead }.compactMap { $0.passenger })
         let candidates = passengers.indices.filter { i in
@@ -1727,7 +1772,7 @@ final class FlightSimulation {
                     if case .lavatory(let li) = s.purpose { leftLavatory(li) }
                     s.inLavatory = false; s.x = s.targetX
                 }
-                s.waiting = false
+                s.waiting = false; s.turn = false
                 s.stage = .returning; s.targetX = passengers[i].x; s.y = s.laneY
             case .returning, .sitting: break
             }

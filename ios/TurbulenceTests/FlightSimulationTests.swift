@@ -1049,6 +1049,31 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertGreaterThan(sim.lavatoryUses, usesBefore, "they use the clean one")
     }
 
+    func testALavatoryTakesOnePassengerAtATime() {
+        let sim = runningSim(plan: flight("TB105"))
+        step(sim, seconds: Tuning.boardingEnds + 0.5)
+        XCTAssertEqual(sim.layout.lavatories.count, 2)
+        sim.makeDirty(lavatory: 1)                             // the only other lavatory is dirty: nowhere else to go
+        sim.startStroll(toLavatory: 0)
+        sim.startStroll(toLavatory: 0)                         // two passengers head for the same free lavatory
+        let walkers = sim.passengers.indices.filter { sim.passengers[$0].stroll != nil }
+        XCTAssertEqual(walkers.count, 2)
+        var everInside = Set<Int>(), waited = false
+        for _ in 0..<1200 {                                    // two minutes in tenths of a second
+            step(sim, seconds: 0.1)
+            let inside = walkers.filter { i in
+                guard let s = sim.passengers[i].stroll, s.inLavatory, case .lavatory(0) = s.purpose else { return false }
+                return true
+            }
+            XCTAssertLessThanOrEqual(inside.count, 1, "the lavatory holds one passenger at a time")
+            everInside.formUnion(inside)
+            if walkers.contains(where: { sim.passengers[$0].stroll?.turn == true }) { waited = true }
+        }
+        XCTAssertTrue(waited, "the second passenger waits their turn at the door")
+        XCTAssertEqual(everInside.count, 2, "then goes in once the first comes out")
+        XCTAssertEqual(sim.stats.queueCost, 0, "waiting for a clean lavatory costs nothing")
+    }
+
     func testALineMovesToTheOtherLavatoryOnceItsClean() {
         let sim = runningSim(plan: flight("TB102"))
         sim.strollsEnabled = true

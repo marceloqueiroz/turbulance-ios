@@ -95,6 +95,8 @@ final class CabinScene: SKScene {
     private var stationNodes: [Int: SKSpriteNode] = [:]
     /// Trash bins whose flap is open, until this clock time (it swings shut a moment after the drop).
     private var trashOpenUntil: [Int: Double] = [:]
+    /// Painted open doors for the lavatories (hidden while shut: the closed door is in the cabin picture).
+    private var lavDoorNodes: [Int: SKSpriteNode] = [:]
     private var dustTimer = 0.0
     /// Jump seats as sprites, so they can fold away after Go on flights without turbulence.
     private var jumpSeatNodes: [SKSpriteNode] = []
@@ -516,6 +518,17 @@ final class CabinScene: SKScene {
             world.addChild(g)
             return g
         }
+        lavDoorNodes.values.forEach { $0.removeFromParent() }
+        lavDoorNodes.removeAll()
+        for (li, lav) in layout.lavatories.enumerated() {
+            guard let art = skin?.lavatory(above: lav.above) else { continue }
+            let r = art.doorRect
+            let n = SKSpriteNode(texture: art.openDoor, size: r.size)
+            n.anchorPoint = CGPoint(x: 0, y: 1)
+            n.position = pt(layout.aftX + Double(r.minX), Double(r.minY))
+            n.zPosition = 0.06; n.isHidden = true
+            world.addChild(n); lavDoorNodes[li] = n
+        }
         lavSigns.forEach { $0.removeFromParent() }
         lavSigns = layout.lavatories.map { lav in
             let sign = SKShapeNode(rect: CGRect(x: -9, y: -3.5, width: 18, height: 7), cornerRadius: 3.5)
@@ -645,7 +658,16 @@ final class CabinScene: SKScene {
         let calling = Set(sim.occurrences.compactMap { $0.kind == .call && !$0.dead && !$0.failed ? $0.passenger : nil })
         for (i, p) in sim.passengers.enumerated() where i < paxNodes.count {
             let n = paxNodes[i]
-            n.position = pt(p.drawX, p.drawY)
+            // inside an open-top lavatory: seated on its toilet, turned to face the way it faces
+            var onToilet: CGFloat?
+            if let s = p.stroll, s.inLavatory, case .lavatory(let li) = s.purpose, li < sim.layout.lavatories.count,
+               let art = skin?.lavatory(above: sim.layout.lavatories[li].above) {
+                onToilet = art.facing
+                n.position = pt(sim.layout.aftX + Double(art.toilet.x), Double(art.toilet.y))
+            } else {
+                n.position = pt(p.drawX, p.drawY)
+            }
+            n.onToilet = onToilet
             n.zPosition = p.stroll != nil ? 3 : 0
             n.sync(p, calling: calling.contains(i), clock: clock, dt: dt, turbulence: turbulence)
         }
@@ -758,6 +780,19 @@ final class CabinScene: SKScene {
                 return true
             }
             (sign.childNode(withName: "lamp") as? SKShapeNode)?.fillColor = taken ? Palette.critical : UIColor(hex: 0x6FD08C)
+        }
+        // a lavatory door stands open while someone steps in or out, or while the attendant cleans it
+        for (li, door) in lavDoorNodes where li < sim.layout.lavatories.count {
+            let lav = sim.layout.lavatories[li]
+            let passing = sim.passengers.contains { p in
+                guard let s = p.stroll, !s.inLavatory, !s.waiting, case .lavatory(li) = s.purpose else { return false }
+                return abs(s.x - lav.doorX) < 14 && (s.stage == .walking || s.stage == .returning || s.stage == .dwelling)
+            }
+            let cleaning = sim.crews.contains { c in
+                guard case .apply(let id)? = c.busy?.task, let o = sim.occurrences.first(where: { $0.id == id }) else { return false }
+                return o.kind == .dirtyLav && o.lavatory == li
+            }
+            door.isHidden = !(passing || cleaning)
         }
         if let skin, let open = skin.trashOpen, let shut = skin.station(.trash, machine: nil) {
             for c in sim.crews {
@@ -1167,6 +1202,8 @@ final class PaxNode: SKNode {
     private var walkFacing = AttendantArt.Facing.side
     private var walkDistance = 0.0
     private var lastPos: (x: Double, y: Double)?
+    /// Set by the scene: seated on a lavatory toilet, turned this much (the painted seated picture faces the nose).
+    var onToilet: CGFloat?
     private var shownSick = false
     private var visible: CGFloat = 1
 
@@ -1219,7 +1256,7 @@ final class PaxNode: SKNode {
     func sync(_ p: Passenger, calling: Bool, clock: Double, dt: Double, turbulence: Double) {
         // walking: the painted cycle, facing the way they move (side along the aisle, front going down, back going up)
         var walkTex: SKTexture?
-        if p.stroll != nil {
+        if p.stroll != nil && onToilet == nil {
             if let l = lastPos {
                 let dx = p.drawX - l.x, dy = p.drawY - l.y, d = hypot(dx, dy)
                 if d > 0.01 { walkFacing = abs(dy) > abs(dx) ? (dy > 0 ? .front : .back) : .side; walkDistance += d }
@@ -1230,7 +1267,13 @@ final class PaxNode: SKNode {
             }
         }
         lastPos = (p.drawX, p.drawY)
-        if let walkTex {
+        body.zRotation = onToilet ?? 0
+        if let painted, onToilet != nil {
+            if body.texture !== painted.seated {
+                body.texture = painted.seated; body.size = PassengerArt.size; body.anchorPoint = CGPoint(x: 0.5, y: 0.5)
+            }
+            body.colorBlendFactor = 0
+        } else if let walkTex {
             if body.texture !== walkTex {
                 body.texture = walkTex; body.size = AttendantArt.frameSize; body.anchorPoint = AttendantArt.anchor
             }
@@ -1260,7 +1303,9 @@ final class PaxNode: SKNode {
         if archetype == .nervous && !p.grumpy && !p.asleep { dx += sin(t * 23) * 0.6 }
         if p.sick { dx += sin(t * 9) * 0.9 }
         if turbulence > 0 { dx += sin(t * 31) * 1.6 * turbulence; dy += sin(t * 27 + 1) * 1.2 * turbulence }
-        if let s = p.stroll {
+        if onToilet != nil {
+            flip.xScale = 1
+        } else if let s = p.stroll {
             if walkTex != nil {
                 flip.xScale = walkFacing == .side && s.face < 0 ? -1 : 1      // painted side frames face right
                 dy -= 20                                                     // feet on the walking line, like the crew
@@ -1274,7 +1319,7 @@ final class PaxNode: SKNode {
         flip.yScale = mirrored && p.stroll == nil && painted != nil ? -1 : 1
         body.position = CGPoint(x: dx, y: dy)
 
-        let want: CGFloat = (p.stroll?.inLavatory ?? false) ? 0 : 1
+        let want: CGFloat = (p.stroll?.inLavatory ?? false) && onToilet == nil ? 0 : 1
         visible += (want - visible) * CGFloat(min(1, dt * 8))
         alpha = visible
     }
