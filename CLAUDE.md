@@ -71,8 +71,16 @@ The Options screen has a DEBUG-only Developer section (skip the intro, make a De
   approved character image as a reference to keep characters consistent.
 - Character animations: use the `animate-sprite` skill (head-locked pose guides → Gemini → clean-up →
   `ios/tools/sprite_atlas.py` into an atlas). Side views face right; left is mirrored in code.
-- Done so far: attendant walk / carry / idle (side, front, back); seated passengers in the Comet cabin;
-  walks for the father, business, nervous and sleeper passengers; second crew member is a recolour.
+- Done so far:
+  - Attendant: walk / carry / idle (side, front, back) and a cleaning loop (side view, any clean step).
+  - Passengers: seated (relaxed and calling; about half drawn mirrored for variety) and walks in all three
+    facings for the five core archetypes (the father walks without his toddler).
+  - Comet cabin set: base picture, galley fittings, machine states (idle / working / ready / cold), trash bin
+    with an opening flap; the attendant stands in front of a wall bin's flap (`CabinLayout.standX`).
+  - The second attendant (plum) and the trainee (navy) are shader recolours of the attendant.
+  - No animations at the galley stations: a stop there lasts `Tuning.pickDuration` (0.25 s), too short to read.
+- Generated sheets: run `cut_sheet.py` then `align_strip.py`; use `lock_head.py` when the head, collar or
+  scarf flickers between frames. Check finished strips for sliced hands at the frame edge.
 - Work in the scratchpad; copy only finals into `branding/` and atlases into the app.
 
 ## Current game rules worth knowing
