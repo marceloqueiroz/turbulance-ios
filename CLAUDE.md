@@ -41,6 +41,7 @@ Code comments cite GDD sections (e.g. `GDD §5a`); keep doing that.
 - `ios/tools/` — asset pipeline scripts (`sprite_atlas.py`, character rig/segmentation, map cutouts, icon tools).
 - `branding/` — key art, logos, icon sources, map art, sprite style work and character art
   (`branding/sprites/characters/`). `animation-tests/` is git-ignored.
+- `specs/` — one dated spec per plan (see "Plans become specs").
 - `prototype/index.html` — the original web prototype; frozen reference, don't extend it.
 - `.claude/skills/animate-sprite/` — project skill for making 24-frame character animations with Gemini.
 
@@ -97,6 +98,20 @@ The Options screen has a DEBUG-only Developer section (skip the intro, make a De
 - The user often edits in the same working tree at the same time: never `git stash`, never reset their changes.
   To preview a change, apply it, render (e.g. a temporary XCTest that writes `Art.cabin` to a PNG in the
   scratchpad), then restore only the files you touched.
-- Commit only when asked. Commit messages are short, plain-English summaries of what changed in the game
+- Commit only when asked (specs below are the exception). Commit messages are short, plain-English summaries of what changed in the game
   (see `git log`).
 - Never commit `.env` or anything in it (Gemini key, App Store Connect key).
+
+## Plans become specs
+
+Every time the user asks for a plan (plan mode, "plan this", "how would you do X"), write it up as a spec and
+commit it to the repo. No need to ask first.
+
+- File: `specs/YYYY-MM-DD-short-slug.md` (today's date, kebab-case topic). Create `specs/` if it's missing.
+- Contents: **Goal** (what changes for the player, one paragraph) · **Source** (doc sections it implements,
+  e.g. `GDD §5a`, with links) · **Design** (rules, tuning numbers, what's out of scope) · **Changes** (files
+  and types touched) · **Testing** (tests to add/update, Bot or simulator checks) · **Open questions**.
+- Commit only the spec file (`git add specs/<file>` then `git commit`), never other changes in the tree.
+  Message: `Spec: <topic>`.
+- If the plan changes after review or during implementation, update the spec and commit again, so the spec
+  in the repo always matches what was built. When the work lands, set a `Status: done` line at the top.
