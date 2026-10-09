@@ -41,6 +41,7 @@ Code comments cite GDD sections (e.g. `GDD §5a`); keep doing that.
 - `ios/tools/` — asset pipeline scripts (`sprite_atlas.py`, character rig/segmentation, map cutouts, icon tools).
 - `branding/` — key art, logos, icon sources, map art, sprite style work and character art
   (`branding/sprites/characters/`). `animation-tests/` is git-ignored.
+- `specs/` — feature specs, one folder each (`spec.md` + its images), e.g. `specs/galley-main-menu/`.
 - `prototype/index.html` — the original web prototype; frozen reference, don't extend it.
 - `.claude/skills/animate-sprite/` — project skill for making 24-frame character animations with Gemini.
 
