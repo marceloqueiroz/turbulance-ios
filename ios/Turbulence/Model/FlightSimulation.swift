@@ -75,6 +75,8 @@ enum Tuning {
     static let turbulenceFuseRate = 0.5         // everyone's strapped in: problems escalate at half speed
     static let buckleDuration = 0.5
     static let unbuckleDuration = 0.3
+    /// How far out from a jump seat, along the aisle, the crew stands to get in or out of it.
+    static let jumpSeatStep = 24.0
     static let crewKnockdown = 1.5
     static let crewStumbleEvery = 3.0
     static let turbulenceCrewFactor = 0.6
@@ -86,6 +88,8 @@ enum Tuning {
     static let maxStrollers = 2
     static let paxWalkSpeed = 55.0
     static let paxStepSpeed = 50.0
+    /// How far along the aisle a seatmate stands to let someone out of (or into) the row; one more step per seat in.
+    static let stepAsideGap = 28.0
     static let hurryFactor = 1.6
     static let chatDwell = 4.0...7.0
     static let lavDwell = 4.0...6.0
@@ -192,7 +196,9 @@ struct TurbulenceBump: Equatable {
 
 enum Turbulence: Equatable { case none, warning, active(intensity: Double) }
 
-enum StrollPurpose: Equatable { case chat(partner: Int), lavatory(Int) }
+/// Why a passenger is out of their seat: to chat, to use a lavatory, or standing in the aisle to let a seatmate further
+/// in get out or back in (GDD §4).
+enum StrollPurpose: Equatable { case chat(partner: Int), lavatory(Int), makeWay(for: Int) }
 enum StrollStage: Equatable { case leaving, walking, dwelling, returning, sitting }
 
 /// A passenger out of their seat. Position is in world units; y is their lane in the aisle.
@@ -213,8 +219,12 @@ struct Stroll: Equatable {
     var face = -1.0
     /// Spills this walker has already slipped on (once each).
     var slippedOn: Set<Int> = []
-    /// Standing in the aisle (slows the crew a little, stumbles in turbulence).
-    var inAisle: Bool { stage == .walking || stage == .returning || (stage == .dwelling && !inLavatory) }
+    /// Standing in the aisle (slows the crew a little, stumbles in turbulence). A seatmate letting someone by only takes
+    /// a step out of their row, tucked in against the seats, and keeps out of the crew's way.
+    var inAisle: Bool {
+        if case .makeWay = purpose { return false }
+        return stage == .walking || stage == .returning || (stage == .dwelling && !inLavatory)
+    }
 }
 
 enum Archetype: CaseIterable { case business, family, nervous, sleeper, chatterbox }
@@ -445,7 +455,6 @@ enum SimEvent: Equatable {
     case fell(x: Double, y: Double)
     case rush
     case newStations([Int])
-    case jumpSeatsAway                     // no turbulence on this flight: the seats fold away after Go
     case wrongItem(x: Double, y: Double)
     case paxSlipped(x: Double, y: Double)
     case queueCost(x: Double, y: Double)   // one point lost to the line at a dirty lavatory
@@ -574,7 +583,14 @@ final class FlightSimulation {
     var liveOccurrences: [Occurrence] { occurrences.filter { !$0.dead } }
     var seatbeltOn: Bool { turbulence != .none }
     var turbulenceIntensity: Double { if case .active(let i) = turbulence { return i }; return 0 }
-    var strollerCount: Int { passengers.filter { $0.stroll != nil }.count }
+    /// Passengers out for a walk (not counting seatmates standing aside to let one of them by).
+    var strollerCount: Int {
+        passengers.filter { p in
+            guard let s = p.stroll else { return false }
+            if case .makeWay = s.purpose { return false }
+            return true
+        }.count
+    }
     var vipIndex: Int? { passengers.firstIndex { $0.vip } }
 
     /// Whether this flight's bonus goal was met (GDD §6a). Evaluated after landing.
@@ -600,7 +616,6 @@ final class FlightSimulation {
     func start() {
         running = true
         if !freshStations.isEmpty { events.append(.newStations(freshStations)) }
-        if !jumpSeatsInPlay { events.append(.jumpSeatsAway) }
         emitToast("Boarding. Tap the aisle to walk. Your tray carries two things at once.")
         if plan.twist == .boardingRush {
             spawn(.carryOn)                          // the rest follow one at a time while boarding
@@ -663,7 +678,7 @@ final class FlightSimulation {
     private func autoBuckle() {
         guard crew.seated == nil, let j = nearestJumpSeat() else { return }
         let js = layout.jumpSeats[j]
-        let t = CrewTarget(x: js.x, aisle: js.aisle, action: .jumpSeat(j))
+        let t = CrewTarget(x: standX(atJumpSeat: js), aisle: js.aisle, action: .jumpSeat(j))
         if crew.busy != nil { crew.queued = t } else { crew.target = t }
     }
 
@@ -1508,7 +1523,7 @@ final class FlightSimulation {
         if phase == .cruise && !seatbeltOn {
             let chance = Tuning.dozeChancePerSecond * (plan.twist == .redEye ? 3 : 1)
             for i in passengers.indices where !passengers[i].asleep && passengers[i].stroll == nil && !passengers[i].vip
-                && !passengers[i].sick && !passengers[i].grumpy && random() < chance * dt {
+                && !passengers[i].sick && !passengers[i].grumpy && random() < chance * dt && !innerSeatmateOut(i) {
                 passengers[i].asleep = true
             }
         }
@@ -1559,7 +1574,14 @@ final class FlightSimulation {
             let home = passengers[i]
             switch s.stage {
             case .leaving:
-                if approach(&s.y, s.laneY, Tuning.paxStepSpeed * hurry * dt) { s.stage = .walking }
+                if case .makeWay = s.purpose {
+                    // a seatmate stepping out: out into the aisle and along it, toward the side they'll stand on
+                    _ = approach(&s.x, s.targetX, Tuning.paxStepSpeed * 0.5 * hurry * dt)
+                    if approach(&s.y, s.laneY, Tuning.paxStepSpeed * hurry * dt) { s.stage = .walking }
+                } else if rowClear(for: i, aside: -s.face) {
+                    // the seatmates in the way stand on the far side from where this passenger is heading
+                    if approach(&s.y, s.laneY, Tuning.paxStepSpeed * hurry * dt) { s.stage = .walking }
+                }
             case .walking, .returning:
                 let d = s.targetX - s.x
                 if d != 0 { s.face = d < 0 ? -1 : 1 }
@@ -1603,10 +1625,18 @@ final class FlightSimulation {
                         case .chat(let partner):
                             s.dwell = random(in: Tuning.chatDwell)
                             s.face = passengers[partner].x < s.x ? -1 : 1
+                        case .makeWay:
+                            s.dwell = .infinity                              // until the seatmate is by (below)
                         }
                     }
                 }
             case .dwelling:
+                if case .makeWay(let w) = s.purpose {
+                    // back to their seat once the seatmate is by, after anyone further in who stood up too
+                    if hasPassed(w, row: home) && !innerSeatmatesStanding(i) { s.stage = .returning; s.targetX = home.x }
+                    passengers[i].stroll = s
+                    continue
+                }
                 if s.turn, case .lavatory(let li) = s.purpose {
                     if isDirty(li) {
                         s.turn = false; s.waiting = true                      // it got dirty meanwhile: this is the dirty line now
@@ -1651,6 +1681,8 @@ final class FlightSimulation {
                     }
                 }
             case .sitting:
+                // seatmates in the way step out first (ahead of where this passenger came from), unless they never left
+                if abs(s.y - home.y) > 0.5, !rowClear(for: i, aside: s.face) { break }
                 if approach(&s.y, home.y, Tuning.paxStepSpeed * hurry * dt) { passengers[i].stroll = nil; continue }
             }
             passengers[i].stroll = s
@@ -1691,6 +1723,7 @@ final class FlightSimulation {
         let candidates = passengers.indices.filter { i in
             let p = passengers[i]
             return p.aisle == lav.aisle && p.stroll == nil && !p.sick && !p.asleep && !p.hasKid && !p.vip && !busy.contains(i)
+                && canGetOut(i, busy: busy)
         }
         guard !candidates.isEmpty else { return }
         let i = candidates.min { abs(passengers[$0].x - lav.doorX) + random() * 300 < abs(passengers[$1].x - lav.doorX) + random() * 300 }!
@@ -1719,6 +1752,7 @@ final class FlightSimulation {
             let p = passengers[i]
             return p.stroll == nil && !p.sick && !p.grumpy && !p.asleep && !p.hasKid && !p.vip
                 && !busy.contains(i) && !crews.contains { p.aisle == $0.aisle && abs(p.x - $0.x) < 40 }
+                && canGetOut(i, busy: busy)
         }
         guard !candidates.isEmpty else { return }
         let i = candidates[pickWeighted(candidates.map { passengers[$0].archetype == .chatterbox ? 2.5 : 1 })]
@@ -1753,6 +1787,81 @@ final class FlightSimulation {
                                       face: targetX < p.x ? -1 : 1)
     }
 
+    // MARK: Getting past seatmates (GDD §4): whoever sits nearer the aisle steps out to let a passenger by
+
+    /// The same row, served from the same aisle and on the same side of it.
+    private func seatmates(_ p: Passenger, _ q: Passenger) -> Bool {
+        let aisleY = layout.aisles[p.aisle]
+        return q.row == p.row && q.aisle == p.aisle && (q.y < aisleY) == (p.y < aisleY)
+    }
+
+    /// Seatmates between this passenger and the aisle.
+    func rowBlockers(_ i: Int) -> [Int] {
+        let p = passengers[i]
+        return passengers.indices.filter { seatmates(p, passengers[$0]) && passengers[$0].reach < p.reach }
+    }
+
+    /// Everyone between this passenger and the aisle is out already, or could step out for them now.
+    private func canGetOut(_ i: Int, busy: Set<Int>) -> Bool {
+        rowBlockers(i).allSatisfy { j in
+            let q = passengers[j]
+            return q.stroll != nil || (!q.asleep && !q.hasKid && !q.sick && !busy.contains(j))
+        }
+    }
+
+    /// Whether the way between this passenger's seat and the aisle is free. Seated seatmates in the way are asked to
+    /// step out and stand `aside` (−1 toward the nose, 1 toward the tail); false until they're standing there.
+    private func rowClear(for i: Int, aside: Double) -> Bool {
+        var clear = true
+        for j in rowBlockers(i) {
+            guard let s = passengers[j].stroll else {
+                if passengers[j].asleep || passengers[j].hasKid { continue }    // can't get up: squeeze past them
+                stepOut(j, for: i, aside: aside)
+                clear = false
+                continue
+            }
+            switch s.stage {
+            case .leaving, .sitting: clear = false                              // still in the row
+            case .walking, .returning: if case .makeWay = s.purpose { clear = false }   // not aside yet
+            case .dwelling: break
+            }
+        }
+        return clear
+    }
+
+    /// A seatmate gets up and stands in the aisle, a step `aside` (further for seats further in), to let `i` by.
+    private func stepOut(_ j: Int, for i: Int, aside: Double) {
+        let q = passengers[j]
+        let aisleY = layout.aisles[q.aisle]
+        let lane = aisleY + (q.y < aisleY ? -9 : 9)
+        let x = q.x + aside * Tuning.stepAsideGap * Double(1 + q.reach)
+        passengers[j].stroll = Stroll(purpose: .makeWay(for: i), stage: .leaving, x: q.x, y: q.y, targetX: x, laneY: lane, face: aside)
+    }
+
+    /// Passenger `w` is back in their seat, or out of the row and clear of it.
+    private func hasPassed(_ w: Int, row home: Passenger) -> Bool {
+        guard let s = passengers[w].stroll else { return true }
+        switch s.stage {
+        case .leaving, .sitting: return false
+        default: return abs(s.x - home.x) > Tuning.stepAsideGap
+        }
+    }
+
+    /// Someone further in this row stood up to let a passenger by and isn't back in their seat yet: they go in first.
+    private func innerSeatmatesStanding(_ i: Int) -> Bool {
+        let p = passengers[i]
+        return passengers.contains { q in
+            guard seatmates(p, q), q.reach > p.reach, let s = q.stroll, case .makeWay = s.purpose else { return false }
+            return true
+        }
+    }
+
+    /// Someone further in this row is out of their seat: this passenger stays awake to let them back in.
+    private func innerSeatmateOut(_ i: Int) -> Bool {
+        let p = passengers[i]
+        return passengers.contains { seatmates(p, $0) && $0.reach > p.reach && $0.stroll != nil }
+    }
+
     /// A passenger has just come out of a lavatory: every couple of visits it's left dirty (GDD §5a).
     private func leftLavatory(_ li: Int) {
         lavUsesSinceClean[li, default: 0] += 1
@@ -1765,6 +1874,7 @@ final class FlightSimulation {
     private func sendStrollersBack() {
         for i in passengers.indices {
             guard var s = passengers[i].stroll else { continue }
+            if case .makeWay = s.purpose { continue }        // standing aside: back in once their seatmate is by
             switch s.stage {
             case .leaving: s.stage = .sitting
             case .walking, .dwelling:
@@ -1869,6 +1979,8 @@ final class FlightSimulation {
     }
 
     func jumpSeatY(_ j: JumpSeat) -> Double { layout.aisles[j.aisle] - 30 }
+    /// Where on the aisle the crew stands to get into or out of a jump seat: a step out from it, into the cabin.
+    func standX(atJumpSeat j: JumpSeat) -> Double { j.x + (j.x > layout.aftX ? -1 : 1) * Tuning.jumpSeatStep }
 
     func nearestJumpSeat() -> Int? {
         layout.jumpSeats.indices.min { a, b in
@@ -1900,7 +2012,7 @@ final class FlightSimulation {
 
     func target(forTapAt x: Double, _ y: Double) -> CrewTarget {
         for (i, j) in layout.jumpSeats.enumerated() where jumpSeatsInPlay && abs(x - j.x) < 22 && abs(y - jumpSeatY(j)) < 18 {
-            return CrewTarget(x: j.x, aisle: j.aisle, action: .jumpSeat(i))
+            return CrewTarget(x: standX(atJumpSeat: j), aisle: j.aisle, action: .jumpSeat(i))
         }
         // a request bubble counts as its passenger's seat (the nearest one, if bubbles overlap)
         let bubbles = occurrences.filter { $0.kind.atSeat && !$0.dead && $0.passenger != nil && !isBehindCurtain($0) }
@@ -2214,7 +2326,7 @@ final class FlightSimulation {
         for k in crews.indices {
             guard let i = layout.jumpSeats.indices.first(where: { layout.jumpSeats[$0].aisle == homeAisle(k) }) else { continue }
             let j = layout.jumpSeats[i]
-            crews[k].x = j.x; crews[k].aisle = j.aisle; crews[k].y = layout.aisles[j.aisle]
+            crews[k].x = standX(atJumpSeat: j); crews[k].aisle = j.aisle; crews[k].y = layout.aisles[j.aisle]
             crews[k].seated = i
             crews[k].face = 1
         }
@@ -2228,6 +2340,15 @@ final class FlightSimulation {
         let li = layout.lavatories.indices.last ?? 0
         passengers[i].stroll = Stroll(purpose: .lavatory(li), stage: .walking, x: x, y: lane,
                                       targetX: layout.lavatories.last?.doorX ?? x, laneY: lane, face: 1)
+    }
+
+    /// Sends one passenger from their seat to a lavatory (tests).
+    func sendToLavatory(passenger i: Int, _ li: Int) {
+        let p = passengers[i], door = layout.lavatories[li].doorX
+        let aisleY = layout.aisles[p.aisle]
+        let lane = aisleY + (p.y < aisleY ? -9 : 9)
+        passengers[i].stroll = Stroll(purpose: .lavatory(li), stage: .leaving, x: p.x, y: p.y, targetX: door, laneY: lane,
+                                      face: door < p.x ? -1 : 1)
     }
 
     func setAsleep(_ i: Int, _ asleep: Bool) { passengers[i].asleep = asleep }

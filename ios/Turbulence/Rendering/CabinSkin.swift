@@ -32,13 +32,14 @@ struct CabinSkin {
                              baseRect: CGRect(x: 264 / 7.96, y: 18, width: 6336 / 7.96, height: 336),
                              parts: SKTextureAtlas(named: "CabinComet"),
                              // the bottom row (oven, snack, toy) sits 36 apart, so those fittings are kept to ~36 wide
-                             widths: ["drinks": 52, "coffee": 34, "oven": 36, "snack": 33, "toy": 35, "trash": 30, "crewseat": 33])
+                             widths: ["drinks": 52, "coffee": 34, "oven": 36, "snack": 33, "toy": 35, "trash": 30, "jumpseat": 39])
         default:
             return nil
         }
     }
 
-    /// Every fitting picture has a 6 px margin; the body (the machine without added steam or handles) starts at its top-left.
+    /// Every fitting picture has a 6 px margin; the body (the machine without added steam or handles) starts at its
+    /// top-left, unless `bodyTop` says it sits lower to leave room for something above it.
     private static let margin: CGFloat = 6
 
     /// The sprite for a station: texture, size in world units and the anchor that puts the body's centre on the station.
@@ -85,18 +86,43 @@ struct CabinSkin {
     /// A trash bin with its flap pushed open (shown while someone drops something in).
     var trashOpen: (texture: SKTexture, size: CGSize, anchor: CGPoint)? { sprite("trash-open", width: widths["trash"] ?? 30) }
 
-    /// The crew's fold-down seat by the end walls.
-    var crewSeat: (texture: SKTexture, size: CGSize, anchor: CGPoint)? { sprite("crewseat", width: widths["crewseat"] ?? 33) }
+    /// The crew's fold-down jump seat on an end wall (GDD §5b): stowed flat against the wall, or folded down to sit on.
+    /// Both pictures share one canvas with the wall along their left edge, so the seat doesn't move as it folds.
+    /// 39 wide (wall plate to cushion edge) so it matches the seat in the attendant's seated picture.
+    func jumpSeat(down: Bool) -> (texture: SKTexture, size: CGSize, anchor: CGPoint)? {
+        let name = down ? "jumpseat-down" : "jumpseat-up"
+        guard var s = sprite(name, width: widths["jumpseat"] ?? 39), let px = textures[name]?.size() else { return nil }
+        let k = s.size.width / px.width                   // world units per picture pixel
+        s.anchor.x = (Self.margin + Self.jumpSeatWallInset / k) / px.width   // the wall plate on the wall
+        return s
+    }
+
+    /// How far the layout's jump seat point sits out from its end wall (CabinLayout: 72 against the nose wall at 57).
+    /// The pictures hang their wall plate there, whatever size they're drawn.
+    static let jumpSeatWallInset: CGFloat = 15
+
+    /// The attendant buckled into a folded-down jump seat (the countdown, turbulence), seen from above like the cabin
+    /// and the seated passengers. Her seat (wall plate to cushion edge, 834 px) is drawn as wide as the empty jump seat,
+    /// and the wall plate hangs on the wall like the empty seat's.
+    /// Source: branding/sprites/cabin/comet/jumpseat-crew-source.png.
+    var crewInJumpSeat: (texture: SKTexture, size: CGSize, anchor: CGPoint)? {
+        guard let t = textures["jumpseat-crew"] else { return nil }
+        let px = t.size()
+        let k = (widths["jumpseat"] ?? 39) / 834          // world units per picture pixel
+        let anchor = CGPoint(x: (Self.margin + Self.jumpSeatWallInset / k) / px.width, y: 0.5)
+        return (t, CGSize(width: px.width * k, height: px.height * k), anchor)
+    }
 
     private func sprite(_ name: String, width: CGFloat) -> (texture: SKTexture, size: CGSize, anchor: CGPoint)? {
         guard let t = textures[name] else { return nil }
         let px = t.size()
         let m = Self.margin
         let bodyW = px.width - 2 * m
-        let bodyH = min(px.height - 2 * m, bodyW * Self.aspect(name))
+        let top = m + Self.bodyTop(name) * px.height
+        let bodyH = min(px.height - top - m, bodyW * Self.aspect(name))
         let k = width / bodyW
         // anchor: the body's centre, measured from the picture's bottom-left
-        let anchor = CGPoint(x: 0.5, y: 1 - (m + bodyH / 2) / px.height)
+        let anchor = CGPoint(x: 0.5, y: 1 - (top + bodyH / 2) / px.height)
         return (t, CGSize(width: px.width * k, height: px.height * k), anchor)
     }
 
@@ -106,6 +132,12 @@ struct CabinSkin {
         case "oven": return 520.0 / 468.0
         default: return 10                        // the body fills the canvas height
         }
+    }
+
+    /// How far below the margin the body starts, as a share of the canvas height: the ready oven's steam rises
+    /// above it (113 of 700 px), so every oven state keeps its body in the same place.
+    private static func bodyTop(_ name: String) -> CGFloat {
+        name == "oven-ready" ? 113.0 / 700.0 : 0
     }
 }
 
@@ -145,7 +177,11 @@ enum PassengerArt {
         }
     }
 
-    // MARK: Walk cycles (24 frames per facing; side faces right and is mirrored for left), same frame size as the attendant's
+    // MARK: Walk cycles (24 frames per facing; side faces right and is mirrored for left), drawn on the attendant's frame
+
+    /// The walk frames are painted at the attendant's size, and a passenger on their feet stands as tall as she does.
+    static let walkScale: CGFloat = 1
+    static var walkSize: CGSize { CGSize(width: AttendantArt.frameSize.width * walkScale, height: AttendantArt.frameSize.height * walkScale) }
 
     private static let walkAtlas = SKTextureAtlas(named: "PassengerWalk")
     private static var walkCache: [String: [SKTexture]] = [:]

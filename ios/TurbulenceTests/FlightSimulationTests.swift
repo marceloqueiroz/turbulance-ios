@@ -1043,10 +1043,45 @@ final class FlightSimulationTests: XCTestCase {
         XCTAssertEqual(sim.layout.lavatories.count, 2)
         sim.makeDirty(lavatory: 0)
         let usesBefore = sim.lavatoryUses
-        step(sim, seconds: 45)
-        XCTAssertEqual(sim.lavQueue(0), 0, "nobody lines up while the other lavatory is clean")
+        for _ in 0..<450 {                                     // 45 s, until the other one gets dirty too
+            step(sim, seconds: 0.1)
+            if sim.isDirty(1) { break }
+            XCTAssertEqual(sim.lavQueue(0), 0, "nobody lines up while the other lavatory is clean")
+        }
         XCTAssertEqual(sim.stats.queueCost, 0)
         XCTAssertGreaterThan(sim.lavatoryUses, usesBefore, "they use the clean one")
+    }
+
+    /// Nobody climbs over a seatmate (GDD §4): the aisle-seat passenger steps out, waits aside, and sits back down after.
+    func testSeatmateStepsOutToLetAWindowPassengerByAndBackIn() {
+        let sim = runningSim(plan: flight("TB105"))
+        step(sim, seconds: Tuning.boardingEnds + 0.5)
+        let busy = Set(sim.occurrences.filter { !$0.dead }.compactMap { $0.passenger })
+        guard let w = sim.passengers.indices.first(where: { i in
+            let p = sim.passengers[i]
+            let mates = sim.rowBlockers(i)
+            return p.reach == 1 && p.stroll == nil && !busy.contains(i) && mates.count == 1 && mates.allSatisfy { j in
+                let q = sim.passengers[j]
+                return q.stroll == nil && !q.asleep && !q.hasKid && !q.sick && !busy.contains(j)
+            }
+        }) else { return XCTFail("a window passenger with someone in the aisle seat") }
+        let a = sim.rowBlockers(w)[0]
+        sim.sendToLavatory(passenger: w, 0)
+        var steppedOut = false, wasOut = false, aSatAfter = false
+        for _ in 0..<900 {                                     // 90 s in tenths
+            step(sim, seconds: 0.1)
+            let ws = sim.passengers[w].stroll, asr = sim.passengers[a].stroll
+            if case .makeWay(for: w)? = asr?.purpose { steppedOut = true }
+            if let ws, abs(ws.y - sim.passengers[w].y) > 0.5, ws.stage == .leaving || ws.stage == .sitting {
+                XCTAssertNotNil(asr, "the aisle seat is empty while the window passenger passes through it")
+            }
+            if ws != nil { wasOut = true }
+            if wasOut && ws == nil {
+                if asr == nil { aSatAfter = true; break }
+            }
+        }
+        XCTAssertTrue(steppedOut, "the aisle-seat passenger stepped out")
+        XCTAssertTrue(aSatAfter, "both are seated again, the aisle one last")
     }
 
     func testALavatoryTakesOnePassengerAtATime() {
@@ -1054,9 +1089,11 @@ final class FlightSimulationTests: XCTestCase {
         step(sim, seconds: Tuning.boardingEnds + 0.5)
         XCTAssertEqual(sim.layout.lavatories.count, 2)
         sim.makeDirty(lavatory: 1)                             // the only other lavatory is dirty: nowhere else to go
-        sim.startStroll(toLavatory: 0)
-        sim.startStroll(toLavatory: 0)                         // two passengers head for the same free lavatory
-        let walkers = sim.passengers.indices.filter { sim.passengers[$0].stroll != nil }
+        // two aisle-seat passengers near the back head for the same free lavatory
+        let door = sim.layout.lavatories[0].doorX
+        let walkers = Array(sim.passengers.indices.filter { sim.passengers[$0].reach == 0 && sim.passengers[$0].stroll == nil }
+            .sorted { abs(sim.passengers[$0].x - door) < abs(sim.passengers[$1].x - door) }.prefix(2))
+        walkers.forEach { sim.sendToLavatory(passenger: $0, 0) }
         XCTAssertEqual(walkers.count, 2)
         var everInside = Set<Int>(), waited = false
         for _ in 0..<1200 {                                    // two minutes in tenths of a second
@@ -1210,16 +1247,28 @@ final class FlightSimulationTests: XCTestCase {
 
     // MARK: Route 1 flight checklist (GDD §9a): each flight shows only what it uses
 
-    func testFirstFlightHasNoTrashLavatoriesOrJumpSeatsInPlay() {
+    func testFirstFlightHasNoTrashOrJumpSeatsInPlay() {
         let sim = FlightSimulation(plan: flight("TB101"), seed: 1)
         XCTAssertFalse(sim.layout.bins.contains { $0.kind == .trash }, "nothing to bin yet")
-        XCTAssertTrue(sim.layout.lavatories.isEmpty, "nobody walks to the loo yet")
-        XCTAssertFalse(sim.layout.blocks.contains { $0.kind == .lavatory }, "drawn as plain closets")
+        XCTAssertFalse(sim.layout.lavatories.isEmpty, "the lavatories are there, nobody uses them yet")
         XCTAssertFalse(sim.jumpSeatsInPlay, "no turbulence")
         sim.start()
-        XCTAssertTrue(sim.drainEvents().contains(.jumpSeatsAway), "the take-off seat folds away after Go")
         let j = sim.layout.jumpSeats[0]
         XCTAssertNotEqual(sim.target(forTapAt: j.x, sim.jumpSeatY(j)).action, .jumpSeat(0), "not tappable in play")
+    }
+
+    /// The same aircraft has the same cabin on every flight; only the galley stations vary (GDD §6a).
+    func testEveryFlightOfAnAircraftHasTheSameCabin() {
+        for route in Campaign.routes {
+            for f in route.flights {
+                let last = route.flights.last { $0.aircraft == f.aircraft }!
+                let a = FlightSimulation(plan: f, seed: 1).layout, b = FlightSimulation(plan: last, seed: 1).layout
+                XCTAssertEqual(a.width, b.width, "\(f.id) cabin length")
+                XCTAssertEqual(a.blocks, b.blocks, "\(f.id) fixtures")
+                XCTAssertEqual(a.lavatories, b.lavatories, "\(f.id) lavatories")
+                XCTAssertEqual(a.jumpSeats, b.jumpSeats, "\(f.id) jump seats")
+            }
+        }
     }
 
     func testFixturesArriveOnTheFlightsThatUseThem() {

@@ -98,7 +98,7 @@ final class CabinScene: SKScene {
     /// Painted open doors for the lavatories (hidden while shut: the closed door is in the cabin picture).
     private var lavDoorNodes: [Int: SKSpriteNode] = [:]
     private var dustTimer = 0.0
-    /// Jump seats as sprites, so they can fold away after Go on flights without turbulence.
+    /// Jump seats as sprites, so the painted ones can fold down from the wall.
     private var jumpSeatNodes: [SKSpriteNode] = []
     /// A coloured frame around each seat that's asking for something, under the passenger.
     private var seatFrames: [Int: SKShapeNode] = [:]
@@ -455,12 +455,13 @@ final class CabinScene: SKScene {
         stationNodes.values.forEach { $0.removeFromParent() }
         stationNodes.removeAll()
         jumpSeatNodes.forEach { $0.removeFromParent() }
-        let painted = skin?.crewSeat
+        // jump seats are always there, stowed against the wall; they fold down for turbulence (see update)
+        let painted = skin?.jumpSeat(down: false)
         let seatTex = painted?.texture ?? SKTexture(image: Art.jumpSeatImage())
         jumpSeatNodes = layout.jumpSeats.map { j in
             let n = SKSpriteNode(texture: seatTex, size: painted?.size ?? CGSize(width: 32, height: 28))
             if let painted { n.anchorPoint = painted.anchor }
-            // the painted seat faces into the cabin from the nose wall; on the tail wall it faces the other way
+            // the painted seat hangs on the nose wall facing into the cabin; on the tail wall it faces the other way
             if painted != nil && j.x > layout.aftX { n.xScale = -1 }
             n.position = pt(j.x, layout.aisles[j.aisle] - 30)
             n.zPosition = 0.4
@@ -511,8 +512,12 @@ final class CabinScene: SKScene {
         dimNode.position = CGPoint(x: -3000, y: -3000)
         jumpGlows.forEach { $0.removeFromParent() }
         jumpGlows = layout.jumpSeats.map { j in
-            let g = SKShapeNode(rect: CGRect(x: -14, y: -9, width: 28, height: 18), cornerRadius: 5)
+            // around the painted seat, which runs from its wall plate (a wall inset behind the seat point) out into the cabin
+            let painted = skin.map { _ in (CabinSkin.jumpSeatWallInset, CGFloat(39), CGFloat(34)) }
+            let (back, w, h) = painted ?? (14, 28, 18)
+            let g = SKShapeNode(rect: CGRect(x: -back - 2, y: -h / 2, width: w + 4, height: h), cornerRadius: 5)
             g.strokeColor = Palette.calm; g.lineWidth = 2.5; g.glowWidth = 3; g.fillColor = Palette.calm.withAlphaComponent(0.18)
+            if painted != nil && j.x > layout.aftX { g.xScale = -1 }        // the tail-wall seat faces the other way
             g.position = pt(j.x, layout.aisles[j.aisle] - 30)
             g.zPosition = 5.6; g.isHidden = true
             world.addChild(g)
@@ -542,6 +547,86 @@ final class CabinScene: SKScene {
         }
         crewNode.worldWidth = worldW
         layoutWorld()
+    }
+
+    /// How far above the aisle line each crew member is still drawn after getting out of a jump seat (0 once down),
+    /// and the walk phase for stepping down on the spot.
+    private var seatLift: [(dy: Double, walk: Double)] = [(0, 0), (0, 0)]
+
+    /// After a jump seat: she stays level with the seat while she walks along the galley floor to where she's going,
+    /// then walks down to the aisle line. She steps down sooner if she's about to leave the galley (the rows are there).
+    private func liftedFromSeat(_ c: Crew, _ i: Int, _ sim: FlightSimulation, dt: Double) -> Crew {
+        guard i < seatLift.count else { return c }
+        if case .buckle? = c.busy?.task { return c }       // going back in: seatStepped starts from where she's drawn
+        if let j = c.seated, sim.layout.jumpSeats.indices.contains(j) {
+            let seat = sim.layout.jumpSeats[j]
+            seatLift[i].dy = sim.jumpSeatY(seat) - c.y
+            guard sittingInSeat(c) else { return c }      // getting up: drawn by seatStepped
+            // sitting: her (hidden) figure and tray stay at the seat, so getting up starts there with no turn or jump
+            var shown = c
+            shown.x = seat.x; shown.y = sim.jumpSeatY(seat)
+            return shown
+        }
+        guard seatLift[i].dy < 0 else { return c }
+        let onGalley = sim.layout.galleyFloors.contains { $0.contains(c.x) }
+        let nextX = c.target?.x ?? c.x
+        let stays = c.isMoving && onGalley && sim.layout.galleyFloors.contains { $0.contains(nextX) }
+        var shown = c
+        if !stays {
+            seatLift[i].dy = min(0, seatLift[i].dy + Self.stepDownSpeed * dt)
+            if !c.isMoving {                              // walking down on the spot
+                seatLift[i].walk += dt * 9
+                shown.walk = seatLift[i].walk
+                shown.target = CrewTarget(x: c.x, action: .none)
+            }
+        }
+        shown.y = c.y + seatLift[i].dy
+        return shown
+    }
+    /// World units a second she walks down from seat level to the aisle line.
+    private static let stepDownSpeed = 70.0
+
+    /// Buckled into a jump seat and not getting up out of it.
+    private func sittingInSeat(_ c: Crew) -> Bool {
+        if case .unbuckle? = c.busy?.task { return false }
+        return c.seated != nil
+    }
+
+    /// Getting into or out of a jump seat (the buckle and unbuckle moments): she's drawn walking between the seat and
+    /// her place on the aisle line, where the simulation already has her.
+    private func seatStepped(_ c: Crew, _ sim: FlightSimulation, lift: Double) -> Crew {
+        guard let busy = c.busy else { return c }
+        let seat: Int, f: Double                         // f: 1 at the seat, 0 on the aisle
+        var unbuckling = false
+        switch busy.task {
+        case .unbuckle: guard let s = c.seated else { return c }; seat = s; f = 1 - busy.progress; unbuckling = true
+        case .buckle(let s): seat = s; f = busy.progress
+        default: return c
+        }
+        guard sim.layout.jumpSeats.indices.contains(seat) else { return c }
+        // getting in: up from the aisle level with the seat, then into it. Getting out: a step forward out of the
+        // seat, level with it; the way down to the aisle comes later (`seatLift`), once she's walked where she's going.
+        let j = sim.layout.jumpSeats[seat]
+        // going in, she starts from where she's drawn: still partway up from getting out, if she hadn't finished
+        // walking down to the aisle line
+        let fromY = unbuckling ? sim.jumpSeatY(j) : c.y + min(0, lift)
+        let across = abs(c.x - j.x), down = abs(sim.jumpSeatY(j) - fromY)
+        let d = f * (across + down)                      // how far along the way from where she stands to the seat
+        var shown = c
+        shown.y = fromY
+        if d <= down {
+            shown.y = fromY + (sim.jumpSeatY(j) - fromY) * (down > 0 ? d / down : 1)
+        } else {
+            shown.y = sim.jumpSeatY(j)
+            shown.x = c.x + (j.x - c.x) * ((d - down) / max(across, 0.001))
+        }
+        // face the way she's walking: out of the seat into the cabin, or back toward the wall going in
+        if c.x != j.x { shown.face = (unbuckling ? c.x - j.x : j.x - c.x) < 0 ? -1 : 1 }
+        shown.busy = nil                                 // walking, not a timed task with a progress ring
+        shown.seated = nil                               // on her feet: no seatbelt strap
+        shown.target = CrewTarget(x: c.x, action: .none)
+        shown.walk = busy.progress * 2 * .pi              // one step cycle
+        return shown
     }
 
     private func buildWings() {
@@ -597,10 +682,6 @@ final class CabinScene: SKScene {
         let hiding = Set(sim.freshStations)
         if builtFor != staticKey(sim.layout, hiding) { buildStatic(sim.layout, hiding: hiding) }
         for n in freshNodes.values { n.removeAllActions(); n.alpha = 0; n.setScale(0.2) }
-        for n in jumpSeatNodes {                                   // back for the take-off countdown
-            let facing: CGFloat = n.xScale < 0 ? -1 : 1           // the tail-wall seat stays mirrored
-            n.removeAllActions(); n.alpha = 1; n.setScale(1); n.xScale = facing
-        }
         cartNode.isHidden = true
         flightNodes.forEach { $0.removeFromParent() }
         flightNodes.removeAll()
@@ -852,6 +933,17 @@ final class CabinScene: SKScene {
                 }
             }
         }
+        // painted jump seats fold down while the seatbelt sign is on (on flights that use them) or someone sits in one;
+        // a seat with the attendant in it shows her painted there, buckled in, in place of her standing figure
+        let seatedArt = skin?.crewInJumpSeat
+        if let skin, let up = skin.jumpSeat(down: false), let down = skin.jumpSeat(down: true) {
+            for (i, n) in jumpSeatNodes.enumerated() {
+                let taken = sim.crews.contains { $0.seated == i && self.sittingInSeat($0) }
+                let s = taken ? (seatedArt ?? down) : (sim.seatbeltOn && sim.jumpSeatsInPlay) ? down : up
+                if n.texture !== s.texture { n.texture = s.texture; n.size = s.size; n.anchorPoint = s.anchor }
+                n.zPosition = taken && seatedArt != nil ? crewNode.zPosition - 0.1 : 0.4
+            }
+        }
         // jump seats light up while the seatbelt sign is on; the nearest one pulses until you're seated
         let nearest = sim.crew.seated == nil ? sim.nearestJumpSeat() : nil
         for (i, g) in jumpGlows.enumerated() {
@@ -900,10 +992,12 @@ final class CabinScene: SKScene {
         }
         for (i, c) in sim.crews.enumerated() {
             let node = i == 0 ? crewNode : partnerNode
+            let shown = seatStepped(liftedFromSeat(c, i, sim, dt: dt), sim, lift: i < seatLift.count ? seatLift[i].dy : 0)
             node.trayWarmth = c.tray.indices.map { sim.warmth(ofTraySlot: $0, crew: i) }
             node.action = paintedAction(c, sim)
-            node.sync(c, clock: clock)
-            node.position = pt(c.x, c.y)
+            node.inSeatArt = sittingInSeat(c) && seatedArt != nil
+            node.sync(shown, clock: clock)
+            node.position = pt(shown.x, shown.y)
         }
         partnerNode.isHidden = !sim.twoCrew
         activeMark.isHidden = !sim.twoCrew
@@ -1047,11 +1141,6 @@ final class CabinScene: SKScene {
             shake = max(shake, 0.15)
             burst(.puff, x: x, y: y, count: 8, colors: [UIColor(hex: 0x8A4B22, alpha: 0.8), UIColor(hex: 0xC8BCAA, alpha: 0.9)])
             floatText("Slipped! −\(Int(Tuning.paxSlipPenalty))", x: x, y: y - 26, color: Palette.critical)
-        case .jumpSeatsAway:
-            for n in jumpSeatNodes {
-                n.run(.sequence([.wait(forDuration: 1.2),
-                                 .group([.scaleX(to: n.xScale < 0 ? -1 : 1, y: 0.1, duration: 0.35), .fadeOut(withDuration: 0.35)])]))
-            }
         case .newStations(let list):
             for (k, i) in list.enumerated() {
                 guard let n = freshNodes[i], let b = game?.sim.layout.bins[i] else { continue }
@@ -1183,6 +1272,8 @@ final class CabinScene: SKScene {
 final class PaxNode: SKNode {
     private let flip = SKNode()                  // mirrors the passenger when they walk aft
     private let body: SKSpriteNode
+    /// The seated picture left on the seat while the passenger stands up (or sits down): the two crossfade.
+    private let seatGhost = SKSpriteNode()
     private let normalTex: SKTexture
     private let sickTex: SKTexture
     private let grumpy = SKSpriteNode(texture: CabinScene.Tex.grumpy)
@@ -1204,6 +1295,7 @@ final class PaxNode: SKNode {
     private var lastPos: (x: Double, y: Double)?
     /// Set by the scene: seated on a lavatory toilet, turned this much (the painted seated picture faces the nose).
     var onToilet: CGFloat?
+    private var wasOnToilet = false
     private var shownSick = false
     private var visible: CGFloat = 1
 
@@ -1217,6 +1309,9 @@ final class PaxNode: SKNode {
         archetype = p.archetype
         phase = p.phase
         super.init()
+        seatGhost.texture = painted?.seated; seatGhost.size = PassengerArt.size; seatGhost.isHidden = true
+        seatGhost.yScale = mirrored ? -1 : 1
+        addChild(seatGhost)
         addChild(flip)
         flip.addChild(body)
         if p.vip {
@@ -1275,7 +1370,7 @@ final class PaxNode: SKNode {
             body.colorBlendFactor = 0
         } else if let walkTex {
             if body.texture !== walkTex {
-                body.texture = walkTex; body.size = AttendantArt.frameSize; body.anchorPoint = AttendantArt.anchor
+                body.texture = walkTex; body.size = PassengerArt.walkSize; body.anchorPoint = AttendantArt.anchor
             }
             body.colorBlendFactor = 0
         } else if let painted {
@@ -1308,7 +1403,7 @@ final class PaxNode: SKNode {
         } else if let s = p.stroll {
             if walkTex != nil {
                 flip.xScale = walkFacing == .side && s.face < 0 ? -1 : 1      // painted side frames face right
-                dy -= 20                                                     // feet on the walking line, like the crew
+                dy -= 20 * Double(PassengerArt.walkScale)                    // feet on the walking line, like the crew
             } else {
                 flip.xScale = s.face > 0 ? -1 : 1
                 if s.stage == .walking || s.stage == .returning { dy += sin(clock * 14 + phase) * 0.9 }
@@ -1319,6 +1414,21 @@ final class PaxNode: SKNode {
         flip.yScale = mirrored && p.stroll == nil && painted != nil ? -1 : 1
         body.position = CGPoint(x: dx, y: dy)
 
+        // standing up or sitting down: the seated picture stays on the seat and fades as the walking one fades in,
+        // over the first stretch of the step between seat and aisle
+        var stand: CGFloat = 1
+        if let s = p.stroll, walkTex != nil, s.stage == .leaving || s.stage == .sitting {
+            stand = CGFloat(min(1, abs(s.y - p.y) / max(1, abs(s.laneY - p.y)) / 0.45))
+            seatGhost.isHidden = false
+            seatGhost.alpha = 1 - stand
+            seatGhost.position = CGPoint(x: p.x - p.drawX, y: p.drawY - p.y)     // the seat, in this node's (y-up) space
+        } else {
+            seatGhost.isHidden = true
+        }
+        flip.alpha = stand
+
+        // into or out of a lavatory toilet: fade in at the new spot rather than jump there
+        if (onToilet != nil) != wasOnToilet { wasOnToilet = onToilet != nil; visible = 0 }
         let want: CGFloat = (p.stroll?.inLavatory ?? false) && onToilet == nil ? 0 : 1
         visible += (want - visible) * CGFloat(min(1, dt * 8))
         alpha = visible
@@ -1463,6 +1573,9 @@ enum AttendantArt {
     /// Frame size in points; the feet stand on the frame's ground line (`anchor`); the figure is ~56 pt tall.
     static let frameSize = CGSize(width: 56, height: 76)
     static let anchor = CGPoint(x: 0.5, y: 73.0 / 848.0)
+    /// The front and back frames were painted with a bigger head and body than the side ones (same hat-to-feet height,
+    /// but her head is ~10% wider than it is deep in profile): drawn at this scale so she doesn't swell turning to face you.
+    static let frontBackScale: CGFloat = 0.9
     /// Held while standing with the tray up: the carry cycle's passing pose, both feet under the body.
     static let standFrame = 6
     private static let atlas = SKTextureAtlas(named: "Attendant")
@@ -1519,13 +1632,16 @@ final class CrewNode: SKNode {
     private var last: (x: Double, y: Double)?
     /// Set by the scene each frame: the painted action to play instead of walking or standing.
     var action: AttendantArt.Action?
+    /// Set by the scene: she's painted into the jump seat she's buckled in, so her own figure and shadow hide.
+    var inSeatArt = false
+    private let shadow: SKShapeNode
     /// Where the painted figure's feet stand, relative to the crew position (the aisle line).
     private let feetY: CGFloat = -20
     private var headTop: CGFloat { painted ? feetY + 56 : 8 }
 
     override init() {
+        shadow = AttendantArt.available ? SKShapeNode(ellipseOf: CGSize(width: 34, height: 12)) : SKShapeNode(ellipseOf: CGSize(width: 26, height: 34))
         super.init()
-        let shadow = painted ? SKShapeNode(ellipseOf: CGSize(width: 34, height: 12)) : SKShapeNode(ellipseOf: CGSize(width: 26, height: 34))
         shadow.fillColor = Art.ink(0.25); shadow.strokeColor = .clear
         shadow.position = painted ? CGPoint(x: 0, y: feetY + 2) : CGPoint(x: 3, y: -4)
         addChild(shadow)
@@ -1649,8 +1765,9 @@ final class CrewNode: SKNode {
                 } else {
                     body.texture = carrying ? AttendantArt.frames(.carry, facing)[AttendantArt.standFrame] : AttendantArt.idle(facing)
                 }
-                body.xScale = facing == .side && face < 0 ? -1 : 1
-                body.yScale = moving ? 1 : 1 + 0.012 * CGFloat(sin(clock * 2.4))       // breathing while standing
+                let k = facing == .side ? 1 : AttendantArt.frontBackScale
+                body.xScale = (facing == .side && face < 0 ? -1 : 1) * k
+                body.yScale = (moving ? 1 : 1 + 0.012 * CGFloat(sin(clock * 2.4))) * k  // breathing while standing
             }
         } else {
             feet[0].isHidden = !moving; feet[1].isHidden = !moving
@@ -1664,7 +1781,9 @@ final class CrewNode: SKNode {
             torso.yScale = sq
         }
 
-        strap.isHidden = c.seated == nil               // buckled into a jump seat
+        strap.isHidden = c.seated == nil || inSeatArt  // buckled into a jump seat
+        body.isHidden = inSeatArt
+        shadow.isHidden = inSeatArt
         // the tray: up to two items above the crew member's head (the HUD no longer repeats this)
         for k in 0..<heldNodes.count {
             if warmthRings[k].parent == nil {
