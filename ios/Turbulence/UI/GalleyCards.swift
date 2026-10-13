@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-// MARK: - Options and About as galley things (GDD §9a; specs/galley-main-menu "Options and About cards")
+// MARK: - Options and About as galley things (GDD §9a; specs/2026-10-08-galley-main-menu.md "Options and About cards")
 //
 // Options is the oven's control panel and About is the open crew manual. The art (`Cards` in the asset catalog) is
 // text-free: every word, the logo and the studio mark are drawn here. Positions are fractions of each picture.

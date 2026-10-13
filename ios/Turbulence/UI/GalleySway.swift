@@ -52,7 +52,7 @@ struct Sway {
     }
 }
 
-/// How each loose thing in the galley moves (GDD §9a "Turbulence on the galley"; specs/galley-main-menu).
+/// How each loose thing in the galley moves (GDD §9a "Turbulence on the galley"; specs/2026-10-08-galley-main-menu.md).
 /// Starting values to tune on device. Angles in degrees, slides and hops in wall pixels.
 enum GalleyMotion {
     static let tag = Sway(amplitude: 18, frequency: 0.9, settle: 2.6, delay: 0.04, limit: 24)

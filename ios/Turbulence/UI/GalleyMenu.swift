@@ -1,7 +1,7 @@
 import SwiftUI
 import UIKit
 
-// MARK: - Galley main menu (GDD §9a; specs/galley-main-menu)
+// MARK: - Galley main menu (GDD §9a; specs/2026-10-08-galley-main-menu.md)
 
 /// The landing menu as the Comet's galley wall: the Continue and New Game carts, the oven (Options) and the crew
 /// manual (About) are the buttons; the tag, the binder, the cups, the carts and the coffee react to each bump.

@@ -1,16 +1,18 @@
 # Galley Main Menu — Spec
 
+Status: done (PR #2, Oct 13)
+
 2026-10-08 · Marcelo Queiroz · Live doc: [Galley Main Menu — Spec](https://claude.ai/code/artifact/b4bb787d-7cdc-47d5-8da4-25971f2aee11)
 
 ## Overview
 
 The main menu becomes the Comet's galley wall. Every menu option is a fitting you tap, and the loose things in the galley react to turbulence. It replaces the logo-and-capsule-buttons menu on the landing page (GDD §9a). The title card before it (cabin flying in through the clouds) stays.
 
-![Galley main menu mockup: window, logo, coffee maker, oven (Options), crew manual (About), two service carts (Continue, New Game)](mockup.jpg)
+![Galley main menu mockup: window, logo, coffee maker, oven (Options), crew manual (About), two service carts (Continue, New Game)](2026-10-08-galley-main-menu/mockup.jpg)
 
 *Target look (Gemini mockup). In the game the labels and the name tag are live text, and the window shows the moving cloud layers.*
 
-![The galley main menu as built, with the oven door dropping open](galley-app.jpg)
+![The galley main menu as built, with the oven door dropping open](2026-10-08-galley-main-menu/galley-app.jpg)
 
 *As built (phase 2 art): every word and the logo are live; here the oven door is dropping open on its way to Options.*
 
@@ -89,7 +91,7 @@ The galley must work as well as today's four buttons for anyone who can't see it
 
 The Options card is the oven's control panel and the About card is the open crew manual, so each card looks like it comes out of the fitting you tapped. The art is text-free; every word and logo is drawn live and fits its surface (see Art list).
 
-![Options card as built: the oven control panel](options-card.jpg)
+![Options card as built: the oven control panel](2026-10-08-galley-main-menu/options-card.jpg)
 
 **Options, the oven control panel:** one engraved group with two controls, both settings of this device, and Done. It is the same panel from the landing page, the route map's gear and the Pause card.
 
@@ -103,7 +105,7 @@ The Options card is the oven's control panel and the About card is the open crew
 - The group's tab is left blank: with only device settings there is nothing to tell apart.
 - Debug builds add a small "DEV" label beside Done that opens the developer settings.
 
-![About card as built: the open crew manual](about-card.jpg)
+![About card as built: the open crew manual](2026-10-08-galley-main-menu/about-card.jpg)
 
 **About, the open crew manual:** the binder opened as a two-page spread.
 

@@ -3,7 +3,7 @@ import SwiftUI
 // MARK: - Title card and landing page (GDD §9a)
 
 /// The cabin flies in through the clouds and the logo lands (the title card); about 2 s later the galley wall
-/// fades in over the same sky, which now shows through its window (the galley main menu, specs/galley-main-menu).
+/// fades in over the same sky, which now shows through its window (the galley main menu, specs/2026-10-08-galley-main-menu.md).
 struct TitleView: View {
     let app: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

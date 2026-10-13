@@ -2,7 +2,7 @@ import SwiftUI
 
 /// Words printed on painted art (cart plates, placards, the tag, the binder cover, the Options panel). Each label gets
 /// the box of the surface it's printed on and never leaves it: it shrinks down to `minScale`, wraps onto up to
-/// `lines` lines, and only as a last resort is cut short, so longer translations still fit (specs/galley-main-menu).
+/// `lines` lines, and only as a last resort is cut short, so longer translations still fit (specs/2026-10-08-galley-main-menu.md).
 /// Write keys in sentence case and let `upper` capitalise them, so translators see normal words.
 struct FittedLabel: View {
     let text: Text

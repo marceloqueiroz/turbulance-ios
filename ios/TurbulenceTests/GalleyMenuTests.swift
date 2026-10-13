@@ -1,7 +1,7 @@
 import XCTest
 @testable import Turbulence
 
-/// The galley main menu's layout and turbulence springs (GDD §9a; specs/galley-main-menu).
+/// The galley main menu's layout and turbulence springs (GDD §9a; specs/2026-10-08-galley-main-menu.md).
 final class GalleyMenuTests: XCTestCase {
     /// Landscape screens from the smallest iPhone to the largest iPad, in points.
     private let screens = [CGSize(width: 667, height: 375), CGSize(width: 874, height: 402),

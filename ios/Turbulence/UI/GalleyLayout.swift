@@ -1,6 +1,6 @@
 import CoreGraphics
 
-/// Where the pieces of the galley main menu sit (GDD §9a; specs/galley-main-menu). Every rectangle is in wall
+/// Where the pieces of the galley main menu sit (GDD §9a; specs/2026-10-08-galley-main-menu.md). Every rectangle is in wall
 /// units: the wall picture is 3168 × 1344 units (`GalleyWall` itself is 4224 × 1792 px); `placement(in:)` maps
 /// them onto a screen. The art is text-free: the logo, placards, plates, tag and binder cover get their words in code.
 enum GalleyLayout {
