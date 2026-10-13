@@ -172,9 +172,8 @@ struct FlightPlan: Identifiable, Equatable {
     var landingAt: Double { duration - Tuning.landingLead }
 
     /// Whether this flight fits a galley station; the rest stay hidden (GDD §6a "Only what this flight uses").
-    /// Jump seats are for turbulence; lavatories for passengers who walk (GDD §6a, Route 1 flight checklist).
+    /// Lavatories and jump seats are always there; jump seats only take the crew on flights with turbulence.
     var usesJumpSeats: Bool { !turbulence.isEmpty }
-    var usesLavatories: Bool { strolls || kinds.contains(.dirtyLav) }
 
     func uses(_ kind: StationKind) -> Bool {
         switch kind {

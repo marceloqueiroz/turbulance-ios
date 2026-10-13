@@ -78,11 +78,17 @@ The Options screen has a DEBUG-only Developer section (skip the intro, make a De
 - Character animations: use the `animate-sprite` skill (head-locked pose guides → Gemini → clean-up →
   `ios/tools/sprite_atlas.py` into an atlas). Side views face right; left is mirrored in code.
 - Done so far:
-  - Attendant: walk / carry / idle (side, front, back) and a cleaning loop (side view, any clean step).
+  - Attendant: walk / carry / idle (side, front, back) and a cleaning loop (side view, any clean step). The front
+    and back frames were painted bigger than the side ones and are drawn at `AttendantArt.frontBackScale` (0.9).
   - Passengers: seated (relaxed and calling; about half drawn mirrored for variety) and walks in all three
-    facings for the five core archetypes (the father walks without his toddler).
+    facings for the five core archetypes (the father walks without his toddler). Walkers stand at the attendant's
+    height; standing up and sitting down crossfade between the seated and walking pictures.
   - Comet cabin set: base picture, galley fittings, machine states (idle / working / ready / cold), trash bin
     with an opening flap; the attendant stands in front of a wall bin's flap (`CabinLayout.standX`).
+  - Comet jump seats: stowed and folded-down (`jumpseat-up/down`), and the attendant buckled in (`jumpseat-crew`),
+    all seen from above and hung on the end wall by `CabinSkin.jumpSeatWallInset`. Getting in and out is drawn in
+    `CabinScene` (`seatStepped`, `liftedFromSeat`): she steps out level with the seat, walks along the galley, then
+    down to the aisle line.
   - The second attendant (plum) and the trainee (navy) are shader recolours of the attendant.
   - No animations at the galley stations: a stop there lasts `Tuning.pickDuration` (0.25 s), too short to read.
 - Generated sheets: run `cut_sheet.py` then `align_strip.py`; use `lock_head.py` when the head, collar or
@@ -95,7 +101,12 @@ The Options screen has a DEBUG-only Developer section (skip the intro, make a De
   door (up to `Tuning.maxLavQueue`) and each one waiting drains satisfaction until it's cleaned on the spot.
   There is no clog / plunger anymore.
 - Trash goes in wall bins on the cabin end walls; there's no plunger station.
-- Each flight only shows the galley stations it uses (`FlightPlan.uses`).
+- Every flight of an aircraft has the same cabin (lavatories, jump seats, length); only the galley stations vary,
+  each flight showing the ones it uses (`FlightPlan.uses`).
+- Jump seats are always on the wall, folded; they fold down for turbulence. The crew gets in and out from
+  `Tuning.jumpSeatStep` out along the aisle (`FlightSimulation.standX(atJumpSeat:)`).
+- Passengers never climb over a seatmate: whoever sits nearer the aisle steps out and stands aside
+  (`StrollPurpose.makeWay`), and a passenger only gets up if those seatmates can.
 - The route map is free pan/zoom; the plane follows its route and the camera follows long legs.
 
 ## Working conventions

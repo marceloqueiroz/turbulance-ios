@@ -368,7 +368,6 @@ final class GameController {
             synth.play(.chime)
             if haptics { bump.impactOccurred(intensity: 0.7) }
         case .newStations: synth.play(.streakUp)
-        case .jumpSeatsAway: break
         case .wrongItem:
             if haptics { jolt.impactOccurred(intensity: 0.6) }
         case .queueCost: break

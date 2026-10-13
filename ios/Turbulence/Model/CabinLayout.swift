@@ -161,20 +161,11 @@ struct CabinLayout: Equatable {
     let aftX: Double
     var jumpSeats: [JumpSeat]
 
-    /// Only the stations this flight can use are fitted; the rest stay hidden (GDD §6a "Only what this flight uses").
+    /// Only the galley stations this flight can use are fitted; the rest stay hidden (GDD §6a "Only what this flight
+    /// uses"). The cabin itself (length, lavatories, jump seats) is the same on every flight of an aircraft.
     func equipped(for plan: FlightPlan) -> CabinLayout {
         var copy = self
         copy.bins = bins.filter { plan.uses($0.kind) }
-        if !plan.usesLavatories {                   // nobody walks yet: the lavatories are plain closets
-            copy.lavatories = []
-            copy.blocks = blocks.map { $0.kind == .lavatory ? CabinBlock(kind: .closet, x: $0.x, y: $0.y, w: $0.w, h: $0.h) : $0 }
-            if !copy.bins.contains(where: { $0.x >= aftX }) {
-                // nothing to do at the back: the cabin ends just after the last row, no empty closets
-                copy.blocks.removeAll { $0.x >= aftX }
-                copy.jumpSeats.removeAll { $0.x >= aftX }
-                copy.width = aftX + 40
-            }
-        }
         return copy
     }
 
@@ -284,8 +275,9 @@ struct CabinLayout: Equatable {
                  SupplyBin(.oven, x: 78, y: bottomY, aisle: last)]
         bins += [SupplyBin(item: .snack, x: 114, y: bottomY, aisle: last),
                  SupplyBin(item: .toy, x: 150, y: bottomY, aisle: last)]
-        // trash: a wall bin on the nose wall, below the aisle, under the fold-down crew seat (GDD §4a)
-        bins.append(SupplyBin(.trash, x: 76, y: bottomAisle + 34, aisle: last))
+        // trash: a wall bin against the nose wall, below the aisle, across from the fold-down crew seat (GDD §4a);
+        // in line with that seat, like the tail-wall bin and seat
+        bins.append(SupplyBin(.trash, x: 72, y: bottomAisle + 34, aisle: last))
         for a in 0..<last {
             let top = aisles[a] + 56, bottom = aisles[a + 1] - 56
             blocks.append(CabinBlock(kind: .counter, x: 60, y: top, w: 150, h: bottom - top))
