@@ -10,6 +10,10 @@ The main menu becomes the Comet's galley wall. Every menu option is a fitting yo
 
 *Target look (Gemini mockup). In the game the labels and the name tag are live text, and the window shows the moving cloud layers.*
 
+![The galley main menu as built, with the oven door dropping open](galley-app.jpg)
+
+*As built (phase 2 art): every word and the logo are live; here the oven door is dropping open on its way to Options.*
+
 **Why a galley:** it is the place the game is played, so the first screen already teaches the setting. It also reuses painted Comet galley art, and turns the existing "bump every few seconds" into something you can watch.
 
 **In scope:** the landing menu's look, its move in from the title card, the turbulence motion and the art it needs.
@@ -83,36 +87,29 @@ The galley must work as well as today's four buttons for anyone who can't see it
 
 ## Options and About cards
 
-The Options card is the oven's control panel and the About card is the open crew manual, so each card looks like it comes out of the fitting you tapped. The settings, words and behaviour stay as today; only the look changes.
+The Options card is the oven's control panel and the About card is the open crew manual, so each card looks like it comes out of the fitting you tapped. The art is text-free; every word and logo is drawn live and fits its surface (see Art list).
 
-![Options card preview: the oven control panel](options-card.jpg)
+![Options card as built: the oven control panel](options-card.jpg)
 
-*Options preview: text-free Gemini art with the words laid on top as live text.*
+**Options, the oven control panel:** one engraved group with two controls, both settings of this device, and Done. It is the same panel from the landing page, the route map's gear and the Pause card.
 
-**Options, the oven control panel:** a brushed-aluminium panel with a navy title plate and engraved cream placards.
+| Control | Setting |
+| --- | --- |
+| Black bakelite knob with tick marks (drag round it; VoiceOver swipes 10% at a time) | Sound volume |
+| Chrome toggle lever with a green lamp that lights when on | Haptics |
+| Wide coral push button that presses in | Done |
 
-| Control | Setting | Group |
-| --- | --- | --- |
-| Rotary knob with tick marks | Sound volume | This device |
-| Toggle switch with a green lamp | Haptics | This device |
-| Three-way selector dial: Off, Reduced, Full | Screen shake | &lt;name&gt;'s settings |
-| Rocker: Large on top, Standard below | Notification text size | &lt;name&gt;'s settings |
-| Wide coral push button | Done | — |
+- **Screen shake and Notification text size are no longer in Options** (decided Oct 13). They stay saved per crew member and the game still applies them (defaults Full and Standard); see GDD §9a.
+- The group's tab is left blank: with only device settings there is nothing to tell apart.
+- Debug builds add a small "DEV" label beside Done that opens the developer settings.
 
-- From the landing page no crew member is picked, so the right-hand group gives way to today's note: screen shake and text size are set per crew member, from the route map.
-- The card also opens from the route map's Menu, with no galley behind it; the panel stands on its own there.
-- The debug-only Developer section sits on a small second panel below.
-- Every control works with VoiceOver: the knob is adjustable (swipe up or down), the dial and the rocker are pickers, the toggle is a switch.
-
-![About card preview: the open crew manual](about-card.jpg)
-
-*About preview: the same approach, with the real `LogoCrew` file placed on the page.*
+![About card as built: the open crew manual](about-card.jpg)
 
 **About, the open crew manual:** the binder opened as a two-page spread.
 
-- Left page: the `LogoCrew` logo, the version, the code-drawn `ZeldaLabsMark` and "Zelda Labs".
-- Right page: numbered sections with coral headings and navy body text (1. Credits, 2. Privacy, 3. Made with) and a page number.
-- The coral ribbon bookmark closes it; a close button stays for VoiceOver. With large text, the right page scrolls.
+- Left page: the `LogoCrew` logo, the version and build, the code-drawn `ZeldaLabsMark` and "Zelda Labs".
+- Right page: numbered sections with coral headings and navy body text (1. Credits, 2. Privacy, 3. Made with) and a page number. Longer text scrolls and fades out at the bottom.
+- A round coral close button sits on the binder's top-right corner (VoiceOver reads it as Close); the ribbon bookmark closes it too.
 
 ## Art list
 
@@ -128,12 +125,12 @@ The galley is a painted wall plus separate see-through layers for everything tha
 | Service cart | Drawer shut, drawer out | Painted once in a neutral livery; coral and teal by tint. Blank label plate |
 | Name tag | One | Hangs from its string hole (the pivot) |
 | Paper cups | One | Two copies on the rail |
-| Options panel | Panel, knob, toggle up and down, dial, rocker in both positions, Done pressed | Blank title plate, blank placards, blank button face |
+| Options panel | Panel, knob, toggle up and down, lamp on and off, Done raised and pressed | Blank title plate, tab, placards and button face |
 | Crew manual spread | One, plus the ribbon | Blank pages; logo and words placed in code |
 
 **Pipeline:** Gemini (`gemini-3-pro-image`) with the approved mockup and the Comet galley sprites as references, on a flat magenta background for cut-out. Drafts stay in the scratchpad; finals go to `branding/menu/` and into a new `MenuGalley.spriteatlas` via `ios/tools/sprite_atlas.py`. `LogoMenu` and the `TitleCloud` layers are reused as they are.
 
-**No text in generated art:** placards, plates, tags, pages and covers are generated blank, with no game logo and never the Zelda Labs name or mark. Words are live text; logos come from `LogoMenu`, `LogoCrew` and `ZeldaLabsMark`. The phase 1 prototype wall still has OPTIONS, ABOUT, the logo and the CREW MANUAL cover painted in; phase 2 replaces them.
+**No text in generated art:** placards, plates, tags, pages and covers are generated blank, with no game logo and never the Zelda Labs name or mark. Words are live text; logos come from `LogoMenu`, `LogoCrew` and `ZeldaLabsMark`. Phase 2 repainted the galley at 4K without any words or logo (sources in `branding/menu/`, cut into layers by `ios/tools/galley_layers.py`, shipped as HEIC). Every label goes through one fitting rule (`FittedLabel`): it gets the box of its painted surface, shrinks to half size, then wraps (two lines on plates, placards and the tag, three on the binder cover), and is only cut short as a last resort. Checked with Xcode's double-length pseudo-language (launch with `-NSDoubleLocalizedStrings YES`).
 
 **Size:** the wall at 2x for the 12.9″ iPad: the 4:3 safe area at 2732 × 2048 px, the whole wall about 4500 px wide. Fittings at the size they show on that iPad.
 
@@ -148,6 +145,9 @@ This is a view-only change: `AppModel` and the cards are untouched, and the work
 | `UI/GalleySway.swift` (new) | The damped spring per item, the kick on a bump, the coffee liquid `Canvas` |
 | `UI/Landing.swift` | `TitleView` keeps the title card; adds the push-in; clips the clouds to the window; reduces `Jolt`; removes `LandingMenu` and `MenuButton` (used nowhere else) |
 | `Assets.xcassets/MenuGalley.spriteatlas` (new) | The art layers |
+| `UI/GalleyCards.swift` (new) | `OptionsPanel` (oven control panel) and `AboutSpread` (open crew manual); replace the old `OptionsCard` and `AboutCard` |
+| `UI/FittedLabel.swift` (new) | The fitting rule for every word printed on the art |
+| `ios/tools/galley_layers.py` (new) | Cuts the galley layers from the 4K text-free pictures |
 
 1. **Phase 0, doc:** write this into GDD §9a. *Checkpoint: GDD updated.*
 2. **Phase 1, motion prototype:** cut rough layers out of the mockup by hand and build `GalleyLayout`, `GalleyMenu` and `GalleySway` on them. *Checkpoint: you try the feel in the simulator and we tune the spring numbers.*
@@ -155,6 +155,8 @@ This is a view-only change: `AppModel` and the cards are untouched, and the work
 4. **Phase 3, polish:** push-in from the title card, Reduce Motion, VoiceOver, every screen size, then tests and screenshots. *Checkpoint: acceptance criteria below all pass.*
 
 Code comments cite `GDD §9a` as elsewhere.
+
+**Status, Oct 13:** phases 1 to 3 are built, except the GDD §9a write-up, which landed after the build, and a VoiceOver pass on a device. The Options and About cards were added along the way.
 
 ## Testing and acceptance
 
@@ -179,7 +181,7 @@ The menu is done when every box below is ticked on an iPhone SE, an iPhone 17 Pr
 
 ## Open questions
 
-- [ ] Fittings: keep the mockup's generic oven and coffee maker, or use the game's own copper-dome oven and coffee machine from the Comet set?
+- [x] Fittings: kept the mockup's generic oven and coffee maker for the final art (Oct 13).
 - [ ] Should tapping the coffee maker pour a cup as a small hidden treat, or stay pure decoration?
 - [x] Cards in the galley style: yes for Options (oven control panel) and About (open crew manual), decided 2026-10-13; the picker and new-crew cards stay as they are for now.
 - [ ] Should a hard bump ever tip a cup off the rail (it resets when the menu reappears), or is that too busy?

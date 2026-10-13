@@ -31,7 +31,7 @@ struct GalleyMenu: View {
             TimelineView(.animation(paused: motion == 0)) { timeline in
                 let t = timeline.date.timeIntervalSince(start)
                 ZStack(alignment: .topLeading) {
-                    // an iPad shows the whole wall: wall colour above it and floor below (never behind it: the window is see-through)
+                    // an iPad shows the whole wall: wall colour above it and floor below
                     Self.wallTop
                         .frame(width: geo.size.width, height: max(0, p.wallRect.minY) + 1)
                         .allowsHitTesting(false)
@@ -39,7 +39,6 @@ struct GalleyMenu: View {
                         .frame(width: geo.size.width, height: max(0, geo.size.height - p.wallRect.maxY) + 1)
                         .offset(y: p.wallRect.maxY - 1)
                         .allowsHitTesting(false)
-                    windowView(p, t)
                     Image("GalleyWall")
                         .resizable()
                         .frame(width: p.wallRect.width, height: p.wallRect.height)
@@ -48,6 +47,8 @@ struct GalleyMenu: View {
                         #if DEBUG
                         .onTapGesture(perform: bump)
                         #endif
+                    windowView(p, t)
+                    wallWords(p)
                     coffee(p, t)
                     readyLight(p, t)
                     cups(p, t)
@@ -62,10 +63,11 @@ struct GalleyMenu: View {
         .ignoresSafeArea()
         #if DEBUG
         .onAppear {
-            // -galleyOpen oven|manual: start with that fitting open and no card, for screenshots of the open state
+            // -galleyOpen oven|manual|continue|newgame: start with that fitting open and no card, for screenshots of the open state
             let args = ProcessInfo.processInfo.arguments
             if let i = args.firstIndex(of: "-galleyOpen"), i + 1 < args.count {
-                opening = args[i + 1] == "oven" ? .oven : args[i + 1] == "manual" ? .manual : nil
+                let pieces: [String: GalleyLayout.Piece] = ["oven": .oven, "manual": .manual, "continue": .cartContinue, "newgame": .cartNewGame]
+                opening = pieces[args[i + 1]]
             }
         }
         #endif
@@ -97,15 +99,14 @@ struct GalleyMenu: View {
             : GalleyLayout.newGamePlate
         return fitting(.cartNewGame, label: "New Game", p: p, action: app.newGame) {
             ZStack(alignment: .topLeading) {
-                Image(coral ? "GalleyCartCoral" : "GalleyCartTeal")
+                Image((coral ? "GalleyCartCoral" : "GalleyCartTeal") + (opening == .cartNewGame ? "Open" : ""))
                     .resizable()
                     .scaleEffect(x: coral ? -1 : 1)
-                plateText("NEW GAME", at: plate, p: p)
+                plateText("New Game", at: plate, p: p)
             }
             .frame(width: frame.width * p.scale, height: frame.height * p.scale)
         }
-        .modifier(CartMotion(open: opening == .cartNewGame,
-                             tilt: v(GalleyMotion.cartTilt, t, delay: GalleyMotion.cartLag),
+        .modifier(CartMotion(tilt: v(GalleyMotion.cartTilt, t, delay: GalleyMotion.cartLag),
                              slide: v(GalleyMotion.cartSlide, t, delay: GalleyMotion.cartLag) * p.scale))
         .position(x: p.rect(frame).midX, y: p.rect(frame).midY)
     }
@@ -117,19 +118,19 @@ struct GalleyMenu: View {
         let name = app.profile?.name ?? ""
         return fitting(.cartContinue, label: "Continue, last flown: \(name)", p: p, action: app.continueGame) {
             ZStack(alignment: .topLeading) {
-                Image("GalleyCartCoral").resizable()
-                plateText("CONTINUE", at: GalleyLayout.continuePlate, p: p)
+                Image(opening == .cartContinue ? "GalleyCartCoralOpen" : "GalleyCartCoral").resizable()
+                plateText("Continue", at: GalleyLayout.continuePlate, p: p)
                 // the tag hangs from the cart's handle and swings on its string
                 ZStack {
                     Image("GalleyTag").resizable()
                     VStack(spacing: 0) {
                         Text("Last flown:").font(.system(size: 19 * p.scale, weight: .medium, design: .rounded))
-                        Text(name).font(.system(size: 28 * p.scale, weight: .heavy, design: .rounded))
-                            .minimumScaleFactor(0.5).lineLimit(1)
+                            .fitted(CGSize(width: 96 * p.scale, height: 44 * p.scale), lines: 2, minScale: 0.6)
+                        Text(verbatim: name).font(.system(size: 28 * p.scale, weight: .heavy, design: .rounded))
+                            .fitted(CGSize(width: 96 * p.scale, height: 34 * p.scale))
                     }
                     .foregroundStyle(Self.ink)
-                    .frame(width: 92 * p.scale)
-                    .position(x: 57 * p.scale, y: 152 * p.scale)
+                    .position(x: GalleyLayout.tagPaper.x * p.scale, y: GalleyLayout.tagPaper.y * p.scale)
                 }
                 .frame(width: tag.width * p.scale, height: tag.height * p.scale)
                 .rotationEffect(.degrees(v(GalleyMotion.tag, t) + GalleyMotion.tagDrift(at: t) * motion), anchor: pivot)
@@ -137,12 +138,12 @@ struct GalleyMenu: View {
             }
             .frame(width: frame.width * p.scale, height: frame.height * p.scale, alignment: .topLeading)
         }
-        .modifier(CartMotion(open: opening == .cartContinue, tilt: v(GalleyMotion.cartTilt, t),
+        .modifier(CartMotion(tilt: v(GalleyMotion.cartTilt, t),
                              slide: v(GalleyMotion.cartSlide, t) * p.scale))
         .position(x: p.rect(frame).midX, y: p.rect(frame).midY)
     }
 
-    /// Options: the oven door drops open on its bottom hinge and the oven lights up inside.
+    /// Options: the oven door drops open on its bottom hinge onto the lit inside.
     private func oven(_ p: GalleyLayout.Placement) -> some View {
         let r = p.rect(GalleyLayout.frame(.oven))
         let door = p.rect(GalleyLayout.ovenDoor)
@@ -150,7 +151,8 @@ struct GalleyMenu: View {
         return fitting(.oven, label: "Options", p: p, action: { app.sheet = .options }) {
             ZStack(alignment: .topLeading) {
                 Color.clear.frame(width: r.width, height: r.height)
-                OvenInside(lit: open, scale: p.scale)
+                Image("GalleyOvenInside")
+                    .resizable()
                     .frame(width: door.width, height: door.height)
                     .offset(x: door.minX - r.minX, y: door.minY - r.minY)
                 Image("GalleyOvenDoor")
@@ -178,6 +180,13 @@ struct GalleyMenu: View {
                     .offset(x: r.width * spine, y: r.height * 0.03)
                 Image("GalleyManual")
                     .resizable()
+                    .overlay {
+                        Text("Crew Manual")
+                            .font(.system(size: 34 * p.scale, weight: .heavy, design: .rounded))
+                            .foregroundStyle(Color(white: 0.9))
+                            .fitted(CGSize(width: r.width * 0.6, height: r.height * 0.34), lines: 3, upper: true)
+                            .position(x: r.width * 0.56, y: r.height * 0.27)
+                    }
                     .modifier(CoverSwing(angle: opening == .manual ? -158 : 0, spine: spine))
             }
             .frame(width: r.width, height: r.height, alignment: .topLeading)
@@ -191,7 +200,7 @@ struct GalleyMenu: View {
     }
 
     /// A button over a fitting: the pressed motion plays, then the card opens. Its tap area moves with it.
-    private func fitting(_ piece: GalleyLayout.Piece, label: String, p: GalleyLayout.Placement,
+    private func fitting(_ piece: GalleyLayout.Piece, label: LocalizedStringKey, p: GalleyLayout.Placement,
                          action: @escaping () -> Void, @ViewBuilder content: () -> some View) -> some View {
         Button {
             guard opening == nil else { return }
@@ -205,23 +214,49 @@ struct GalleyMenu: View {
             content().contentShape(Rectangle())
         }
         .buttonStyle(FittingPress())
-        .accessibilityLabel(label)
+        .accessibilityLabel(Text(label))
     }
 
-    private func plateText(_ s: String, at c: CGPoint, p: GalleyLayout.Placement) -> some View {
+    private func plateText(_ s: LocalizedStringKey, at c: CGPoint, p: GalleyLayout.Placement) -> some View {
         Text(s)
             .font(.system(size: 66 * p.scale, weight: .heavy, design: .rounded))
             .foregroundStyle(Self.ink)
-            .lineLimit(1).minimumScaleFactor(0.5)
-            .frame(width: 420 * p.scale)
+            .fitted(CGSize(width: 420 * p.scale, height: 125 * p.scale), lines: 2, upper: true)
             .position(x: c.x * p.scale, y: c.y * p.scale)
     }
 
     // MARK: Set dressing
 
+    /// The words and logo on the wall (the art is text-free): the crew-wings logo under the window and the
+    /// OPTIONS and ABOUT placards.
+    private func wallWords(_ p: GalleyLayout.Placement) -> some View {
+        let logo = p.rect(CGRect(x: GalleyLayout.logo.center.x - GalleyLayout.logo.width / 2, y: GalleyLayout.logo.center.y,
+                                 width: GalleyLayout.logo.width, height: 0))
+        return ZStack(alignment: .topLeading) {
+            Image("LogoMenu")
+                .resizable().scaledToFit()
+                .frame(width: logo.width)
+                .shadow(color: .black.opacity(0.18), radius: 4 * p.scale * 3, y: 3 * p.scale * 3)
+                .position(x: logo.midX, y: logo.minY)
+            placard("Options", at: GalleyLayout.optionsPlacard, p: p)
+            placard("About", at: GalleyLayout.aboutPlacard, p: p)
+        }
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func placard(_ s: LocalizedStringKey, at c: CGPoint, p: GalleyLayout.Placement) -> some View {
+        Text(s)
+            .font(.system(size: 26 * p.scale, weight: .heavy, design: .rounded))
+            .tracking(1.5 * p.scale)
+            .foregroundStyle(Self.ink)
+            .fitted(CGSize(width: 148 * p.scale, height: 44 * p.scale), lines: 2, upper: true)     // clear of the screws
+            .position(x: p.origin.x + c.x * p.scale, y: p.origin.y + c.y * p.scale)
+    }
+
     /// The sky through the window: the title card's clouds, smaller and slower, drifting right to left.
     private func windowView(_ p: GalleyLayout.Placement, _ t: TimeInterval) -> some View {
-        let r = p.rect(GalleyLayout.frame(.window)).insetBy(dx: -4, dy: -4)
+        let r = p.rect(GalleyLayout.frame(.window)).insetBy(dx: 1, dy: 1)
         let clouds: [(name: String, h: CGFloat, y: CGFloat, speed: Double, x: Double)] = [
             ("TitleCloud4", 0.30, 0.25, 0.035, 0.1), ("TitleCloud3", 0.36, 0.62, 0.05, 0.55), ("TitleCloud2", 0.44, 0.95, 0.07, 0.9)]
         return ZStack {
@@ -237,7 +272,7 @@ struct GalleyMenu: View {
             }
         }
         .frame(width: r.width, height: r.height)
-        .clipped()
+        .clipShape(RoundedRectangle(cornerRadius: r.width * 0.42, style: .continuous))
         .position(x: r.midX, y: r.midY)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
@@ -319,35 +354,6 @@ private struct PotGlass: Shape {
     }
 }
 
-/// The inside of the oven behind its door: dark metal, a rack, and a warm glow once it's open.
-private struct OvenInside: View {
-    let lit: Bool
-    let scale: CGFloat
-    var body: some View {
-        GeometryReader { g in
-            let w = g.size.width, h = g.size.height
-            ZStack {
-                RoundedRectangle(cornerRadius: 14 * scale)
-                    .fill(LinearGradient(colors: [Color(white: 0.16), Color(white: 0.27)], startPoint: .top, endPoint: .bottom))
-                RoundedRectangle(cornerRadius: 10 * scale)
-                    .fill(Color(white: 0.34))
-                    .frame(width: w * 0.62, height: h * 0.55)
-                    .offset(y: -h * 0.04)
-                ForEach(0..<2) { i in
-                    Capsule().fill(Color(white: 0.62))
-                        .frame(width: w * 0.8, height: max(1, 5 * scale))
-                        .offset(y: h * (0.18 + 0.06 * Double(i)))
-                }
-                RadialGradient(colors: [Color.orange.opacity(0.75), Color.orange.opacity(0)],
-                               center: .init(x: 0.5, y: 0.3), startRadius: 0, endRadius: w * 0.55)
-                    .blendMode(.screen)
-                    .opacity(lit ? 1 : 0)
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 14 * scale))
-        }
-    }
-}
-
 /// The crew manual's first page, under the cover: ring holes and a few lines.
 private struct ManualPage: View {
     let scale: CGFloat
@@ -361,10 +367,11 @@ private struct ManualPage: View {
                         .frame(width: 16 * scale, height: 16 * scale)
                         .offset(x: w * 0.05, y: h * (0.15 + 0.33 * Double(i)))
                 }
-                Text("CREW MANUAL")
+                Text("Crew Manual")
                     .font(.system(size: 24 * scale, weight: .heavy, design: .rounded))
                     .foregroundStyle(Color.navy)
-                    .offset(x: w * 0.2, y: h * 0.1)
+                    .fitted(CGSize(width: w * 0.72, height: h * 0.12), upper: true)
+                    .offset(x: w * 0.2, y: h * 0.06)
                 ForEach(0..<6) { i in
                     Capsule().fill(Color(white: 0.8))
                         .frame(width: w * (i % 3 == 2 ? 0.45 : 0.65), height: max(1, 6 * scale))
@@ -396,16 +403,14 @@ private struct CoverSwing: ViewModifier, Animatable {
     }
 }
 
-/// A cart rocks on its wheels and slides a little; pressed, it rolls toward you (the drawer art comes in phase 2).
+/// A cart rocks on its wheels and slides a little.
 private struct CartMotion: ViewModifier {
-    let open: Bool
     let tilt: Double
     let slide: Double
     func body(content: Content) -> some View {
         content
             .rotationEffect(.degrees(tilt), anchor: tilt >= 0 ? .bottomTrailing : .bottomLeading)
             .offset(x: slide)
-            .scaleEffect(open ? 1.04 : 1, anchor: .bottom)
     }
 }
 

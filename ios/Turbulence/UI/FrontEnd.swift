@@ -42,14 +42,12 @@ struct RootView: View {
         case .options:
             optionsCard
         case .about:
-            AboutCard(close: app.dismissSheet)
+            AboutSpread(close: app.dismissSheet)
         }
     }
 
-    private var optionsCard: OptionsCard {
-        // From the landing page no one is picked yet, so only the device settings show.
-        var card = OptionsCard(device: app.device, options: app.screen == .landing ? nil : app.profile.map { ($0.name, $0.options) },
-                               updateDevice: app.update, updateOptions: app.update, done: app.dismissSheet)
+    private var optionsCard: OptionsPanel {
+        var card = OptionsPanel(device: app.device, updateDevice: app.update, done: app.dismissSheet)
         #if DEBUG
         card.developer = DevSection(canMakeDev: app.slots.devSlot != nil, makeDev: app.makeDevProfile)
         #endif
@@ -292,78 +290,7 @@ struct BriefingCard: View {
     }
 }
 
-// MARK: - Options (GDD §9a)
-
-/// Device settings always; the profile's own settings only once someone is flying (GDD §9a).
-struct OptionsCard: View {
-    @State var device: DeviceSettings
-    @State var options: GameOptions
-    let profileName: String?
-    let updateDevice: (DeviceSettings) -> Void
-    let updateOptions: (GameOptions) -> Void
-    let done: () -> Void
-    #if DEBUG
-    var developer: DevSection?
-    #endif
-
-    init(device: DeviceSettings, options: (name: String, options: GameOptions)?, updateDevice: @escaping (DeviceSettings) -> Void,
-         updateOptions: @escaping (GameOptions) -> Void, done: @escaping () -> Void) {
-        _device = State(initialValue: device)
-        _options = State(initialValue: options?.options ?? GameOptions())
-        profileName = options?.name
-        self.updateDevice = updateDevice
-        self.updateOptions = updateOptions
-        self.done = done
-    }
-
-    var body: some View {
-        Card {
-            Text("Options").font(rounded(26, .bold))
-            if profileName != nil { Eyebrow(text: "This device") }
-            row("Sound") {
-                HStack(spacing: 8) {
-                    Image(systemName: "speaker.fill")
-                    Slider(value: $device.volume, in: 0...1).tint(.teal).frame(maxWidth: 220)
-                    Image(systemName: "speaker.wave.3.fill")
-                }
-            }
-            row("Haptics") { Toggle("Haptics", isOn: $device.haptics).labelsHidden().tint(.teal) }
-            if let name = profileName {
-                Eyebrow(text: "\(name)'s settings").padding(.top, 6)
-                row("Screen shake") {
-                    Picker("Screen shake", selection: $options.shake) {
-                        ForEach(ShakeLevel.allCases, id: \.self) { Text($0.label).tag($0) }
-                    }
-                    .pickerStyle(.segmented).frame(maxWidth: 260)
-                }
-                row("Notification text") {
-                    Picker("Notification text", selection: $options.largeText) {
-                        Text("Standard").tag(false)
-                        Text("Large").tag(true)
-                    }
-                    .pickerStyle(.segmented).frame(maxWidth: 260)
-                }
-            } else {
-                Text("Screen shake and text size are set per crew member, from the route map once you're flying.")
-                    .font(rounded(11, .medium)).foregroundStyle(Color.finePrint)
-            }
-            #if DEBUG
-            developer
-            #endif
-            CTA(title: "Done", action: done).padding(.bottom, 4)
-        }
-        .onChange(of: device) { _, new in updateDevice(new) }
-        .onChange(of: options) { _, new in updateOptions(new) }
-    }
-
-    private func row<C: View>(_ label: String, @ViewBuilder _ control: () -> C) -> some View {
-        HStack {
-            Text(label).font(rounded(15, .bold))
-            Spacer()
-            control()
-        }
-    }
-}
+// MARK: - Options (GDD §9a): the oven control panel lives in GalleyCards.swift
 
 #if DEBUG
 /// Debug builds only: the Options card's Developer section.

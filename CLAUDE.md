@@ -62,6 +62,10 @@ Run the tests and a simulator build after gameplay changes.
 - `-introAt <seconds>` — freeze the 3D intro on one frame.
 - `-resetProfile` — delete saves and device settings.
 - `-demoMap`, `-flyAllLegs`, `-mapEditor` (DEBUG) — route map demos and the path editor.
+- `-landing` — open on the galley main menu; `-galleyShake` (DEBUG) — a bump every 1.2 s; `-galleyOpen oven|manual|continue|newgame`
+  (DEBUG) — start with that fitting open.
+- `-NSDoubleLocalizedStrings YES` — Apple's double-length pseudo-language: every localized word shows twice, to check
+  that labels on painted art still fit (they all go through `FittedLabel`).
 
 The Options screen has a DEBUG-only Developer section (skip the intro, make a Dev crew with every route open).
 

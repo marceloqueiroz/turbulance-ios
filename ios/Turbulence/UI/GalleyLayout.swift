@@ -1,8 +1,8 @@
 import CoreGraphics
 
-/// Where the pieces of the galley main menu sit (GDD §9a; specs/galley-main-menu). Every rectangle is in the
-/// pixels of the wall picture (`GalleyWall`, 3168 × 1344); `placement(in:)` maps them onto a screen.
-/// Phase 1 prototype: the layers are cut from the mockup, so these numbers change with the final art.
+/// Where the pieces of the galley main menu sit (GDD §9a; specs/galley-main-menu). Every rectangle is in wall
+/// units: the wall picture is 3168 × 1344 units (`GalleyWall` itself is 4224 × 1792 px); `placement(in:)` maps
+/// them onto a screen. The art is text-free: the logo, placards, plates, tag and binder cover get their words in code.
 enum GalleyLayout {
     static let wall = CGSize(width: 3168, height: 1344)
     /// What must always be on screen: the tag on the left to the teal cart's handle on the right, the window top to the floor.
@@ -15,11 +15,11 @@ enum GalleyLayout {
     /// The picture's own frame (for the four buttons, `hitRect` is the tap area).
     static func frame(_ piece: Piece) -> CGRect {
         switch piece {
-        case .cartContinue: CGRect(x: 516, y: 864, width: 1005, height: 476)
-        case .cartNewGame: CGRect(x: 1604, y: 864, width: 1042, height: 476)
-        case .tag: CGRect(x: 507, y: 936, width: 116, height: 225)
-        case .manual: CGRect(x: 2164, y: 206, width: 322, height: 337)
-        case .cupA: CGRect(x: 1357, y: 621, width: 122, height: 172)
+        case .cartContinue: CGRect(x: 515, y: 866.5, width: 1007, height: 474.5)
+        case .cartNewGame: CGRect(x: 1603, y: 863, width: 1044, height: 478)
+        case .tag: CGRect(x: 499, y: 936, width: 124, height: 225)
+        case .manual: CGRect(x: 2163, y: 203, width: 324, height: 346)
+        case .cupA: CGRect(x: 1352, y: 621.5, width: 127, height: 171.5)
         case .cupB: CGRect(x: 1483, y: 621, width: 127, height: 172)
         case .pot: CGRect(x: 1305, y: 393, width: 195, height: 117)       // the glass of the coffee pot, under its collar
         case .readyLight: CGRect(x: 1544, y: 233, width: 45, height: 160)
@@ -37,9 +37,16 @@ enum GalleyLayout {
 
     /// The middle of each cart's label plate, from the cart's top-left corner; the tag's pivot (where its string
     /// hangs from the cart handle), from the tag's top-left corner.
-    static let continuePlate = CGPoint(x: 551, y: 283)
-    static let newGamePlate = CGPoint(x: 464, y: 283)
-    static let tagPivot = CGPoint(x: 55, y: 2)
+    static let continuePlate = CGPoint(x: 553, y: 280)
+    static let newGamePlate = CGPoint(x: 466, y: 283)
+    static let tagPivot = CGPoint(x: 80, y: 2)
+    /// The middle of the tag's blank paper, from the tag's top-left corner.
+    static let tagPaper = CGPoint(x: 63, y: 152)
+    /// The crew-wings logo (`LogoMenu`) on the wall under the window: its middle and width.
+    static let logo = (center: CGPoint(x: 830, y: 735), width: CGFloat(450))
+    /// The middles of the blank placards under the oven (OPTIONS) and the binder's cubby (ABOUT).
+    static let optionsPlacard = CGPoint(x: 1892, y: 584)
+    static let aboutPlacard = CGPoint(x: 2358, y: 584)
     /// The oven door (`GalleyOvenDoor`), hinged at its bottom edge.
     static let ovenDoor = CGRect(x: 1672, y: 212, width: 443, height: 328)
     /// The binder's spine, as a fraction of its width: the cover swings open about it.
