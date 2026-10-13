@@ -2,8 +2,8 @@ import SwiftUI
 
 // MARK: - Title card and landing page (GDD §9a)
 
-/// The cabin flies in through the clouds and the logo lands (the title card); about 2 s later the logo rises
-/// and the landing menu fades in over the same scene.
+/// The cabin flies in through the clouds and the logo lands (the title card); about 2 s later the galley wall
+/// fades in over the same sky, which now shows through its window (the galley main menu, specs/2026-10-08-galley-main-menu.md).
 struct TitleView: View {
     let app: AppModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -12,6 +12,8 @@ struct TitleView: View {
     @State private var logo = false
     /// Counts the bumps on the landing page; each one plays the jolt below.
     @State private var bumps = 0
+    /// The same bumps as the galley feels them (recent ones only).
+    @State private var kicks: [GalleyKick] = []
 
     private var menu: Bool { app.screen == .landing }
 
@@ -28,7 +30,8 @@ struct TitleView: View {
     var body: some View {
         GeometryReader { geo in
             let size = geo.size
-            let shake = reduceMotion ? 0 : app.options.shake.scale     // follows the last crew member's Screen shake option
+            let motion = reduceMotion ? 0 : app.options.shake.scale    // follows the last crew member's Screen shake option
+            let shake = motion * 0.3                                   // the room holds still; the loose things in the galley move
             ZStack {
                 TimelineView(.animation(paused: reduceMotion)) { timeline in
                     let t = timeline.date.timeIntervalSince(start)
@@ -42,33 +45,28 @@ struct TitleView: View {
                             .offset(y: reduceMotion ? 0 : sin(t * 2.0) * 6 + sin(t * 4.7) * 1.5)
                             .position(x: size.width * 0.73, y: size.height * 0.53)
                             .offset(x: arrived ? 0 : size.width * 0.6)
+                            .opacity(menu ? 0 : 1)
                         cloud(Self.clouds[Self.clouds.count - 1], t: t, in: size)
+                            .opacity(menu ? 0 : 1)
                     }
                 }
                 .contentShape(Rectangle())
                 .onTapGesture { app.finishSplash() }       // a tap skips the title card; does nothing on the landing page
                 .accessibilityHidden(true)
 
-                // the crew-wings badge (branding/gemini/logo/round2/W1): big on the title card, tucked above the menu on the landing page
-                // the logo and menu are one block, centred on the left and scaled with the screen (iPhone 1×, iPad up to 1.8×)
-                let s = min(1.8, max(1, size.height / 402))
-                let logoW = 260 * s, logoH = logoW * 558 / 1025, menuH = 198 * s, gap = 18 * s
-                let top = (size.height - logoH - gap - menuH) / 2
+                // the crew-wings badge (branding/gemini/logo/round2/W1) lands on the title card; the galley wall has its own
                 Image("LogoMenu")
                     .resizable().scaledToFit()
-                    .frame(width: menu ? logoW : min(size.width * 0.4, 360 * s))
-                    .scaleEffect(logo ? 1 : 0.6).opacity(logo ? 1 : 0)
+                    .frame(width: min(size.width * 0.4, 360 * min(1.8, max(1, size.height / 402))))
+                    .scaleEffect(logo ? 1 : 0.6).opacity(logo && !menu ? 1 : 0)
                     .shadow(color: .black.opacity(0.3), radius: 8, y: 5)
-                    .position(x: size.width * 0.29, y: menu ? top + logoH / 2 : size.height * 0.47)
+                    .position(x: size.width * 0.29, y: size.height * 0.47)
                     .allowsHitTesting(false)
                     .accessibilityLabel("Turbulence")
+                    .accessibilityHidden(menu)
 
-                LandingMenu(app: app)
-                    .frame(width: 240)
-                    .scaleEffect(s)
-                    .position(x: size.width * 0.29, y: top + logoH + gap + menuH / 2)
+                galley
                     .opacity(menu ? 1 : 0)
-                    .offset(y: menu ? 0 : 16)
                     .allowsHitTesting(menu)
                     .accessibilityHidden(!menu)
             }
@@ -100,12 +98,31 @@ struct TitleView: View {
             guard menu else { return }
             let haptic = UIImpactFeedbackGenerator(style: .medium)
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(Double.random(in: 5...9)))
+                var wait = Double.random(in: 5...9)
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("-galleyShake") { wait = 1.2 }   // tuning the galley: a bump every 1.2 s
+                #endif
+                try? await Task.sleep(for: .seconds(wait))
                 guard !Task.isCancelled, app.sheet == nil else { continue }    // no bumps under an open card
-                bumps += 1
+                bump()
                 if app.device.haptics { haptic.impactOccurred(intensity: 0.7) }
             }
         }
+    }
+
+    private var galley: some View {
+        #if DEBUG
+        GalleyMenu(app: app, kicks: kicks, start: start, motion: reduceMotion ? 0 : app.options.shake.scale, bump: bump)
+        #else
+        GalleyMenu(app: app, kicks: kicks, start: start, motion: reduceMotion ? 0 : app.options.shake.scale)
+        #endif
+    }
+
+    /// One patch of rough air: the screen jolts a little and every loose thing in the galley gets a kick.
+    private func bump() {
+        let now = Date.now.timeIntervalSince(start)
+        kicks = kicks.filter { now - $0.time < GalleyMotion.memory } + [GalleyKick.random(at: now)]
+        bumps += 1
     }
 
     /// A cloud drifting right to left, wrapping round once it leaves the screen.
@@ -154,91 +171,3 @@ struct Jolt {
     }
 }
 
-/// Continue (hidden with no profiles), New Game, Options, About. The main action is coral.
-struct LandingMenu: View {
-    let app: AppModel
-
-    var body: some View {
-        let hasCrew = !app.slots.isEmpty
-        VStack(spacing: 10) {
-            if hasCrew {
-                MenuButton(title: "Continue", detail: app.profile.map { "Last flown: \($0.name)" }, color: .coral, action: app.continueGame)
-            }
-            MenuButton(title: "New Game", color: hasCrew ? .teal : .coral, action: app.newGame)
-            MenuButton(title: "Options", color: .cream, ink: .navy) { app.sheet = .options }
-            MenuButton(title: "About", color: .cream, ink: .navy) { app.sheet = .about }
-        }
-    }
-}
-
-/// A full-width CTA in the same pressed-capsule style, with an optional second line.
-struct MenuButton: View {
-    let title: String
-    var detail: String?
-    var color: Color = .coral
-    var ink: Color = .white
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(spacing: 0) {
-                Text(title).font(rounded(19, .bold))
-                if let detail { Text(detail).font(rounded(11, .semibold)).opacity(0.85).lineLimit(1) }
-            }
-            .foregroundStyle(ink)
-            .frame(maxWidth: .infinity, minHeight: detail == nil ? 40 : 48)
-            .background(color, in: Capsule())
-            .overlay(Capsule().stroke(Color.navy, lineWidth: 3))
-            .background(Capsule().fill(Color.navy).offset(y: 4))
-        }
-        .buttonStyle(.plain)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isButton)
-    }
-}
-
-// MARK: - About
-
-struct AboutCard: View {
-    let close: () -> Void
-
-    private var version: String {
-        let info = Bundle.main.infoDictionary
-        let v = info?["CFBundleShortVersionString"] as? String ?? "?"
-        let b = info?["CFBundleVersion"] as? String ?? "?"
-        return "Version \(v) (\(b))"
-    }
-
-    var body: some View {
-        Card {
-            HStack {
-                Eyebrow(text: "About")
-                Spacer()
-                Button(action: close) { Image(systemName: "xmark").font(.system(size: 14, weight: .bold)) }
-                    .buttonStyle(.plain).accessibilityLabel("Close")
-            }
-            // the full crew-wings logo with the attendant (branding/gemini/logo/L5); the main menu uses the character-free one
-            Image("LogoCrew")
-                .resizable().scaledToFit()
-                .frame(height: 88)
-                .frame(maxWidth: .infinity)
-                .accessibilityLabel("Turbulence")
-            HStack(spacing: 8) {
-                ZeldaLabsMark().frame(width: 26, height: 26).accessibilityHidden(true)
-                Text(version).font(rounded(13, .semibold)).foregroundStyle(Color.finePrint)
-            }
-            .frame(maxWidth: .infinity)
-            section("Credits", "Designed and built by Zelda Labs. Sound effects are synthesised in the game.")
-            section("Privacy", "Your crew and progress are saved on this device only. No account, no ads, no tracking.")
-            section("Made with", "Swift, SwiftUI and SpriteKit.")
-            CTA(title: "Done", action: close).padding(.bottom, 4)
-        }
-    }
-
-    private func section(_ title: String, _ body: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title.uppercased()).font(rounded(10, .heavy)).tracking(1.2).foregroundStyle(Color.coral)
-            Text(body).font(rounded(14, .medium))
-        }
-    }
-}

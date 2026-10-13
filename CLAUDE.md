@@ -41,7 +41,8 @@ Code comments cite GDD sections (e.g. `GDD §5a`); keep doing that.
 - `ios/tools/` — asset pipeline scripts (`sprite_atlas.py`, character rig/segmentation, map cutouts, icon tools).
 - `branding/` — key art, logos, icon sources, map art, sprite style work and character art
   (`branding/sprites/characters/`). `animation-tests/` is git-ignored.
-- `specs/` — one dated spec per plan (see "Plans become specs").
+- `specs/` — one dated spec per plan (see "Plans become specs"); a spec's images go in a folder of the same name,
+  e.g. `specs/2026-10-08-galley-main-menu.md` + `specs/2026-10-08-galley-main-menu/`.
 - `prototype/index.html` — the original web prototype; frozen reference, don't extend it.
 - `.claude/skills/animate-sprite/` — project skill for making 24-frame character animations with Gemini.
 
@@ -62,6 +63,10 @@ Run the tests and a simulator build after gameplay changes.
 - `-introAt <seconds>` — freeze the 3D intro on one frame.
 - `-resetProfile` — delete saves and device settings.
 - `-demoMap`, `-flyAllLegs`, `-mapEditor` (DEBUG) — route map demos and the path editor.
+- `-landing` — open on the galley main menu; `-galleyShake` (DEBUG) — a bump every 1.2 s; `-galleyOpen oven|manual|continue|newgame`
+  (DEBUG) — start with that fitting open.
+- `-NSDoubleLocalizedStrings YES` — Apple's double-length pseudo-language: every localized word shows twice, to check
+  that labels on painted art still fit (they all go through `FittedLabel`).
 
 The Options screen has a DEBUG-only Developer section (skip the intro, make a Dev crew with every route open).
 
