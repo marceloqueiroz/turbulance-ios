@@ -16,7 +16,9 @@ struct RootView: View {
             case .map: WorldMapView(app: app)
             case .game: GameView(app: app, game: app.game)
             }
-            if let sheet = app.sheet {
+            if app.sheet == .paywall {
+                paywall.transition(.move(edge: .bottom))        // full screen, not a card over a scrim
+            } else if let sheet = app.sheet {
                 Scrim { card(for: sheet) }
                     .ignoresSafeArea()
                     .transition(.opacity)
@@ -44,10 +46,14 @@ struct RootView: View {
         case .about:
             AboutSpread(close: app.dismissSheet)
         case .paywall:
-            PaywallCard(price: app.fullGamePrice, status: app.storeStatus,
-                        buy: { Task { await app.buyFullGame() } }, restore: { Task { await app.restorePurchases() } },
-                        close: app.dismissSheet)
+            paywall
         }
+    }
+
+    private var paywall: PaywallScreen {
+        PaywallScreen(price: app.fullGamePrice, status: app.storeStatus,
+                      buy: { Task { await app.buyFullGame() } }, restore: { Task { await app.restorePurchases() } },
+                      close: app.dismissSheet)
     }
 
     private var optionsCard: OptionsPanel {

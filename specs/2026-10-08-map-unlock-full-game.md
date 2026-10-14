@@ -98,14 +98,15 @@ The player reaches the purchase from two places: a padlocked route on the map an
 
 | Where | Trigger | Shows |
 | --- | --- | --- |
-| Route map | Tap a route marked "Full game" | Paywall sheet |
+| Route map | Tap a route marked "Full game" | Full-screen paywall |
 | Route map | Tap a route marked "12 ★ to unlock" | Today's notice (stars needed, stars you have) |
-| Results screen | Finish TB106 (last flight of Route 1) without the purchase | "Unlock Route 2" button in place of "Next flight", opening the paywall sheet |
+| Results screen | Finish TB106 (last flight of Route 1) without the purchase | "Unlock Route 2" button in place of "Next flight", opening the paywall |
 | Options | "Restore purchases" row (required by App Review) | Spinner, then "Full game restored" or "Nothing to restore" |
 
-### Paywall sheet (`UI/PaywallSheet.swift`)
+### Paywall (`UI/Paywall.swift`)
 
-- Key art header, title "Unlock the full game".
+- Full screen in the cards' cream, navy and coral, edge to edge with no card rim (a frame round the screen fought the display's round corners); content keeps the same margin on both sides; slides up from the bottom.
+- Two columns in landscape: logo, "Unlock the full game" and the one-line pitch on the left; what's included and the buttons on the right. Stacks and scrolls in portrait.
 - What's included: Route 2 Coastal Shuttle, Route 3 Transcontinental, and every future route, one line each with its aircraft.
 - One line on star gates: "Routes still open as you earn stars."
 - Buttons: Buy for `displayPrice`, Restore, Not now.
@@ -157,7 +158,7 @@ Rules and tests go first, so the art can arrive last behind a placeholder lock.
 
 1. Access rules and tests (section 3).
 2. Hidden regions and the single Coming Soon (section 1).
-3. `Store`, local `.storekit` file, paywall sheet, results-screen button, Restore, debug tools (sections 4 and 5).
+3. `Store`, local `.storekit` file, full-screen paywall, results-screen button, Restore, debug tools (sections 4 and 5).
 4. Padlock art and its idle and unlock motion (section 2), replacing a code-drawn placeholder lock.
 5. Doc updates and App Store Connect setup (section 7).
 
