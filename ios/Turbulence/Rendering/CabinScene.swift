@@ -472,7 +472,7 @@ final class CabinScene: SKScene {
         for (i, b) in layout.bins.enumerated() {
             let fresh = hiding.contains(i)
             let n: SKSpriteNode
-            if let s = skin?.station(b.kind, machine: nil) {
+            if let s = skin?.station(b.kind, machine: nil, backInLine: b.y < layout.aisles[0]) {
                 n = SKSpriteNode(texture: s.texture, size: s.size); n.anchorPoint = s.anchor
                 n.position = pt(b.x, b.y - 4)
                 // the painted trash opens to the right (nose wall); on the tail wall it faces the other way
@@ -888,7 +888,9 @@ final class CabinScene: SKScene {
         }
         if let skin {
             for (i, n) in stationNodes where sim.layout.bins[i].isMachine {
-                guard let s = skin.station(sim.layout.bins[i].kind, machine: sim.machines[i]), n.texture !== s.texture else { continue }
+                let b = sim.layout.bins[i]
+                guard let s = skin.station(b.kind, machine: sim.machines[i], backInLine: b.y < sim.layout.aisles[0]),
+                      n.texture !== s.texture else { continue }
                 n.texture = s.texture; n.size = s.size; n.anchorPoint = s.anchor
             }
         }

@@ -43,7 +43,9 @@ struct CabinSkin {
     private static let margin: CGFloat = 6
 
     /// The sprite for a station: texture, size in world units and the anchor that puts the body's centre on the station.
-    func station(_ kind: StationKind, machine: MachineState?) -> (texture: SKTexture, size: CGSize, anchor: CGPoint)? {
+    /// `backInLine`: the machine stands against the back wall beside the coffee machine, so the oven is drawn as deep as the
+    /// coffee machine (stretched front to back), their top and bottom edges in line (it's shallower, and looked set back).
+    func station(_ kind: StationKind, machine: MachineState?, backInLine: Bool = false) -> (texture: SKTexture, size: CGSize, anchor: CGPoint)? {
         let name: String
         switch kind {
         case .drinks: name = "drinks"
@@ -61,7 +63,21 @@ struct CabinSkin {
         default:
             return nil
         }
-        return sprite(name, width: widths[name.split(separator: "-").first.map(String.init) ?? name] ?? 34)
+        guard var s = sprite(name, width: widths[name.split(separator: "-").first.map(String.init) ?? name] ?? 34) else { return nil }
+        if backInLine && kind == .oven, let oven = bodyHeight(name), let coffee = bodyHeight("coffee-idle") {
+            s.size.height *= coffee / oven          // the anchor is a share of the picture, so the body stays centred
+        }
+        return s
+    }
+
+    /// A fitting's body height in world units, as `sprite` draws it.
+    private func bodyHeight(_ name: String) -> CGFloat? {
+        guard let t = textures[name] else { return nil }
+        let px = t.size()
+        let bodyW = px.width - 2 * Self.margin
+        let top = Self.margin + Self.bodyTop(name) * px.height
+        let w = widths[name.split(separator: "-").first.map(String.init) ?? name] ?? 34
+        return min(px.height - top - Self.margin, bodyW * Self.aspect(name)) * w / bodyW
     }
 
     /// One aft lavatory's painted open door and toilet, placed from the layout's `aftX` (world units, top-down y).
