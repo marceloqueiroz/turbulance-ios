@@ -43,10 +43,12 @@ struct CabinSkin {
     private static let margin: CGFloat = 6
 
     /// The sprite for a station: texture, size in world units and the anchor that puts the body's centre on the station.
-    /// `backInLine`: the machine stands against the back wall beside the coffee machine, so the oven is drawn as deep as the
-    /// coffee machine (stretched front to back), their top and bottom edges in line (it's shallower, and looked set back).
-    func station(_ kind: StationKind, machine: MachineState?, backInLine: Bool = false) -> (texture: SKTexture, size: CGSize, anchor: CGPoint)? {
-        let name: String
+    /// An oven is shallower than its neighbours and looked set back, so both ovens are stretched front to back to the coffee
+    /// machine's depth: above the aisle (`topRow`) in line with the coffee machine, below it standing on the wall like the
+    /// snack tray (bottom edges in line; it reaches a little past the tray's rim). The scene flips the bottom-row oven upside
+    /// down so its door faces the aisle (`ovenFlipped`).
+    func station(_ kind: StationKind, machine: MachineState?, topRow: Bool = false) -> (texture: SKTexture, size: CGSize, anchor: CGPoint)? {
+        var name: String
         switch kind {
         case .drinks: name = "drinks"
         case .trash: name = "trash"
@@ -63,11 +65,33 @@ struct CabinSkin {
         default:
             return nil
         }
+        // upside down, the ready oven's steam would hang below it: the flipped one uses a copy with the steam cut away
+        if Self.ovenFlipped(kind, topRow: topRow) && name == "oven-ready" && textures["oven-ready-flipped"] != nil { name = "oven-ready-flipped" }
+        // upside down, the ready oven's steam would hang below it: the flipped one uses a copy with the steam cut away
+        if Self.ovenFlipped(kind, topRow: topRow) && name == "oven-ready" && textures["oven-ready-flipped"] != nil { name = "oven-ready-flipped" }
         guard var s = sprite(name, width: widths[name.split(separator: "-").first.map(String.init) ?? name] ?? 34) else { return nil }
-        if backInLine && kind == .oven, let oven = bodyHeight(name), let coffee = bodyHeight("coffee-idle") {
-            s.size.height *= coffee / oven          // the anchor is a share of the picture, so the body stays centred
+        if kind == .oven, let oven = bodyHeight(name), let edges = topRow ? coffeeEdges : snackTrayEdges {
+            s.size.height *= (edges.bottom - edges.top) / oven   // the anchor is a share of the picture: the body stays centred
+            // then moves to the middle of those edges; the bottom-row oven is drawn flipped about its anchor (its door faces
+            // the aisle above it), which mirrors that move too
+            s.anchor.y += (topRow ? 1 : -1) * (edges.top + edges.bottom) / 2 / s.size.height
         }
         return s
+    }
+
+    /// Whether a station is drawn upside down: an oven below the aisle, so its door faces the aisle.
+    static func ovenFlipped(_ kind: StationKind, topRow: Bool) -> Bool { kind == .oven && !topRow }
+
+    /// The coffee machine's top and bottom edges, from its station point (world units, top-down).
+    private var coffeeEdges: (top: CGFloat, bottom: CGFloat)? {
+        bodyHeight("coffee-idle").map { (-$0 / 2, $0 / 2) }
+    }
+
+    /// Where the bottom-row oven goes, from its station point: as deep as the coffee machine, its bottom edge on the snack
+    /// tray's (the tray's body is its whole picture, packets included).
+    private var snackTrayEdges: (top: CGFloat, bottom: CGFloat)? {
+        guard let tray = bodyHeight("snack"), let coffee = coffeeEdges else { return nil }
+        return (tray / 2 - (coffee.bottom - coffee.top), tray / 2)
     }
 
     /// A fitting's body height in world units, as `sprite` draws it.
