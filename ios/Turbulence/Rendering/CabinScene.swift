@@ -1576,6 +1576,9 @@ enum AttendantArt {
     /// The front and back frames were painted with a bigger head and body than the side ones (same hat-to-feet height,
     /// but her head is ~10% wider than it is deep in profile): drawn at this scale so she doesn't swell turning to face you.
     static let frontBackScale: CGFloat = 0.9
+    /// The cleaning frames were fitted hat-to-feet like the standing ones, but she's crouched in them, so her head and
+    /// body came out ~16% bigger (hat 49 px wide vs 42): drawn at this scale so she doesn't swell when she bends to clean.
+    static let cleanScale: CGFloat = 0.86
     /// Held while standing with the tray up: the carry cycle's passing pose, both feet under the body.
     static let standFrame = 6
     private static let atlas = SKTextureAtlas(named: "Attendant")
@@ -1757,8 +1760,8 @@ final class CrewNode: SKNode {
                 _ = busy
                 let k = Int(clock / 1.2 * Double(frames.count)) % frames.count
                 body.texture = frames[k]
-                body.xScale = face < 0 ? -1 : 1
-                body.yScale = 1
+                body.xScale = (face < 0 ? -1 : 1) * AttendantArt.cleanScale
+                body.yScale = AttendantArt.cleanScale
             } else {
                 if moving {
                     body.texture = AttendantArt.frames(carrying ? .carry : .walk, facing)[Int(cycle * Double(AttendantArt.frameCount)) % AttendantArt.frameCount]
