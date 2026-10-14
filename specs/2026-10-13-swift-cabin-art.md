@@ -1,4 +1,4 @@
-Status: in progress
+Status: built (simulator TB206; tests 119/119), not yet committed
 
 # N737-Swift painted cabin
 
@@ -21,13 +21,14 @@ seat, counter, lavatory and station stays exactly where the layout puts it.
 
 ## Design
 
-- **One painting, lengthened.** The full Swift is 1326 × 468 world units (≈2.8:1), wider than Gemini paints (21:9).
-  The concept is painted for an 11-economy-row Swift (1002 wide, the Comet's 2.37:1 framing), guided by the game's
-  own render of that layout (`Art.cabin`) so it lands at the layout's proportions like the Comet's did. The game's
-  20-row cabin is then made by repeating one economy-row strip (rows are identical, 36 units apart).
-- **Empty base picture** like the Comet's: seats empty, galley counters bare (the stations are separate sprites), no
-  text or labels. Covers the same world rectangle convention as the Comet (`baseRect`: from 33 units before the nose
-  wall line to 35 past the tail, 18 to height − 26).
+- **Painted pieces, composed at the layout's coordinates.** The full Swift is 1326 × 468 world units (≈2.8:1),
+  wider than Gemini paints (21:9), and a concept never lands exactly on the layout. So the base is composed, like a
+  sprite sheet, at 4 px per world unit over the world rectangle (33, 1)–(1361, 462): Gemini paints the Coastal cabin
+  (guided by the game's own render of an 11-row Swift) and then an empty copy of it; the floor and runner repeat from
+  a clean stretch of the empty copy, the walls get one window per row, the counters, wardrobe and lavatories are cut
+  out and placed on their layout blocks, the curtain is drawn at `curtainX`, and two isolated seat sprites (economy,
+  premium; keyed from green) are placed at every layout seat point with a soft shadow. Re-runnable:
+  `ios/tools/swift_cabin_compose.py`.
 - **Reused from the Comet set:** galley fittings and machine states, trash bins, jump seats and the seated attendant
   (`CabinComet` atlas). Swift-only art: the base picture. The Comet's open lavatory doors are positioned for its own
   lavatories, so they stay Comet-only for now (Swift lavatory doors stay painted shut).
@@ -40,7 +41,8 @@ seat, counter, lavatory and station stays exactly where the layout puts it.
 
 - `Rendering/CabinSkin.swift`: `forAircraft(.swift)` with the Swift base and `baseRect`; per-set fitting atlas
   (reuses `CabinComet`); lavatory door art only where a set has it.
-- Art: `CabinSwiftBase` image set; sources in `branding/sprites/cabin/swift/`.
+- Art: `CabinSwiftBase` image set; sources in `branding/sprites/cabin/swift/` (concept, empty concept, layout
+  guide, seat sprites, composed master); composer in `ios/tools/swift_cabin_compose.py`.
 
 ## Testing
 
@@ -51,3 +53,5 @@ seat, counter, lavatory and station stays exactly where the layout puts it.
 ## Open questions
 
 - Does the curtain need its own sprite (to show it open or drawn), or is painted into the base enough?
+- The A320-Current shares this layout: reuse the composer with its own identity (coral covers, lighter galley,
+  diamond runner).
