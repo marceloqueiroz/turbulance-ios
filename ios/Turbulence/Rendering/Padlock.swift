@@ -5,8 +5,8 @@ import UIKit
 /// when it's in the catalogue, else a code-drawn brass lock of the same size. Sized in screen points; the badge
 /// it sits on keeps it the same size at any zoom.
 final class Padlock: SKNode {
-    static let width: CGFloat = 70
-    static let height: CGFloat = 92
+    static let width: CGFloat = 44
+    static let height: CGFloat = 56
 
     private let closed: SKNode
     private let opened: SKNode
@@ -43,14 +43,14 @@ final class Padlock: SKNode {
     /// Stand-in until the painted art lands: brass body, coral keyhole plate, steel shackle, soft drop shadow.
     private static func drawn(open: Bool) -> SKNode {
         let node = SKNode()
-        let bodyH: CGFloat = 46, bodyY = -height / 2 + bodyH / 2
+        let bodyH = height * 0.6, bodyY = -height / 2 + bodyH / 2
         let shadow = SKShapeNode(ellipseOf: CGSize(width: width * 0.9, height: 10))
         shadow.fillColor = UIColor.black.withAlphaComponent(0.18); shadow.strokeColor = .clear
         shadow.position = CGPoint(x: 0, y: -height / 2 - 2)
         node.addChild(shadow)
 
         // the shackle: a thick rounded arch; open, it lifts and swings clear of the right-hand socket
-        let r: CGFloat = 17, lift: CGFloat = open ? 12 : 0
+        let r = width * 0.27, lift: CGFloat = open ? height * 0.15 : 0
         let arch = CGMutablePath()
         arch.move(to: CGPoint(x: -r, y: bodyY + bodyH / 2 - 4))
         arch.addLine(to: CGPoint(x: -r, y: bodyY + bodyH / 2 + 8))
