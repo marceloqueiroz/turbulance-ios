@@ -113,8 +113,8 @@ The player reaches the purchase from two places: a padlocked route on the map an
 
 ### Debug tools (DEBUG builds only)
 
-- Developer section: an "Own full game" toggle that overrides the store.
-- Launch arguments `-fullGame` and `-noFullGame`.
+- Options → Developer section: a "Full game" dev tool, a three-way picker (Store / Owned / Locked) that follows or overrides the store, kept in DevSettings like the other dev switches.
+- No launch arguments: the Options toggle is the only override.
 - The Dev crew turns ownership on.
 
 ## 6. Testing
@@ -127,7 +127,7 @@ Every access state gets a unit test, and a purchase is checked end to end in the
   - exactly one region shows Coming soon
   - a purchase moves the right routes into `pendingReveals`
 - `AppModelTests`: buying through the fake store rebuilds the map state; the results screen after TB106 offers Unlock instead of Next flight; Restore with nothing owned reports it.
-- `DevToolsTests`: the Dev crew owns the full game; `-fullGame` and `-noFullGame` override the store.
+- `DevToolsTests`: the Dev crew owns the full game; the Options dev toggle overrides the store both ways.
 - `FlightSimulationTests`, `Bot`, `IntensityReportTests`: no changes expected; the whole suite runs anyway.
 - Simulator: with `Turbulence.storekit`, take screenshots of the padlocked map, the paywall, a purchase, the reveal, a refund (Xcode's transaction manager) and Restore.
 

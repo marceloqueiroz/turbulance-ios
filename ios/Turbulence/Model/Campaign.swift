@@ -228,6 +228,8 @@ struct Route: Identifiable, Equatable {
     let flights: [FlightPlan]
     let unlockStars: Int
     var inDevelopment: Bool { flights.isEmpty }
+    /// Route 1 is free; every later route needs the Full Game purchase as well as its stars (GDD §9).
+    var requiresFullGame: Bool { id >= 2 }
 }
 
 /// v1.0 routes (GDD §9a, §11): Routes 1–3, 30 flights. Every flight mixes several task types (GDD §6a).

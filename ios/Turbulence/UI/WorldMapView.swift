@@ -9,6 +9,8 @@ struct WorldMapView: View {
     @State private var notice: Notice?
     /// A briefing waiting for the plane and any reveals to finish.
     @State private var heldBriefing: FlightPlan?
+    /// Reveals are playing; a second batch waits for this one.
+    @State private var revealing = false
 
     struct Notice: Equatable {
         let title: String
@@ -47,7 +49,21 @@ struct WorldMapView: View {
         .animation(.easeOut(duration: 0.2), value: app.briefing)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: notice)
         .onAppear(perform: arrive)
-        .onChange(of: app.profile) { _, p in if let p, heldBriefing == nil, app.pendingLeg == nil { scene.configure(profile: p) } }
+        .onChange(of: app.profile) { _, p in
+            if let p, heldBriefing == nil, app.pendingLeg == nil { scene.configure(profile: p, fullGame: app.ownsFullGame) }
+        }
+        // buying Full Game (or restoring it) while on the map: the routes it opens reveal themselves once no card is open
+        .onChange(of: app.ownsFullGame) { _, _ in revealNewlyOpened(rebuild: true) }
+        .onChange(of: app.sheet) { _, sheet in if sheet == nil { revealNewlyOpened(rebuild: false) } }
+    }
+
+    /// `rebuild` redraws the map even with nothing to reveal (ownership changed: padlock labels and pins change).
+    private func revealNewlyOpened(rebuild: Bool) {
+        guard let p = app.profile, !revealing, heldBriefing == nil, app.pendingLeg == nil else { return }
+        let reveals = MapState(profile: p, fullGame: app.ownsFullGame).pendingReveals
+        guard rebuild || !reveals.isEmpty else { return }
+        scene.configure(profile: p, fullGame: app.ownsFullGame, hiding: Set(reveals))
+        if app.sheet == nil && !reveals.isEmpty { playReveals(reveals) }
     }
 
     /// Arriving on the map: the toy plane flies the leg just finished, newly opened routes reveal themselves one by one,
@@ -59,9 +75,9 @@ struct WorldMapView: View {
         scene.editing = app.mapEditor
         app.markMapVisited()
         guard let profile = app.profile else { return }
-        let reveals = MapState(profile: profile).pendingReveals
+        let reveals = MapState(profile: profile, fullGame: app.ownsFullGame).pendingReveals
         let leg = app.pendingLeg
-        scene.configure(profile: profile, hiding: Set(reveals))
+        scene.configure(profile: profile, fullGame: app.ownsFullGame, hiding: Set(reveals))
         #if DEBUG
         // -flyAllLegs: the toy plane flies every leg of every route in turn, for checking how it flies;
         // -flyFromRoute N starts at route N
@@ -77,14 +93,34 @@ struct WorldMapView: View {
         }
         #endif
         if leg == nil && reveals.isEmpty {
-            if let city = Campaign.destination(of: app.briefing ?? profile.nextFlight) { scene.focus(city: city, animated: false) }
+            if let city = Campaign.destination(of: app.briefing ?? profile.nextFlight(fullGame: app.ownsFullGame)) {
+                scene.focus(city: city, animated: false)
+            }
             return
         }
-        heldBriefing = app.briefing
-        app.briefing = nil
         app.pendingLeg = nil
+        if let leg {
+            if let from = Campaign.route(containing: leg.id).flatMap({ r in r.flights.firstIndex(of: leg).map { r.cities[$0] } }) {
+                scene.focus(city: from, animated: false)
+            }
+            heldBriefing = app.briefing
+            app.briefing = nil
+            scene.flyLeg(leg) { playReveals(reveals) }
+        } else {
+            playReveals(reveals)
+        }
+    }
+
+    /// Newly opened routes reveal themselves one by one; a waiting briefing opens once they're done.
+    private func playReveals(_ reveals: [Int]) {
+        revealing = true
+        if heldBriefing == nil {
+            heldBriefing = app.briefing
+            app.briefing = nil
+        }
         func revealNext(_ remaining: [Int]) {
             guard let id = remaining.first else {
+                revealing = false
                 app.markRevealsSeen()
                 if let held = heldBriefing {
                     if let city = Campaign.destination(of: held) { scene.focus(city: city) }
@@ -95,14 +131,7 @@ struct WorldMapView: View {
             }
             scene.reveal(route: id) { revealNext(Array(remaining.dropFirst())) }
         }
-        if let leg {
-            if let from = Campaign.route(containing: leg.id).flatMap({ r in r.flights.firstIndex(of: leg).map { r.cities[$0] } }) {
-                scene.focus(city: from, animated: false)
-            }
-            scene.flyLeg(leg) { revealNext(reveals) }
-        } else {
-            revealNext(reveals)
-        }
+        revealNext(reveals)
     }
 
     /// Debug-only toolbar for drawing city-life paths; Export copies JSON for MapLayout.json.
@@ -145,7 +174,7 @@ struct WorldMapView: View {
             .background(Color.panel, in: Capsule())
             .overlay(Capsule().stroke(Color.panelLine, lineWidth: 1))
             RoundButton(system: "location.fill", label: "Show the next flight") {
-                if let city = Campaign.destination(of: profile.nextFlight) { scene.focus(city: city) }
+                if let city = Campaign.destination(of: profile.nextFlight(fullGame: app.ownsFullGame)) { scene.focus(city: city) }
             }
             RoundButton(system: "gearshape.fill", label: "Options") { app.sheet = .options }
         }
@@ -157,7 +186,7 @@ struct WorldMapView: View {
         notice = nil
         switch tap {
         case .flight(let plan):
-            if app.profile?.isUnlocked(plan) == true {
+            if app.profile?.isUnlocked(plan, fullGame: app.ownsFullGame) == true {
                 app.briefing = plan
             } else if let before = Campaign.flight(before: plan), let route = Campaign.route(containing: before.id),
                       let n = route.flights.firstIndex(of: before) {
@@ -167,6 +196,8 @@ struct WorldMapView: View {
             show(Notice(title: "Route \(route.id) · \(route.name)",
                         detail: "Unlocks at \(needs) stars. You have \(have). About two stars a flight on the earlier routes gets you there.",
                         symbol: "lock.fill"))
+        case .fullGame:
+            app.showPaywall()
         case .comingSoon(let name):
             show(Notice(title: name, detail: "Arrives in a future update.", symbol: "cloud.bolt.fill"))
         }

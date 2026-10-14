@@ -34,7 +34,7 @@ struct RootView: View {
     @ViewBuilder private func card(for sheet: AppModel.Sheet) -> some View {
         switch sheet {
         case .picker, .replace:
-            ProfileSwitcherCard(slots: app.slots, replacing: sheet == .replace, select: app.continueAs,
+            ProfileSwitcherCard(slots: app.slots, fullGame: app.ownsFullGame, replacing: sheet == .replace, select: app.continueAs,
                                 create: app.startNewCrew, delete: app.deleteProfile, close: app.dismissSheet)
         case .newCrew:
             OnboardingCard(firstRun: app.slots.isEmpty, create: { app.createProfile(name: $0, avatar: $1) },
@@ -43,13 +43,20 @@ struct RootView: View {
             optionsCard
         case .about:
             AboutSpread(close: app.dismissSheet)
+        case .paywall:
+            PaywallCard(price: app.fullGamePrice, status: app.storeStatus,
+                        buy: { Task { await app.buyFullGame() } }, restore: { Task { await app.restorePurchases() } },
+                        close: app.dismissSheet)
         }
     }
 
     private var optionsCard: OptionsPanel {
         var card = OptionsPanel(device: app.device, updateDevice: app.update, done: app.dismissSheet)
+        card.storeStatus = app.storeStatus
+        card.restore = { Task { await app.restorePurchases() } }
         #if DEBUG
-        card.developer = DevSection(canMakeDev: app.slots.devSlot != nil, makeDev: app.makeDevProfile)
+        card.developer = DevSection(canMakeDev: app.slots.devSlot != nil, makeDev: app.makeDevProfile,
+                                    fullGame: Binding(get: { app.devFullGame }, set: { app.devFullGame = $0 }))
         #endif
         return card
     }
@@ -131,6 +138,7 @@ struct MenuChip: View {
 /// Continue's picker. In replace mode (New Game with all four slots full) the only action is deleting one.
 struct ProfileSwitcherCard: View {
     let slots: ProfileSlots
+    let fullGame: Bool
     var replacing = false
     let select: (Int) -> Void
     let create: (Int) -> Void
@@ -149,7 +157,7 @@ struct ProfileSwitcherCard: View {
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
                 ForEach(0..<ProfileSlots.count, id: \.self) { i in
                     if let p = slots.slots[i] {
-                        ProfileSlotView(profile: p, lastFlown: i == slots.active && !replacing, selectable: !replacing,
+                        ProfileSlotView(profile: p, fullGame: fullGame, lastFlown: i == slots.active && !replacing, selectable: !replacing,
                                         select: { select(i) }, delete: { delete(i) })
                     } else {
                         Button { create(i) } label: {
@@ -178,6 +186,7 @@ struct ProfileSwitcherCard: View {
 /// A filled slot: tap to fly as them; hold the bin for 1.2 s to delete (it can't be undone).
 struct ProfileSlotView: View {
     let profile: Profile
+    let fullGame: Bool
     let lastFlown: Bool
     var selectable = true
     let select: () -> Void
@@ -194,7 +203,7 @@ struct ProfileSlotView: View {
                         HStack(spacing: 3) {
                             Image(systemName: "star.fill").foregroundStyle(Color.calm)
                             Text("\(profile.totalStars)").monospacedDigit()
-                            Text("· next \(profile.nextFlight.id)").foregroundStyle(Color.teal)
+                            Text("· next \(profile.nextFlight(fullGame: fullGame).id)").foregroundStyle(Color.teal)
                         }
                         .font(rounded(12, .heavy))
                     }
@@ -204,7 +213,7 @@ struct ProfileSlotView: View {
             }
             .buttonStyle(.plain)
             .disabled(!selectable)
-            .accessibilityLabel("\(profile.name), \(profile.totalStars) stars, next flight \(profile.nextFlight.id)\(lastFlown ? ", flown last" : "")")
+            .accessibilityLabel("\(profile.name), \(profile.totalStars) stars, next flight \(profile.nextFlight(fullGame: fullGame).id)\(lastFlown ? ", flown last" : "")")
             ZStack {
                 Circle().fill(Color.white)
                 Circle().trim(from: 0, to: hold).stroke(Color.critical, style: StrokeStyle(lineWidth: 3, lineCap: .round))
@@ -297,6 +306,7 @@ struct BriefingCard: View {
 struct DevSection: View {
     let canMakeDev: Bool
     let makeDev: () -> Void
+    @Binding var fullGame: DevSettings.FullGame
     @State private var skipIntro = DevSettings.skipFlightIntro
 
     var body: some View {
@@ -306,6 +316,14 @@ struct DevSection: View {
                 Text("Skip flight intro").font(rounded(15, .bold))
                 Spacer()
                 Toggle("Skip flight intro", isOn: $skipIntro).labelsHidden().tint(.teal)
+            }
+            HStack {
+                Text("Full game").font(rounded(15, .bold))
+                Spacer()
+                Picker("Full game", selection: $fullGame) {
+                    ForEach(DevSettings.FullGame.allCases, id: \.self) { Text($0.label).tag($0) }
+                }
+                .pickerStyle(.segmented).frame(maxWidth: 260)
             }
             HStack {
                 Text("Dev crew, 2★ everywhere").font(rounded(15, .bold))

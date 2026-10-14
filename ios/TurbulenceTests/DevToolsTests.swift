@@ -12,7 +12,7 @@ final class DevToolsTests: XCTestCase {
     private func model(_ names: [String?]) -> AppModel {
         var s = ProfileSlots()
         for (i, name) in names.enumerated() { if let name { s.create(in: i, name: name, avatar: 0) } }
-        return AppModel(slots: s, device: DeviceSettings(), persist: false)
+        return AppModel(slots: s, device: DeviceSettings(), persist: false, store: FakeStore())
     }
 
     func testDevProfileHasTwoStarsEverywhereAndOpensEveryRoute() throws {
@@ -22,10 +22,11 @@ final class DevToolsTests: XCTestCase {
         XCTAssertEqual(p.name, "Dev")
         XCTAssertEqual(app.slots.active, 1, "goes in the first empty slot")
         XCTAssertEqual(app.screen, .map)
-        for route in Campaign.routes { XCTAssertTrue(p.isUnlocked(route), "route \(route.id)") }
+        XCTAssertTrue(app.ownsFullGame, "the Dev crew turns the Full Game dev tool on")
+        for route in Campaign.routes { XCTAssertTrue(p.isUnlocked(route, fullGame: app.ownsFullGame), "route \(route.id)") }
         for f in Campaign.routes.flatMap(\.flights) {
             XCTAssertEqual(p.stars[f.id], 2, f.id)
-            XCTAssertTrue(p.isUnlocked(f), f.id)
+            XCTAssertTrue(p.isUnlocked(f, fullGame: app.ownsFullGame), f.id)
         }
         XCTAssertEqual(app.slots.slots[0]?.name, "Ana")
     }
@@ -35,7 +36,7 @@ final class DevToolsTests: XCTestCase {
         s.create(in: 0, name: "Ana", avatar: 0)
         s.create(in: 2, name: "Dev", avatar: 0)
         s.slots[2]?.stars["TB101"] = 3
-        let app = AppModel(slots: s, device: DeviceSettings(), persist: false)
+        let app = AppModel(slots: s, device: DeviceSettings(), persist: false, store: FakeStore())
         app.makeDevProfile()
         XCTAssertEqual(app.slots.active, 2)
         XCTAssertEqual(app.profile?.stars["TB101"], 2)
@@ -48,6 +49,22 @@ final class DevToolsTests: XCTestCase {
         app.makeDevProfile()
         XCTAssertEqual(app.slots.slots.map { $0?.name }, ["A", "B", "C", "D"])
         XCTAssertNotEqual(app.screen, .map)
+    }
+
+    @MainActor func testFullGameDevToolOverridesTheStoreBothWays() async {
+        let store = FakeStore(owned: true)
+        let app = AppModel(slots: ProfileSlots(), device: DeviceSettings(), persist: false, store: store)
+        await app.restorePurchases()
+        XCTAssertEqual(app.devFullGame, .store, "tests never pick up this device's dev switch")
+        XCTAssertTrue(app.ownsFullGame)
+        app.devFullGame = .locked
+        XCTAssertFalse(app.ownsFullGame, "Locked shows the paywall on a device that owns it")
+        app.devFullGame = .owned
+        store.owned = false
+        await app.restorePurchases()
+        XCTAssertTrue(app.ownsFullGame, "Owned opens everything without buying")
+        app.devFullGame = .store
+        XCTAssertFalse(app.ownsFullGame)
     }
 
     func testSkipFlightIntroGoesStraightToTheCountdown() {

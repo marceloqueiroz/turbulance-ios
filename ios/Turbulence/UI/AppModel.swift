@@ -15,6 +15,14 @@ final class AppModel {
         case newCrew(Int)       // the name-and-look card filling this slot
         case options
         case about
+        case paywall            // Unlock the full game (GDD §9)
+    }
+
+    /// Where a Full Game purchase or restore stands, for the paywall and Options.
+    enum StoreStatus: Equatable {
+        case idle
+        case working
+        case message(String)
     }
 
     var screen: Screen = .studio
@@ -31,6 +39,27 @@ final class AppModel {
     private let persist: Bool
     /// The developer path editor on the route map (debug builds, -mapEditor).
     private(set) var mapEditor = false
+
+    /// The Full Game purchase (GDD §9) belongs to the Apple ID, so every profile on the device shares it.
+    private let store: FullGameStore?
+    private(set) var storeOwnsFullGame = false
+    private(set) var fullGamePrice: String?
+    private(set) var storeStatus = StoreStatus.idle
+    #if DEBUG
+    /// The Options dev tool: overrides the store either way.
+    var devFullGame = DevSettings.fullGame { didSet { if persist { DevSettings.fullGame = devFullGame } } }
+    #endif
+
+    var ownsFullGame: Bool {
+        #if DEBUG
+        switch devFullGame {
+        case .owned: return true
+        case .locked: return false
+        case .store: break
+        }
+        #endif
+        return storeOwnsFullGame
+    }
 
     convenience init() {
         let args = ProcessInfo.processInfo.arguments
@@ -63,10 +92,23 @@ final class AppModel {
         self.init(slots: ProfileStore.load(), device: device, persist: true, arguments: args)
     }
 
-    init(slots: ProfileSlots, device: DeviceSettings, persist: Bool, arguments args: [String] = []) {
+    init(slots: ProfileSlots, device: DeviceSettings, persist: Bool, arguments args: [String] = [],
+         store: FullGameStore? = AppStoreFullGame()) {
         self.slots = slots
         self.device = device
         self.persist = persist
+        self.store = store
+        #if DEBUG
+        if !persist { devFullGame = .store }        // tests and in-memory demos don't read this device's dev switch
+        #endif
+        if let store {
+            store.listen { [weak self] owned in Task { @MainActor in self?.storeOwnsFullGame = owned } }
+            Task { @MainActor [weak self] in
+                let (owned, price) = await store.refresh()
+                self?.storeOwnsFullGame = owned
+                self?.fullGamePrice = price
+            }
+        }
         game.apply(device)
         if let p = slots.current { game.apply(p.options, avatar: p.avatar) }
         game.onEnded = { [weak self] plan, result in self?.record(plan, result) }
@@ -170,20 +212,60 @@ final class AppModel {
     /// The first visit to the route map starts tracking unlock reveals; routes already open count as seen.
     func markMapVisited() {
         guard var p = profile, p.seenRoutes == nil else { return }
-        p.seenRoutes = MapState(profile: p).seenAfterVisit
+        p.seenRoutes = MapState(profile: p, fullGame: ownsFullGame).seenAfterVisit
         profile = p
     }
 
     /// After the map has played its unlock reveals.
     func markRevealsSeen() {
         guard var p = profile else { return }
-        p.seenRoutes = MapState(profile: p).seenAfterVisit
+        p.seenRoutes = MapState(profile: p, fullGame: ownsFullGame).seenAfterVisit
         profile = p
     }
 
+    var mapState: MapState? { profile.map { MapState(profile: $0, fullGame: ownsFullGame) } }
+
     func nextFlight(after plan: FlightPlan) -> FlightPlan? {
-        guard let next = Campaign.flight(after: plan), profile?.isUnlocked(next) == true else { return nil }
+        guard let next = Campaign.flight(after: plan), profile?.isUnlocked(next, fullGame: ownsFullGame) == true else { return nil }
         return next
+    }
+
+    /// The route the scorecard offers to unlock: the next flight is on a route that needs Full Game, and it isn't owned.
+    func routeToUnlock(after plan: FlightPlan) -> Route? {
+        guard !ownsFullGame, let next = Campaign.flight(after: plan), let route = Campaign.route(containing: next.id),
+              route.requiresFullGame, !route.inDevelopment else { return nil }
+        return route
+    }
+
+    // MARK: Full Game (GDD §9)
+
+    func showPaywall() {
+        storeStatus = .idle
+        sheet = .paywall
+    }
+
+    /// Buys Full Game; on success the card closes and the map plays the reveal for any route that now opens.
+    @MainActor func buyFullGame() async {
+        guard let store, storeStatus != .working else { return }
+        storeStatus = .working
+        switch await store.purchase() {
+        case .purchased:
+            storeOwnsFullGame = true
+            storeStatus = .idle
+            if sheet == .paywall { sheet = nil }
+        case .pending: storeStatus = .message("Waiting for approval. Routes open as soon as it's approved.")
+        case .cancelled: storeStatus = .idle
+        case .failed(let why): storeStatus = .message(why)
+        }
+    }
+
+    @MainActor func restorePurchases() async {
+        guard let store, storeStatus != .working else { return }
+        storeStatus = .working
+        let owned = await store.restore()
+        storeOwnsFullGame = owned
+        storeStatus = .message(owned ? "Full game restored." : "Nothing to restore on this Apple Account.")
+        if owned, sheet == .paywall { sheet = nil }
     }
 
     // MARK: Options
@@ -192,6 +274,7 @@ final class AppModel {
     /// Developer section: the Dev crew member with two stars everywhere, opened on the route map.
     func makeDevProfile() {
         guard slots.makeDev() else { return }
+        devFullGame = .owned
         saveSlots()
         applyProfile()
         sheet = nil

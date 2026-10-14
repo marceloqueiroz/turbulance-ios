@@ -89,6 +89,7 @@ struct GameView: View {
             Scrim {
                 EndCard(plan: game.plan, result: game.result, newBest: app.newBest, sound: { game.playUI($0) },
                         next: app.nextFlight(after: game.plan).map { next in { app.openMap(brief: next) } },
+                        unlock: app.routeToUnlock(after: game.plan).map { route in (route, { app.showPaywall() }) },
                         retry: { app.board(game.plan) }, map: { app.openMap() })
             }
         case .idle, .intro, .countdown, .playing: EmptyView()
@@ -294,19 +295,23 @@ struct Scrim<Content: View>: View {
 struct Card<Content: View>: View {
     @ViewBuilder let content: Content
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 10) { content }
-                .padding(.horizontal, 20).padding(.vertical, 14)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        // hugs its content; a card taller than the screen (Options on a landscape phone) scrolls instead of clipping
+        ViewThatFits(in: .vertical) {
+            stack.fixedSize(horizontal: false, vertical: true)
+            ScrollView { stack }.scrollBounceBehavior(.basedOnSize)
         }
-        .scrollBounceBehavior(.basedOnSize)
-        .fixedSize(horizontal: false, vertical: true)
         .frame(maxWidth: 540)
         .background(Color.cream, in: RoundedRectangle(cornerRadius: 22))
         .overlay(RoundedRectangle(cornerRadius: 22).stroke(Color.navy, lineWidth: 3))
         .overlay(RoundedRectangle(cornerRadius: 25).stroke(Color.coral, lineWidth: 4).padding(-3.5))
         .shadow(color: .black.opacity(0.45), radius: 18, y: 10)
         .foregroundStyle(Color.navy)
+    }
+
+    private var stack: some View {
+        VStack(alignment: .leading, spacing: 10) { content }
+            .padding(.horizontal, 20).padding(.vertical, 14)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -374,6 +379,8 @@ struct EndCard: View {
     let newBest: Bool
     let sound: (Synth.Sound) -> Void
     let next: (() -> Void)?
+    /// The end of the free route without Full Game: offer the next route instead of Next flight (GDD §9).
+    var unlock: (route: Route, action: () -> Void)?
     let retry: () -> Void
     let map: () -> Void
 
@@ -450,7 +457,8 @@ struct EndCard: View {
             }
             HStack(spacing: 12) {
                 if let next { CTA(title: "Next flight", action: next) }
-                CTA(title: "Retry", color: next == nil ? .coral : .teal, action: retry)
+                else if let unlock, r.stars > 0 { CTA(title: "Unlock Route \(unlock.route.id)", action: unlock.action) }
+                CTA(title: "Retry", color: next == nil && (unlock == nil || r.stars == 0) ? .coral : .teal, action: retry)
                 CTA(title: "Route map", color: .navy, action: map)
             }
             .padding(.bottom, 4)
