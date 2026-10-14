@@ -1370,7 +1370,10 @@ final class PaxNode: SKNode {
             body.colorBlendFactor = 0
         } else if let walkTex {
             if body.texture !== walkTex {
-                body.texture = walkTex; body.size = PassengerArt.walkSize; body.anchorPoint = AttendantArt.anchor
+                // front and back walk frames were painted bulkier than the side ones, like the attendant's
+                let k = walkFacing == .side ? 1 : AttendantArt.frontBackScale
+                body.texture = walkTex; body.size = CGSize(width: PassengerArt.walkSize.width * k, height: PassengerArt.walkSize.height * k)
+                body.anchorPoint = AttendantArt.anchor
             }
             body.colorBlendFactor = 0
         } else if let painted {
@@ -1575,6 +1578,7 @@ enum AttendantArt {
     static let anchor = CGPoint(x: 0.5, y: 73.0 / 848.0)
     /// The front and back frames were painted with a bigger head and body than the side ones (same hat-to-feet height,
     /// but her head is ~10% wider than it is deep in profile): drawn at this scale so she doesn't swell turning to face you.
+    /// The passengers' walk frames have the same mismatch and use it too.
     static let frontBackScale: CGFloat = 0.9
     /// Held while standing with the tray up: the carry cycle's passing pose, both feet under the body.
     static let standFrame = 6
