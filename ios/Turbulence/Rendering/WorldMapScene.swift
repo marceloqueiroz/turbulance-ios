@@ -10,6 +10,7 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
         case flight(FlightPlan)
         case lockedRoute(Route, needs: Int, have: Int)
         case fullGame(Route)                // needs the Full Game purchase (GDD §9)
+        case needsRoute(Route, after: Route)    // owned; every flight of `after` needs a star first
         case comingSoon(String)
     }
 
@@ -179,9 +180,16 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
                 guard let id = routeID, let route = Campaign.routes.first(where: { $0.id == id }) else { continue }
                 let needs = route.unlockStars, have = profile.totalStars
                 // a route waiting for its reveal is already open: its badge says so until the clouds part
-                let (tap, why): (Tap, String) = hiding.contains(id) ? (.lockedRoute(route, needs: needs, have: have), "Unlocked")
-                    : state.access(route) == .needsFullGame ? (.fullGame(route), "Full game")
-                    : (.lockedRoute(route, needs: needs, have: have), "\(needs) ★ to unlock")
+                let (tap, why): (Tap, String) = {
+                    if hiding.contains(id) { return (.lockedRoute(route, needs: needs, have: have), "Unlocked") }
+                    switch state.access(route) {
+                    case .needsFullGame: return (.fullGame(route), "Full game")
+                    case .needsRoute(let before):
+                        let after = Campaign.routes.first { $0.id == before } ?? Campaign.route1
+                        return (.needsRoute(route, after: after), "Finish Route \(before)")
+                    default: return (.lockedRoute(route, needs: needs, have: have), "\(needs) ★ to unlock")
+                    }
+                }()
                 addClouds(over: frame, storm: false, region: region.id)
                 addBadge(lines: ["Route \(route.id) · \(route.name)", why], symbol: nil, padlock: true,
                          at: CGPoint(x: frame.midX, y: frame.midY), tap: tap, region: region.id)

@@ -9,7 +9,8 @@ Route 1 stays free. One non-consumable in-app purchase, **Full Game**, opens Rou
 | Topic | Decision |
 | --- | --- |
 | Product | One non-consumable, Full Game. It covers routes 2 and up, including routes shipped later. |
-| Star gates | Kept. Buying removes the paywall; Route 2 still opens at 12 ★ and Route 3 at 36 ★. |
+| Gates | Route 2 opens once it's bought and every Route 1 flight has at least one star. Route 3 still opens at 36 ★. |
+| Price | $4.99, with Family Sharing on. |
 | Coming soon | Only R4 Long Haul stays under storm clouds. S1 Red-Eye, S2 Storm Season and R5 Flagship are hidden until built. |
 | Lock art | A painted soft-3D padlock in the jet-age style, closed and open versions. |
 | Ownership | The purchase belongs to the Apple ID, so every profile on the device shares it. |
@@ -48,7 +49,8 @@ Every locked route keeps its soft cloud blanket, with a large painted padlock on
 | State | Title line | Second line |
 | --- | --- | --- |
 | Needs the purchase | Route 2 · Coastal Shuttle | Full game |
-| Owned, needs stars | Route 2 · Coastal Shuttle | 12 ★ to unlock |
+| Owned, Route 1 not finished | Route 2 · Coastal Shuttle | Finish Route 1 |
+| Owned, needs stars | Route 3 · Transcontinental | 36 ★ to unlock |
 
 The pill no longer needs its own small lock symbol, since the padlock sits above it.
 
@@ -64,7 +66,7 @@ A route opens when it is built, owned (if it needs Full Game) and has enough sta
 | Route | Needs Full Game | Stars to open | Without purchase | With purchase, short of stars |
 | --- | --- | --- | --- | --- |
 | 1 Regional Hops | No | 0 | Open | Open |
-| 2 Coastal Shuttle | Yes | 12 | Padlock · "Full game" | Padlock · "12 ★ to unlock" |
+| 2 Coastal Shuttle | Yes | 0 (every Route 1 flight passed instead) | Padlock · "Full game" | Padlock · "Finish Route 1" |
 | 3 Transcontinental | Yes | 36 | Padlock · "Full game" | Padlock · "36 ★ to unlock" |
 | 4 Long Haul | Yes | 60 | Storm · "Coming soon" | Storm · "Coming soon" |
 
@@ -99,7 +101,7 @@ The player reaches the purchase from two places: a padlocked route on the map an
 | Where | Trigger | Shows |
 | --- | --- | --- |
 | Route map | Tap a route marked "Full game" | Full-screen paywall |
-| Route map | Tap a route marked "12 ★ to unlock" | Today's notice (stars needed, stars you have) |
+| Route map | Tap a route marked "36 ★ to unlock" | Today's notice (stars needed, stars you have) |
 | Results screen | Finish TB106 (last flight of Route 1) without the purchase | "Unlock Route 2" button in place of "Next flight", opening the paywall |
 | Options | "Restore purchases" row (required by App Review) | Spinner, then "Full game restored" or "Nothing to restore" |
 
@@ -109,7 +111,7 @@ The player reaches the purchase from two places: a padlocked route on the map an
 - Two columns in landscape: logo, "Unlock the full game" and the one-line pitch on the left; what's included and the buttons on the right. Stacks and scrolls in portrait.
 - What's included: Route 2 Coastal Shuttle, Route 3 Transcontinental, and every future route, one line each with its aircraft.
 - One line on star gates: "Routes still open as you earn stars."
-- Buttons: Buy for `displayPrice`, Restore, Not now.
+- Buttons: Unlock for `displayPrice` (green) and Not now (navy) in one row, centred under what's included; a quiet "Restore purchases" link under the pitch text in the left column, on the same line as the buttons (the screen is two rows on one grid).
 - While buying: buttons disabled with a spinner. On success the sheet closes and the map plays the reveal. Errors show one plain line under the buttons.
 
 ### Debug tools (DEBUG builds only)
@@ -147,7 +149,7 @@ The design docs are the source of truth, so they change before the code ships. A
 
 - [ ] Sign the Paid Apps Agreement; add banking and tax details.
 - [ ] Create the non-consumable `<bundle id>.fullgame`: reference name, display name, description, price, review screenshot of the paywall.
-- [ ] Turn on Family Sharing for it (can't be turned off later).
+- [ ] Turn on Family Sharing for it (decided: on; it can't be turned off later).
 - [ ] Attach the IAP to the 1.0 version so it's reviewed with the app.
 - [ ] Reviewer notes: "Route 1 is free. Full Game unlocks Routes 2 and up; routes also need stars, so use a sandbox account and the Restore button to check."
 - [ ] App Privacy stays "Data Not Collected": StoreKit purchases don't change it.
@@ -164,7 +166,7 @@ Rules and tests go first, so the art can arrive last behind a placeholder lock.
 
 ### Open questions
 
-- [ ] Price: the GDD suggests $2.99–$4.99. The `.storekit` file uses $3.99 as a placeholder.
-- [ ] Family Sharing: recommended on; it can't be turned off later.
-- [ ] App Review access: a reviewer who buys still needs 12 ★ to see Route 2. Accept that, or show a short "Earn 12 ★ to open" line on the paywall's success screen?
+- [x] Price: $4.99 (decided 2026-10-14; the `.storekit` file matches).
+- [x] Family Sharing: on.
+- [ ] App Review access: a reviewer must pass all 6 Route 1 flights before Route 2 opens. Say so in the reviewer notes (or give them a way in)?
 - [ ] Future specials (Red-Eye, Storm Season): part of Full Game when they ship, or free updates?

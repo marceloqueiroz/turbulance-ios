@@ -198,6 +198,9 @@ struct WorldMapView: View {
                         symbol: "lock.fill"))
         case .fullGame:
             app.showPaywall()
+        case let .needsRoute(route, after):
+            show(Notice(title: "Route \(route.id) · \(route.name)",
+                        detail: "Opens once you've earned a star on every flight of \(after.name).", symbol: "lock.fill"))
         case .comingSoon(let name):
             show(Notice(title: name, detail: "Arrives in a future update.", symbol: "cloud.bolt.fill"))
         }

@@ -227,6 +227,8 @@ struct Route: Identifiable, Equatable {
     let cities: [String]               // one more than flights: each flight is a leg
     let flights: [FlightPlan]
     let unlockStars: Int
+    /// Opens only once every flight of this route has at least one star (GDD §9: Route 2 after Route 1).
+    var opensAfter: Int? = nil
     var inDevelopment: Bool { flights.isEmpty }
     /// Route 1 is free; every later route needs the Full Game purchase as well as its stars (GDD §9).
     var requiresFullGame: Bool { id >= 2 }
@@ -374,7 +376,7 @@ enum Campaign {
                        whatsNew: "Everything the coast has thrown at you, on one long flight.",
                        pace: Pace(fuseScale: 2.0, spawnEvery: 5...7, rush: false))
         ],
-        unlockStars: 12)
+        unlockStars: 0, opensAfter: 1)  // Full Game plus every Route 1 flight passed (GDD §9); Route 3 still waits for stars
 
     // MARK: Route 3 – Transcontinental (B757-Longhaul, then A330-Voyager)
 

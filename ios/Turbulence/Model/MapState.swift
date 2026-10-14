@@ -5,6 +5,7 @@ struct MapState {
     enum RouteAccess: Equatable {
         case open
         case needsFullGame                       // routes 2 and up without the purchase: clouds + padlock (GDD §9)
+        case needsRoute(Int)                     // owned, but every flight of that route needs a star first: clouds + padlock
         case locked(needs: Int, have: Int)      // owned but not enough stars yet: clouds + padlock
         case comingSoon                          // not built yet: storm clouds
     }
@@ -32,6 +33,7 @@ struct MapState {
     func access(_ route: Route) -> RouteAccess {
         if route.inDevelopment { return .comingSoon }
         if route.requiresFullGame && !fullGame { return .needsFullGame }
+        if let before = route.opensAfter, !profile.hasPassed(route: before) { return .needsRoute(before) }
         return profile.isUnlocked(route, fullGame: fullGame) ? .open : .locked(needs: route.unlockStars, have: profile.totalStars)
     }
 
@@ -48,7 +50,7 @@ struct MapState {
         guard region.kind == .route, let id = region.route, let route = routes.first(where: { $0.id == id }) else { return .storm }
         switch access(route) {
         case .open: return .none
-        case .locked, .needsFullGame: return .clouds
+        case .locked, .needsFullGame, .needsRoute: return .clouds
         case .comingSoon: return .storm
         }
     }

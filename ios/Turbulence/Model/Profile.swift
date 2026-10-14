@@ -34,7 +34,14 @@ struct Profile: Codable, Equatable {
     /// A route opens when it's built, owned (routes 2 and up need Full Game, GDD §9) and has enough stars.
     /// `fullGame` is the device's purchase, not the profile's: every profile on the device shares it.
     func isUnlocked(_ route: Route, fullGame: Bool) -> Bool {
-        !route.inDevelopment && (fullGame || !route.requiresFullGame) && totalStars >= route.unlockStars
+        !route.inDevelopment && (fullGame || !route.requiresFullGame) && route.opensAfter.map(hasPassed) != false
+            && totalStars >= route.unlockStars
+    }
+
+    /// Every flight of the route has at least one star.
+    func hasPassed(route id: Int) -> Bool {
+        guard let route = Campaign.routes.first(where: { $0.id == id }) else { return false }
+        return route.flights.allSatisfy { (stars[$0.id] ?? 0) > 0 }
     }
 
     /// A flight opens once the one before it on its route has at least one star.

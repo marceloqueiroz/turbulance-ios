@@ -117,7 +117,8 @@ The Options screen has a DEBUG-only Developer section (skip the intro, make a De
 - Passengers never climb over a seatmate: whoever sits nearer the aisle steps out and stands aside
   (`StrollPurpose.makeWay`), and a passenger only gets up if those seatmates can.
 - The route map is free pan/zoom; the plane follows its route and the camera follows long legs.
-- Route 1 is free; Routes 2+ need the Full Game in-app purchase (StoreKit 2, `UI/Store.swift`) as well as their stars.
+- Route 1 is free; Routes 2+ need the Full Game in-app purchase ($4.99, StoreKit 2, `UI/Store.swift`). Route 2 opens
+  once it's bought and every Route 1 flight has a star (`Route.opensAfter`); Route 3 also needs its 36 stars.
   Locked routes sit under clouds with a painted padlock; only Long Haul shows "Coming soon" (other unbuilt regions are
   `"hidden"` in `MapLayout.json`). `ios/Turbulence.storekit` is attached to the scheme for local purchases; the Options
   Developer section has a Full game Store / Owned / Locked override. Spec: `specs/2026-10-08-map-unlock-full-game.md`.
