@@ -270,8 +270,9 @@ struct CabinLayout: Equatable {
         blocks.append(CabinBlock(kind: .counter, x: 60, y: 30, w: 150, h: topAisle - 86, label: ""))      // no floor label (GDD §8a)
         blocks.append(CabinBlock(kind: .counter, x: 60, y: bottomAisle + 56, w: 150, h: height - 50 - (bottomAisle + 56)))
         let topY = topAisle - 102, bottomY = bottomAisle + 102
+        // drinks (52 wide), coffee (34) and oven (36) with the same 6-unit gap between each
         bins += [SupplyBin(.drinks, x: 96, y: topY, aisle: 0),
-                 SupplyBin(.coffee, x: 150, y: topY, aisle: 0), SupplyBin(.oven, x: 186, y: topY, aisle: 0),
+                 SupplyBin(.coffee, x: 145, y: topY, aisle: 0), SupplyBin(.oven, x: 186, y: topY, aisle: 0),
                  SupplyBin(.oven, x: 78, y: bottomY, aisle: last)]
         bins += [SupplyBin(item: .snack, x: 114, y: bottomY, aisle: last),
                  SupplyBin(item: .toy, x: 150, y: bottomY, aisle: last)]
