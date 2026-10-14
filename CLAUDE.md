@@ -48,13 +48,22 @@ Code comments cite GDD sections (e.g. `GDD §5a`); keep doing that.
 
 ## Build and test
 
-Use XcodeBuildMCP (call `session_show_defaults` first), or:
+Use XcodeBuildMCP (call `session_show_defaults` first) or `xcodebuild`, always on a simulator picked as described
+below. Run the tests and a simulator build after gameplay changes.
+
+### Pick an unused simulator
+
+Several sessions/worktrees often build and test at the same time, and two runs on one simulator collide. So
+don't use a simulator that's already booted (another session may be testing on it), and don't target one by
+name (`name=iPhone 17 Pro` matches several devices). Instead claim a free one by UDID:
 
 ```bash
-xcodebuild test -project ios/Turbulence.xcodeproj -scheme Turbulence -destination 'platform=iOS Simulator,name=iPhone 17 Pro'
+SIM=$(ios/tools/free_sim.sh)   # boots a shut-down iPhone (prefers iPhone 17 Pro) and prints its UDID
+xcodebuild test -project ios/Turbulence.xcodeproj -scheme Turbulence -destination "platform=iOS Simulator,id=$SIM"
 ```
 
-Run the tests and a simulator build after gameplay changes.
+With XcodeBuildMCP, pass that UDID as `simulatorId` in `session_set_defaults`. Reuse the same simulator for the
+rest of the session, and shut it down when done (`xcrun simctl shutdown $SIM`) so it's free for others.
 
 ### Debug launch arguments
 
