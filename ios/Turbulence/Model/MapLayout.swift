@@ -21,6 +21,7 @@ struct MapLayout: Decodable {
         let center: [Double]
         let size: [Double]
         var life: [Life]?               // moving city life, authored after the art (Route Map Plan, City life)
+        var hidden: Bool?               // not drawn at all until it's built: only one region shows "Coming soon"
 
         var frame: CGRect {
             CGRect(x: center[0] - size[0] / 2, y: center[1] - size[1] / 2, width: size[0], height: size[1])

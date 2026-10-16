@@ -7,7 +7,81 @@ final class AppModelTests: XCTestCase {
         var s = ProfileSlots()
         for (i, name) in names.enumerated() { if let name { s.create(in: i, name: name, avatar: 0) } }
         s.switchTo(active)
-        return AppModel(slots: s, device: DeviceSettings(), persist: false)
+        return AppModel(slots: s, device: DeviceSettings(), persist: false, store: FakeStore())
+    }
+
+    // MARK: Full Game (GDD §9)
+
+    private func model(store: FakeStore, stars: [String: Int] = [:]) -> AppModel {
+        var s = ProfileSlots()
+        s.create(in: 0, name: "Ana", avatar: 0)
+        s.slots[0]?.stars = stars
+        s.switchTo(0)
+        return AppModel(slots: s, device: DeviceSettings(), persist: false, store: store)
+    }
+
+    @MainActor func testBuyingFullGameClosesThePaywallAndOpensRoutes() async {
+        let store = FakeStore()
+        let stars = Dictionary(uniqueKeysWithValues: Campaign.route1.flights.map { ($0.id, 2) })
+        let app = model(store: store, stars: stars)
+        XCTAssertFalse(app.ownsFullGame)
+        XCTAssertEqual(app.mapState?.access(Campaign.route2), .needsFullGame)
+        app.showPaywall()
+        XCTAssertEqual(app.sheet, .paywall)
+        await app.buyFullGame()
+        XCTAssertEqual(store.purchases, 1)
+        XCTAssertTrue(app.ownsFullGame)
+        XCTAssertNil(app.sheet, "the card closes so the map can play the reveal")
+        XCTAssertEqual(app.mapState?.access(Campaign.route2), .open)
+    }
+
+    @MainActor func testCancelledOrPendingPurchasesLeaveTheGameLocked() async {
+        let store = FakeStore()
+        let app = model(store: store)
+        app.showPaywall()
+        store.nextPurchase = .cancelled
+        await app.buyFullGame()
+        XCTAssertFalse(app.ownsFullGame)
+        XCTAssertEqual(app.sheet, .paywall)
+        XCTAssertEqual(app.storeStatus, .idle)
+        store.nextPurchase = .pending
+        await app.buyFullGame()
+        XCTAssertFalse(app.ownsFullGame)
+        guard case .message = app.storeStatus else { return XCTFail("Ask to Buy says it's waiting for approval") }
+    }
+
+    @MainActor func testRestoreReportsWhatItFound() async {
+        let store = FakeStore()
+        let app = model(store: store)
+        await app.restorePurchases()
+        XCTAssertEqual(app.storeStatus, .message("Nothing to restore on this Apple Account."))
+        XCTAssertFalse(app.ownsFullGame)
+        store.owned = true
+        await app.restorePurchases()
+        XCTAssertEqual(app.storeStatus, .message("Full game restored."))
+        XCTAssertTrue(app.ownsFullGame)
+    }
+
+    @MainActor func testARefundLocksTheGameAgain() async throws {
+        let store = FakeStore(owned: true)
+        let app = model(store: store)
+        await app.restorePurchases()
+        XCTAssertTrue(app.ownsFullGame)
+        store.push(false)
+        try await Task.sleep(for: .milliseconds(50))         // the listener hops to the main actor
+        XCTAssertFalse(app.ownsFullGame)
+    }
+
+    @MainActor func testTheScorecardOffersRouteTwoAfterTheLastFreeFlight() async {
+        let last = Campaign.route1.flights.last!
+        let locked = model(store: FakeStore())
+        XCTAssertNil(locked.nextFlight(after: last))
+        XCTAssertEqual(locked.routeToUnlock(after: last)?.id, 2)
+        XCTAssertNil(locked.routeToUnlock(after: Campaign.route1.flights[0]), "mid-route flights carry on as before")
+
+        let owned = model(store: FakeStore(owned: true))
+        await owned.restorePurchases()
+        XCTAssertNil(owned.routeToUnlock(after: last), "nothing to sell once it's owned")
     }
 
     func testTitleCardSettlesOnTheLandingPage() {

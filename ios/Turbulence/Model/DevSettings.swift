@@ -5,6 +5,18 @@ import Foundation
 /// Kept out of `DeviceSettings` so release saves never carry them.
 enum DevSettings {
     private static let skipIntroKey = "dev.skipFlightIntro"
+    private static let fullGameKey = "dev.fullGame"
+
+    /// The Options dev tool for the Full Game purchase: use the App Store, or pretend it's owned or not.
+    enum FullGame: String, CaseIterable {
+        case store, owned, locked
+        var label: String { self == .store ? "Store" : self == .owned ? "Owned" : "Locked" }
+    }
+
+    static var fullGame: FullGame {
+        get { UserDefaults.standard.string(forKey: fullGameKey).flatMap(FullGame.init) ?? .store }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: fullGameKey) }
+    }
 
     /// Boarding goes straight to the 3-2-1 countdown, without the 3D intro cutscene.
     static var skipFlightIntro: Bool {

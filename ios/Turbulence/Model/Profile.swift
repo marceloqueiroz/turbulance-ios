@@ -31,18 +31,29 @@ struct Profile: Codable, Equatable {
 
     var totalStars: Int { stars.values.reduce(0, +) }
 
-    func isUnlocked(_ route: Route) -> Bool { !route.inDevelopment && totalStars >= route.unlockStars }
+    /// A route opens when it's built, owned (routes 2 and up need Full Game, GDD §9) and has enough stars.
+    /// `fullGame` is the device's purchase, not the profile's: every profile on the device shares it.
+    func isUnlocked(_ route: Route, fullGame: Bool) -> Bool {
+        !route.inDevelopment && (fullGame || !route.requiresFullGame) && route.opensAfter.map(hasPassed) != false
+            && totalStars >= route.unlockStars
+    }
+
+    /// Every flight of the route has at least one star.
+    func hasPassed(route id: Int) -> Bool {
+        guard let route = Campaign.routes.first(where: { $0.id == id }) else { return false }
+        return route.flights.allSatisfy { (stars[$0.id] ?? 0) > 0 }
+    }
 
     /// A flight opens once the one before it on its route has at least one star.
-    func isUnlocked(_ plan: FlightPlan) -> Bool {
-        guard let route = Campaign.route(containing: plan.id), isUnlocked(route),
+    func isUnlocked(_ plan: FlightPlan, fullGame: Bool) -> Bool {
+        guard let route = Campaign.route(containing: plan.id), isUnlocked(route, fullGame: fullGame),
               let i = route.flights.firstIndex(of: plan) else { return false }
         return i == 0 || (stars[route.flights[i - 1].id] ?? 0) > 0
     }
 
     /// The flight the Fly button should open: the first unlocked one without three stars.
-    var nextFlight: FlightPlan {
-        let open = Campaign.routes.flatMap(\.flights).filter(isUnlocked)
+    func nextFlight(fullGame: Bool) -> FlightPlan {
+        let open = Campaign.routes.flatMap(\.flights).filter { isUnlocked($0, fullGame: fullGame) }
         return open.first { (stars[$0.id] ?? 0) < 3 } ?? open.last ?? Campaign.route1.flights[0]
     }
 

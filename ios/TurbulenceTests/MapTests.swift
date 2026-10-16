@@ -71,31 +71,81 @@ final class MapTests: XCTestCase {
         Dictionary(uniqueKeysWithValues: Campaign.routes.filter { routeIDs.contains($0.id) }.flatMap(\.flights).map { ($0.id, 2) })
     }
 
-    func testRouteOneIsOpenFromTheStartAndTheRestWaitForStars() {
-        let state = MapState(profile: profile())
+    func testRouteTwoWaitsForEveryRouteOneFlightToBePassed() {
+        let state = MapState(profile: profile(), fullGame: true)
         XCTAssertEqual(state.access(Campaign.route1), .open)
-        XCTAssertEqual(state.access(Campaign.route2), .locked(needs: 12, have: 0))
+        XCTAssertEqual(state.access(Campaign.route2), .needsRoute(1))
         XCTAssertEqual(state.cover(layout.region("R1")!), .none)
         XCTAssertEqual(state.cover(layout.region("R2")!), .clouds)
+
+        var stars = Dictionary(uniqueKeysWithValues: Campaign.route1.flights.map { ($0.id, 3) })
+        stars[Campaign.route1.flights.last!.id] = nil
+        XCTAssertEqual(MapState(profile: profile(stars: stars), fullGame: true).access(Campaign.route2), .needsRoute(1),
+                       "lots of stars aren't enough: the last flight still needs one")
+        stars[Campaign.route1.flights.last!.id] = 1
+        XCTAssertEqual(MapState(profile: profile(stars: stars), fullGame: true).access(Campaign.route2), .open)
+        XCTAssertEqual(MapState(profile: profile(stars: stars), fullGame: false).access(Campaign.route2), .needsFullGame,
+                       "finishing Route 1 doesn't open Route 2 without the purchase")
     }
 
-    func testRouteTwoOpensAtTwelveStars() {
-        let state = MapState(profile: profile(stars: twoStars(on: [1])))
-        XCTAssertEqual(state.access(Campaign.route2), .open)
-        XCTAssertEqual(state.cover(layout.region("R2")!), .none)
-        XCTAssertEqual(state.access(Campaign.route3), .locked(needs: 36, have: 12))
+    func testRouteThreeOpensAtThirtySixStars() {
+        let state = MapState(profile: profile(stars: twoStars(on: [1, 2])), fullGame: true)
+        XCTAssertEqual(state.access(Campaign.route3), .open)
+        XCTAssertEqual(state.cover(layout.region("R3")!), .none)
     }
 
-    func testSpecialsAndUnbuiltRoutesSitUnderStorms() {
-        let state = MapState(profile: profile(stars: twoStars(on: [1, 2, 3])))
-        for id in ["S1", "S2", "R4", "R5"] { XCTAssertEqual(state.cover(layout.region(id)!), .storm, id) }
+    func testOnlyLongHaulSitsUnderStormsAndTheOtherUnbuiltPlacesAreHidden() {
+        let state = MapState(profile: profile(stars: twoStars(on: [1, 2, 3])), fullGame: true)
+        XCTAssertEqual(state.cover(layout.region("R4")!), .storm)
+        for id in ["S1", "S2", "R5"] { XCTAssertEqual(state.cover(layout.region(id)!), .hidden, id) }
+        let comingSoon = layout.regions.filter { state.cover($0) == .storm }.map(\.id)
+        XCTAssertEqual(comingSoon, ["R4"], "exactly one region says Coming soon")
+        for id in ["R1", "R2", "R3"] { XCTAssertNotEqual(state.cover(layout.region(id)!), .hidden, id) }
         let unbuilt = Route(id: 9, name: "Later", aircraftNames: "", cities: ["A"], flights: [], unlockStars: 0)
         XCTAssertEqual(state.access(unbuilt), .comingSoon)
     }
 
+    // MARK: Full Game (GDD §9)
+
+    func testWithoutFullGameRoutesTwoAndUpWaitBehindThePaywallEvenWithStars() {
+        let state = MapState(profile: profile(stars: twoStars(on: [1, 2, 3])), fullGame: false)
+        XCTAssertEqual(state.access(Campaign.route1), .open, "Route 1 is free")
+        XCTAssertEqual(state.access(Campaign.route2), .needsFullGame)
+        XCTAssertEqual(state.access(Campaign.route3), .needsFullGame)
+        XCTAssertEqual(state.cover(layout.region("R2")!), .clouds)
+        XCTAssertEqual(state.access(Campaign.route2.flights[0]), .locked)
+        XCTAssertEqual(state.openRoutes, [1])
+    }
+
+    func testOwningFullGameStillNeedsTheStarsForRouteThree() {
+        let state = MapState(profile: profile(stars: twoStars(on: [1])), fullGame: true)
+        XCTAssertEqual(state.access(Campaign.route2), .open)
+        XCTAssertEqual(state.access(Campaign.route3), .locked(needs: 36, have: 12))
+    }
+
+    func testNextFlightStaysOnRouteOneWithoutFullGame() {
+        let p = profile(stars: Dictionary(uniqueKeysWithValues: Campaign.route1.flights.map { ($0.id, 3) }))
+        XCTAssertEqual(p.nextFlight(fullGame: false), Campaign.route1.flights.last, "everything open is done: the last open flight")
+        XCTAssertEqual(p.nextFlight(fullGame: true), Campaign.route2.flights[0])
+    }
+
+    func testBuyingFullGameRevealsTheRoutesItOpens() {
+        let fresh = MapState(profile: profile(seen: [1]), fullGame: false)
+        XCTAssertEqual(fresh.pendingReveals, [], "nothing to reveal without the purchase")
+        XCTAssertEqual(MapState(profile: profile(seen: fresh.seenAfterVisit), fullGame: true).pendingReveals, [],
+                       "a new player who buys still has Route 1 to finish")
+        XCTAssertEqual(MapState(profile: profile(stars: twoStars(on: [1]), seen: [1]), fullGame: true).pendingReveals, [2],
+                       "Route 1 finished: buying opens Route 2 straight away")
+
+        let stars = twoStars(on: [1, 2])           // 12 + 24 stars: enough for Route 3 too
+        let before = MapState(profile: profile(stars: stars, seen: [1]), fullGame: false)
+        XCTAssertEqual(before.seenAfterVisit, [1])
+        XCTAssertEqual(MapState(profile: profile(stars: stars, seen: before.seenAfterVisit), fullGame: true).pendingReveals, [2, 3])
+    }
+
     func testFlightStatesFollowStarsAndTheNextFlight() {
         let f = Campaign.route1.flights
-        let state = MapState(profile: profile(stars: [f[0].id: 3, f[1].id: 1]))
+        let state = MapState(profile: profile(stars: [f[0].id: 3, f[1].id: 1]), fullGame: false)
         XCTAssertEqual(state.access(f[0]), .done(stars: 3))
         XCTAssertEqual(state.access(f[1]), .next(stars: 1), "the next flight is the first without three stars, replays included")
         XCTAssertEqual(state.access(f[2]), .open)
@@ -104,12 +154,12 @@ final class MapTests: XCTestCase {
 
     func testRevealsPlayOncePerNewRouteAndNotForOldSaves() {
         let stars = twoStars(on: [1])
-        XCTAssertEqual(MapState(profile: profile(stars: stars, seen: nil)).pendingReveals, [], "a first visit counts open routes as seen")
-        XCTAssertEqual(MapState(profile: profile(stars: stars, seen: nil)).seenAfterVisit, [1, 2])
+        XCTAssertEqual(MapState(profile: profile(stars: stars, seen: nil), fullGame: true).pendingReveals, [], "a first visit counts open routes as seen")
+        XCTAssertEqual(MapState(profile: profile(stars: stars, seen: nil), fullGame: true).seenAfterVisit, [1, 2])
 
-        let unlocked = MapState(profile: profile(stars: stars, seen: [1]))
+        let unlocked = MapState(profile: profile(stars: stars, seen: [1]), fullGame: true)
         XCTAssertEqual(unlocked.pendingReveals, [2], "route 2 just opened")
-        XCTAssertEqual(MapState(profile: profile(stars: stars, seen: unlocked.seenAfterVisit)).pendingReveals, [], "it plays once")
+        XCTAssertEqual(MapState(profile: profile(stars: stars, seen: unlocked.seenAfterVisit), fullGame: true).pendingReveals, [], "it plays once")
     }
 
     func testOldSavesWithoutSeenRoutesStillLoad() throws {

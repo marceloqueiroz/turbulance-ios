@@ -31,6 +31,9 @@ struct OptionsPanel: View {
     @State var device: DeviceSettings
     let updateDevice: (DeviceSettings) -> Void
     let done: () -> Void
+    /// Restore purchases (App Review needs a way to restore Full Game, GDD §9) and how it went.
+    var restore: (() -> Void)?
+    var storeStatus = AppModel.StoreStatus.idle
     #if DEBUG
     var developer: DevSection?
     @State private var showDeveloper = false
@@ -63,6 +66,7 @@ struct OptionsPanel: View {
                 soundKnob(s)
                 hapticsToggle(s)
                 doneButton(s)
+                restoreButton(s)
                 #if DEBUG
                 if developer != nil {
                     Button { showDeveloper = true } label: {
@@ -180,6 +184,31 @@ struct OptionsPanel: View {
             .accessibilityValue(on ? "On" : "Off")
             .accessibilityAddTraits(.isToggle)
             .position(x: nut.x, y: nut.y - (base - 0.5) * h)
+        }
+    }
+
+    /// Engraved like the DEV button, on the other side of Done; the outcome shows under it.
+    @ViewBuilder private func restoreButton(_ s: Sheet) -> some View {
+        if let restore {
+            VStack(spacing: s.len(0.006)) {
+                Button(action: restore) {
+                    Text(storeStatus == .working ? "Restoring…" : "Restore purchases")
+                        .font(.system(size: max(9, s.len(0.024)), weight: .heavy, design: .rounded))
+                        .tracking(0.5).foregroundStyle(engrave.opacity(0.8))
+                        .fitted(CGSize(width: s.len(0.2), height: s.len(0.07)), lines: 2, upper: true)
+                        .padding(6).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .disabled(storeStatus == .working)
+                if case .message(let text) = storeStatus {
+                    Text(text)
+                        .font(.system(size: max(8, s.len(0.018)), weight: .semibold, design: .rounded))
+                        .foregroundStyle(engrave)
+                        .multilineTextAlignment(.center)
+                        .frame(width: s.len(0.22))
+                }
+            }
+            .position(s.at(0.15, 0.877))
         }
     }
 

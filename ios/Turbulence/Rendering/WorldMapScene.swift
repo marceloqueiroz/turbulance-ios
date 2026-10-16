@@ -2,13 +2,15 @@ import SpriteKit
 import UIKit
 
 /// The route map world (Route Map Plan, step 5): toy-3D regions on a code-drawn sea, airports, flight paths and pins,
-/// soft clouds over locked routes and storms over places not built yet. Drag to pan (with momentum), pinch to zoom,
+/// soft clouds and a padlock over locked routes, storms over the one place not built yet (others stay hidden). Drag to pan (with momentum), pinch to zoom,
 /// double-tap to zoom in; taps on pins and covered regions are reported through `onTap`.
 /// Layout points have y pointing down; the scene flips them so the art reads the right way up.
 final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
     enum Tap {
         case flight(FlightPlan)
         case lockedRoute(Route, needs: Int, have: Int)
+        case fullGame(Route)                // needs the Full Game purchase (GDD §9)
+        case needsRoute(Route, after: Route)    // owned; every flight of `after` needs a star first
         case comingSoon(String)
     }
 
@@ -18,13 +20,14 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
 
     let layout: MapLayout
     private(set) var profile = Profile(name: "", avatar: 0)
+    private(set) var fullGame = false
 
     private let cam = SKCameraNode()
     private let regionLayer = SKNode(), pathLayer = SKNode(), airportLayer = SKNode()
     private let pinLayer = SKNode(), coverLayer = SKNode(), badgeLayer = SKNode()
     private let life = MapLifeLayer()
     private let plane = SKSpriteNode(imageNamed: "Map/ToyPlane"), planeShadow = SKShapeNode(ellipseOf: CGSize(width: 34, height: 12))
-    private var cloudNodes: [String: [SKNode]] = [:], badgeNodes: [String: SKNode] = [:]
+    private var cloudNodes: [String: [SKNode]] = [:], badgeNodes: [String: SKNode] = [:], padlocks: [String: Padlock] = [:]
     private var hiding: Set<Int> = []
 
     // MARK: Developer path editor (debug builds, -mapEditor)
@@ -116,7 +119,7 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
     }
 
     private func buildRegions() {
-        for r in layout.regions {
+        for r in layout.regions where r.hidden != true {
             let node = SKSpriteNode(imageNamed: r.image)
             node.size = CGSize(width: r.size[0], height: r.size[1])
             node.position = scenePoint(CGPoint(x: r.center[0], y: r.center[1]))
@@ -143,13 +146,14 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
 
     /// Rebuilds pins, paths, clouds, badges and city life for this profile's progress. Routes in `hiding` still show
     /// as locked (their reveal hasn't played yet); `drawIn` animates that route's paths and pins appearing.
-    func configure(profile: Profile, hiding: Set<Int> = [], drawIn: Int? = nil) {
+    func configure(profile: Profile, fullGame: Bool, hiding: Set<Int> = [], drawIn: Int? = nil) {
         self.profile = profile
+        self.fullGame = fullGame
         self.hiding = hiding
         for layer in [pathLayer, pinLayer, coverLayer, badgeLayer] { layer.removeAllChildren() }
         screenSized.removeAll(); pathNodes.removeAll(); pins.removeAll(); badges.removeAll(); covered.removeAll(); cityLabels.removeAll()
-        cloudNodes.removeAll(); badgeNodes.removeAll()
-        let state = MapState(profile: profile)
+        cloudNodes.removeAll(); badgeNodes.removeAll(); padlocks.removeAll()
+        let state = MapState(profile: profile, fullGame: fullGame)
         let isOpen = { (r: Route) in state.access(r) == .open && !hiding.contains(r.id) }
 
         for route in Campaign.routes where isOpen(route) {
@@ -175,11 +179,23 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
             case .clouds:
                 guard let id = routeID, let route = Campaign.routes.first(where: { $0.id == id }) else { continue }
                 let needs = route.unlockStars, have = profile.totalStars
-                let tap = Tap.lockedRoute(route, needs: needs, have: have)
+                // a route waiting for its reveal is already open: its badge says so until the clouds part
+                let (tap, why): (Tap, String) = {
+                    if hiding.contains(id) { return (.lockedRoute(route, needs: needs, have: have), "Unlocked") }
+                    switch state.access(route) {
+                    case .needsFullGame: return (.fullGame(route), "Full game")
+                    case .needsRoute(let before):
+                        let after = Campaign.routes.first { $0.id == before } ?? Campaign.route1
+                        return (.needsRoute(route, after: after), "Finish Route \(before)")
+                    default: return (.lockedRoute(route, needs: needs, have: have), "\(needs) ★ to unlock")
+                    }
+                }()
                 addClouds(over: frame, storm: false, region: region.id)
-                addBadge(lines: ["Route \(route.id) · \(route.name)", "\(needs) ★ to unlock"], symbol: "lock.fill",
+                addBadge(lines: ["Route \(route.id) · \(route.name)", why], symbol: nil, padlock: true,
                          at: CGPoint(x: frame.midX, y: frame.midY), tap: tap, region: region.id)
                 covered.append((frame, tap))
+            case .hidden:
+                continue
             case .storm:
                 let name = region.name ?? routeID.flatMap { id in Campaign.routes.first { $0.id == id }?.name } ?? "New route"
                 let tap = Tap.comingSoon(name)
@@ -190,7 +206,7 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
         }
 
         // busy airports: every open city gets a parked plane, the next flight's departure gets a boarding queue
-        let next = profile.nextFlight
+        let next = profile.nextFlight(fullGame: fullGame)
         let nextFrom = Campaign.route(containing: next.id).flatMap { r in r.flights.firstIndex(of: next).map { r.cities[$0] } }
         var airportLife: [(at: CGPoint, style: MapLayout.Airport.Style, isNext: Bool)] = []
         for route in Campaign.routes where isOpen(route) {
@@ -370,8 +386,8 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
         }
     }
 
-    /// A rounded navy label on top of a covered region: lock + star target, or storm + "Coming soon".
-    private func addBadge(lines: [String], symbol name: String, at p: CGPoint, tap: Tap, region: String) {
+    /// A rounded navy label on top of a covered region: route + why it's locked under a padlock, or storm + "Coming soon".
+    private func addBadge(lines: [String], symbol name: String?, padlock: Bool = false, at p: CGPoint, tap: Tap, region: String) {
         let node = SKNode()
         node.position = p
         let title = SKLabelNode(text: lines[0])
@@ -380,14 +396,28 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
         let sub = SKLabelNode(text: lines[1])
         sub.fontName = "AvenirNext-DemiBold"; sub.fontSize = 11; sub.fontColor = Palette.calm
         sub.verticalAlignmentMode = .center; sub.position = CGPoint(x: 10, y: -9)
-        let w = max(title.frame.width, sub.frame.width) + 52
+        let inset: CGFloat = name == nil ? 16 : 34
+        let w = max(title.frame.width, sub.frame.width) + inset + 18
         let box = SKShapeNode(rect: CGRect(x: -w / 2, y: -21, width: w, height: 42), cornerRadius: 14)
         box.fillColor = Palette.navy.withAlphaComponent(0.92); box.strokeColor = Palette.panelLine; box.lineWidth = 1.5
-        let icon = symbol(name, size: 15, color: Palette.calm)
-        icon.position = CGPoint(x: -w / 2 + 18, y: 0)
-        title.position.x = -w / 2 + 34 + title.frame.width / 2
-        sub.position.x = -w / 2 + 34 + sub.frame.width / 2
-        for n in [box, icon, title, sub] { node.addChild(n) }
+        node.addChild(box)
+        if let name {
+            let icon = symbol(name, size: 15, color: Palette.calm)
+            icon.position = CGPoint(x: -w / 2 + 18, y: 0)
+            node.addChild(icon)
+        }
+        title.position.x = -w / 2 + inset + title.frame.width / 2
+        sub.position.x = -w / 2 + inset + sub.frame.width / 2
+        for n in [title, sub] { node.addChild(n) }
+        if padlock {
+            let lock = Padlock()
+            lock.position = CGPoint(x: 0, y: 21 + 6 + Padlock.height / 2)
+            node.addChild(lock)
+            padlocks[region] = lock
+            if !reduceMotion {
+                lock.run(.repeatForever(.sequence([.moveBy(x: 0, y: 4, duration: 1.3), .moveBy(x: 0, y: -4, duration: 1.3)])))
+            }
+        }
         badgeLayer.addChild(node)
         screenSized.append(node)
         badges.append((node, tap))
@@ -493,7 +523,7 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
         let part = SKAction.run { [weak self] in
             guard let self else { return }
             if self.haptics { UIImpactFeedbackGenerator(style: .medium).impactOccurred() }
-            self.badgeNodes[region.id]?.run(.fadeOut(withDuration: 0.3))
+            self.badgeNodes[region.id]?.run(.sequence([.wait(forDuration: 0.25), .fadeOut(withDuration: 0.3)]))
             for cloud in self.cloudNodes[region.id] ?? [] {
                 cloud.removeAllActions()
                 let away = CGVector(dx: cloud.position.x - center.x, dy: cloud.position.y - center.y)
@@ -502,15 +532,27 @@ final class WorldMapScene: SKScene, UIGestureRecognizerDelegate {
                 cloud.run(.group([.move(by: push, duration: 1.2), .fadeOut(withDuration: 1.2), .scale(by: 1.3, duration: 1.2)]))
             }
         }
+        // the padlock springs open with a little shake, then lifts away before the clouds part
+        let unlock = SKAction.run { [weak self] in
+            guard let self, let lock = self.padlocks[region.id] else { return }
+            lock.removeAllActions()
+            lock.open()
+            if self.haptics { UIImpactFeedbackGenerator(style: .rigid).impactOccurred() }
+            let shake = SKAction.sequence([.rotate(toAngle: 0.14, duration: 0.05), .rotate(toAngle: -0.14, duration: 0.08),
+                                           .rotate(toAngle: 0.08, duration: 0.07), .rotate(toAngle: 0, duration: 0.05)])
+            lock.run(.sequence([shake, .group([.scale(to: 1.4, duration: 0.3), .fadeOut(withDuration: 0.3),
+                                               .moveBy(x: 0, y: 18, duration: 0.3)])]))
+        }
         let open = SKAction.run { [weak self] in
             guard let self else { return }
-            self.configure(profile: self.profile, hiding: self.hiding.subtracting([id]), drawIn: id)
+            self.configure(profile: self.profile, fullGame: self.fullGame, hiding: self.hiding.subtracting([id]), drawIn: id)
         }
         // hold until the last pin has popped (paths draw 0.25 s apart, each pin pops 0.4 s after its path and takes 0.3 s);
         // finishing earlier rebuilds the map and the remaining pins would appear all at once
         let flights = Campaign.routes.first { $0.id == id }?.flights.count ?? 1
         let drawIn = 0.25 * Double(flights - 1) + 0.4 + 0.3 + 0.4
-        let steps = reduceMotion ? [open, .run(completion)] : [.wait(forDuration: 0.9), part, .wait(forDuration: 1.0), open, .wait(forDuration: drawIn), .run(completion)]
+        let steps = reduceMotion ? [open, .run(completion)]
+            : [.wait(forDuration: 0.9), unlock, .wait(forDuration: 0.5), part, .wait(forDuration: 1.0), open, .wait(forDuration: drawIn), .run(completion)]
         run(.sequence(steps), withKey: "reveal")
     }
 
