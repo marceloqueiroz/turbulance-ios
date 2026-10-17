@@ -775,8 +775,18 @@ final class CabinScene: SKScene {
                 }
             }
             if o.kind == .binJam || o.kind == .carryOn, jamNodes[o.id] == nil {
-                let n = o.kind == .binJam ? SKSpriteNode(texture: Tex.binJam, size: CGSize(width: 48, height: 48))
+                let n: SKSpriteNode
+                if o.kind == .carryOn, let art = skin?.carryOn {      // painted bag where the cabin set has one
+                    n = SKSpriteNode(texture: art.texture, size: art.size); n.anchorPoint = art.anchor
+                    // a small luggage badge over it, so it reads as "stow me" at a glance
+                    let badge = SKSpriteNode(texture: Tex.suitcase, size: CGSize(width: 20, height: 18))
+                    badge.position = CGPoint(x: 0, y: art.size.height * 0.5 + 6); badge.zPosition = 1
+                    badge.run(.repeatForever(.sequence([.moveBy(x: 0, y: 2.5, duration: 0.6), .moveBy(x: 0, y: -2.5, duration: 0.6)])))
+                    n.addChild(badge)
+                } else {
+                    n = o.kind == .binJam ? SKSpriteNode(texture: Tex.binJam, size: CGSize(width: 48, height: 48))
                                           : SKSpriteNode(texture: Tex.suitcase, size: CGSize(width: 40, height: 36))
+                }
                 n.position = pt(o.x, o.y + 4)
                 n.setScale(0)
                 n.run(.scale(to: 1, duration: 0.2))
@@ -793,6 +803,8 @@ final class CabinScene: SKScene {
                     // over the toilet seat, so the dirt seeping out under the door stays in view
                     let lav = sim.layout.lavatories[li]
                     n.position = pt(lav.seatX, lav.seatY)
+                } else if o.kind == .carryOn, skin?.carryOn != nil {
+                    n.position = pt(o.x, o.y)                       // hidden below: the painted suitcase is the cue
                 } else {
                     n.position = pt(o.x, o.y - (o.kind.isCart ? 22 : 2))
                 }
@@ -801,7 +813,7 @@ final class CabinScene: SKScene {
             icon.sync(o, clock: clock)
             // the dark spill puddle is its own indicator: no circle icon over it (tapping the puddle still targets it;
             // off-screen spills keep their edge marker)
-            icon.isHidden = sim.isBehindCurtain(o) || o.kind == .spill
+            icon.isHidden = sim.isBehindCurtain(o) || o.kind == .spill || (o.kind == .carryOn && skin?.carryOn != nil)
             if o.kind.atSeat, let pi = o.passenger {
                 let frame = seatFrames[o.id] ?? {
                     let p = sim.passengers[pi]

@@ -1,4 +1,4 @@
-Status: built (simulator TB206; tests 119/119), not yet committed
+Status: done
 
 # N737-Swift painted cabin
 
@@ -34,6 +34,12 @@ seat, counter, lavatory and station stays exactly where the layout puts it.
   lavatories, so they stay Comet-only for now (Swift lavatory doors stay painted shut).
 - **Identity:** cream headrest covers with a thin teal stripe on economy seats; wider navy-leather premium seats in
   2-2; a curtain at the premium/economy line; same jet-age floor, runner, lighting and palette as the Comet.
+- **Fixes after the first look (2026-10-17):** the aft lavatories were stretched, so they were repainted at the
+  Swift's own 110 × 152 proportions; the forward galley counters now stand against the side walls at the Comet's
+  depth (94; the bottom one flush on its wall) with galley floor in front, instead of filling the space to the aisle
+  (`CabinLayout`: counter blocks and station y; the Comet is unchanged). The boarding-rush carry-on is a painted 70s
+  caramel leather holdall (`carryon`, 52 wide, shared with the Comet set), with the old flat suitcase as a small
+  bobbing badge over it and no hand bubble.
 - Out of scope: the A320-Current (same layout, its own identity, next), the 757 and A330, lavatory door art for the
   Swift, the toolkit station art (keeps its code-drawn sprite).
 

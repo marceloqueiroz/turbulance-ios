@@ -28,7 +28,7 @@ Code comments cite GDD sections (e.g. `GDD §5a`); keep doing that.
   - `CabinLayout.swift` — rows, aisles, galley stations, lavatories, bins per aircraft.
   - `Profile.swift`, `MapState.swift`, `MapLayout.swift`, `DevSettings.swift` (DEBUG only).
 - `ios/Turbulence/Rendering/` — SpriteKit: `CabinScene` (gameplay), `Art` (code-drawn art), `CabinSkin`
-  (painted per-aircraft cabin sprite sets; only the Comet so far), `WorldMapScene` + `MapLife` (route map),
+  (painted per-aircraft cabin sprite sets: the Comet and the 737-Swift), `WorldMapScene` + `MapLife` (route map),
   `IntroScene3D` (code-built 3D intro cutscene), `Palette`.
 - `ios/Turbulence/UI/` — SwiftUI: `AppModel` (screens, saves), `GameController`, `GameView`, `Landing`,
   `FrontEnd`, `WorldMapView`, `Theme`.
@@ -89,6 +89,9 @@ The Options screen has a DEBUG-only Developer section (skip the intro, make a De
     all seen from above and hung on the end wall by `CabinSkin.jumpSeatWallInset`. Getting in and out is drawn in
     `CabinScene` (`seatStepped`, `liftedFromSeat`): she steps out level with the seat, walks along the galley, then
     down to the aisle line.
+  - 737-Swift cabin: one base picture composed at the layout's coordinates by `ios/tools/swift_cabin_compose.py`
+    from Gemini-painted pieces (concept, empty concept, seats, lavatories); fittings come from the Comet set.
+  - Boarding-rush carry-on: a painted leather holdall (`carryon`) with a small suitcase badge over it.
   - The second attendant (plum) and the trainee (navy) are shader recolours of the attendant.
   - No animations at the galley stations: a stop there lasts `Tuning.pickDuration` (0.25 s), too short to read.
 - Generated sheets: run `cut_sheet.py` then `align_strip.py`; use `lock_head.py` when the head, collar or

@@ -267,9 +267,15 @@ struct CabinLayout: Equatable {
 
         // Forward galley (GDD §6a): drinks, machines and food above the top aisle; snacks, toys
         // and trash below the bottom aisle; a toolkit counter between aisles on wide-bodies.
-        blocks.append(CabinBlock(kind: .counter, x: 60, y: 30, w: 150, h: topAisle - 86, label: ""))      // no floor label (GDD §8a)
-        blocks.append(CabinBlock(kind: .counter, x: 60, y: bottomAisle + 56, w: 150, h: height - 50 - (bottomAisle + 56)))
-        let topY = topAisle - 102, bottomY = bottomAisle + 102
+        // counters stand against the side walls at the Comet's depth (94), however wide the seat blocks make the cabin;
+        // the stations sit on them, the galley floor runs from their front edge to the aisle
+        // (in the Comet the counters already reach the aisle, so they keep their place; in wider cabins the bottom one
+        // sits flush on the bottom wall, height - 30, like the top one on the top wall)
+        let counterDepth = min(topAisle - 86, 94.0)
+        let bottomEnd = topAisle - 86 > 94 ? height - 30 : height - 50
+        blocks.append(CabinBlock(kind: .counter, x: 60, y: 30, w: 150, h: counterDepth, label: ""))      // no floor label (GDD §8a)
+        blocks.append(CabinBlock(kind: .counter, x: 60, y: bottomEnd - counterDepth, w: 150, h: counterDepth))
+        let topY = 30 + counterDepth / 2 + 1, bottomY = bottomEnd - counterDepth / 2 - 1
         bins += [SupplyBin(.drinks, x: 96, y: topY, aisle: 0),
                  SupplyBin(.coffee, x: 150, y: topY, aisle: 0), SupplyBin(.oven, x: 186, y: topY, aisle: 0),
                  SupplyBin(.oven, x: 78, y: bottomY, aisle: last)]

@@ -15,14 +15,20 @@ struct CabinSkin {
     private let widths: [String: CGFloat]
     /// The fittings, loaded once (the scene compares textures by identity to see a machine change state).
     private let textures: [String: SKTexture]
+    /// Whether the set's lavatory door art fits this cabin (it's placed for the Comet's aft lavatories).
+    private let lavDoors: Bool
 
-    init(base: SKTexture, baseRect: CGRect, parts: SKTextureAtlas, widths: [String: CGFloat]) {
-        self.base = base; self.baseRect = baseRect; self.widths = widths
+    init(base: SKTexture, baseRect: CGRect, parts: SKTextureAtlas, widths: [String: CGFloat], lavDoors: Bool = true) {
+        self.base = base; self.baseRect = baseRect; self.widths = widths; self.lavDoors = lavDoors
         textures = Dictionary(uniqueKeysWithValues: parts.textureNames.map { n in
             let name = (n as NSString).deletingPathExtension.replacingOccurrences(of: "@2x", with: "").replacingOccurrences(of: "@3x", with: "")
             return (name, parts.textureNamed(name))
         })
     }
+
+    /// The Comet's fittings, jump seats and seated attendant, shared by every painted set so far.
+    /// The bottom row (oven, snack, toy) sits 36 apart, so those fittings are kept to ~36 wide.
+    private static let jetAgeWidths: [String: CGFloat] = ["drinks": 52, "coffee": 34, "oven": 36, "snack": 33, "toy": 35, "trash": 30, "jumpseat": 39]
 
     static func forAircraft(_ aircraft: Aircraft) -> CabinSkin? {
         switch aircraft {
@@ -30,9 +36,14 @@ struct CabinSkin {
             guard let img = UIImage(named: "CabinCometBase") else { return nil }
             return CabinSkin(base: SKTexture(image: img),
                              baseRect: CGRect(x: 264 / 7.96, y: 18, width: 6336 / 7.96, height: 336),
-                             parts: SKTextureAtlas(named: "CabinComet"),
-                             // the bottom row (oven, snack, toy) sits 36 apart, so those fittings are kept to ~36 wide
-                             widths: ["drinks": 52, "coffee": 34, "oven": 36, "snack": 33, "toy": 35, "trash": 30, "jumpseat": 39])
+                             parts: SKTextureAtlas(named: "CabinComet"), widths: jetAgeWidths)
+        case .swift:
+            // the "Coastal" identity (sprite plan §3): cream headrest covers with a teal stripe, navy-leather premium
+            // seats behind a curtain. Built at the layout's own world units, so it covers its rectangle one to one;
+            // the fittings come from the Comet set. Source: branding/sprites/cabin/swift/.
+            guard let img = UIImage(named: "CabinSwiftBase") else { return nil }
+            return CabinSkin(base: SKTexture(image: img), baseRect: CGRect(x: 33, y: 1, width: 1328, height: 461),
+                             parts: SKTextureAtlas(named: "CabinComet"), widths: jetAgeWidths, lavDoors: false)
         default:
             return nil
         }
@@ -77,11 +88,14 @@ struct CabinSkin {
 
     /// The painted lavatory above (true) or below (false) the aisle, if this set has them.
     func lavatory(above: Bool) -> LavArt? {
-        guard let t = textures[above ? "lavdoor-top-open" : "lavdoor-bottom-open"] else { return nil }
+        guard lavDoors, let t = textures[above ? "lavdoor-top-open" : "lavdoor-bottom-open"] else { return nil }
         return above
             ? LavArt(openDoor: t, doorRect: CGRect(x: -0.7, y: 98, width: 70.4, height: 47.5), toilet: CGPoint(x: 34.5, y: 76.8), facing: .pi / 2)
             : LavArt(openDoor: t, doorRect: CGRect(x: 4.3, y: 220.5, width: 70.4, height: 47.5), toilet: CGPoint(x: 83.7, y: 304.2), facing: -.pi / 2)
     }
+
+    /// A carry-on suitcase left in the aisle during a boarding rush, seen from above (GDD §5a).
+    var carryOn: (texture: SKTexture, size: CGSize, anchor: CGPoint)? { sprite("carryon", width: 52) }
 
     /// A trash bin with its flap pushed open (shown while someone drops something in).
     var trashOpen: (texture: SKTexture, size: CGSize, anchor: CGPoint)? { sprite("trash-open", width: widths["trash"] ?? 30) }
